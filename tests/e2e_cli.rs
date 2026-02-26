@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serial_test::serial;
 use serde_json::json;
 
 struct TestEnv {
@@ -36,15 +37,46 @@ impl TestEnv {
 
     fn run(&self, args: &[&str]) -> Output {
         let bin = env!("CARGO_BIN_EXE_oxmgr");
-        Command::new(bin)
+        let mut child = Command::new(bin)
             .args(args)
             .env("OXMGR_HOME", &self.home)
             .env("OXMGR_DAEMON_ADDR", &self.daemon_addr)
             .env("OXMGR_LOG_MAX_SIZE_MB", "1")
             .env("OXMGR_LOG_MAX_FILES", "3")
             .env("OXMGR_LOG_MAX_DAYS", "1")
-            .output()
-            .expect("failed to execute oxmgr command")
+            .spawn()
+            .expect("failed to spawn oxmgr command");
+
+        let timeout = Duration::from_secs(60);
+        let deadline = Instant::now() + timeout;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    return child
+                        .wait_with_output()
+                        .expect("failed to collect oxmgr command output");
+                }
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let output = child
+                            .wait_with_output()
+                            .expect("failed to collect timed out oxmgr command output");
+                        panic!(
+                            "oxmgr command timed out after {:?}: {:?}\nstdout:\n{}\nstderr:\n{}",
+                            timeout,
+                            args,
+                            String::from_utf8_lossy(&output.stdout),
+                            String::from_utf8_lossy(&output.stderr)
+                        );
+                    }
+                    sleep(Duration::from_millis(100));
+                }
+                Err(err) => {
+                    panic!("failed while waiting for oxmgr command {:?}: {err}", args);
+                }
+            }
+        }
     }
 
     fn run_vec(&self, args: Vec<String>) -> Output {
@@ -158,6 +190,7 @@ fn wait_for_pid(env: &TestEnv, target: &str, timeout: Duration) -> Option<u32> {
 }
 
 #[test]
+#[serial]
 fn e2e_process_lifecycle() {
     if !should_run_e2e("e2e_process_lifecycle") {
         return;
@@ -217,6 +250,7 @@ fn e2e_process_lifecycle() {
 }
 
 #[test]
+#[serial]
 fn e2e_validate_oxfile() {
     if !should_run_e2e("e2e_validate_oxfile") {
         return;
@@ -243,6 +277,7 @@ fn e2e_validate_oxfile() {
 }
 
 #[test]
+#[serial]
 fn e2e_validate_rejects_non_toml_input() {
     if !should_run_e2e("e2e_validate_rejects_non_toml_input") {
         return;
@@ -267,6 +302,7 @@ fn e2e_validate_rejects_non_toml_input() {
 }
 
 #[test]
+#[serial]
 fn e2e_convert_ecosystem_to_oxfile_and_validate() {
     if !should_run_e2e("e2e_convert_ecosystem_to_oxfile_and_validate") {
         return;
@@ -319,6 +355,7 @@ fn e2e_convert_ecosystem_to_oxfile_and_validate() {
 }
 
 #[test]
+#[serial]
 fn e2e_apply_is_idempotent() {
     if !should_run_e2e("e2e_apply_is_idempotent") {
         return;
@@ -367,6 +404,7 @@ stop_timeout_secs = 1
 }
 
 #[test]
+#[serial]
 fn e2e_reload_replaces_pid() {
     if !should_run_e2e("e2e_reload_replaces_pid") {
         return;
@@ -419,6 +457,7 @@ fn e2e_reload_replaces_pid() {
 }
 
 #[test]
+#[serial]
 fn e2e_logs_show_stdout_content() {
     if !should_run_e2e("e2e_logs_show_stdout_content") {
         return;
