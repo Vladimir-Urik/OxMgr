@@ -8,6 +8,8 @@ use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::sleep;
+#[cfg(windows)]
+use tokio::time::timeout as tokio_timeout;
 use tracing::{error, info, warn};
 
 use crate::config::AppConfig;
@@ -1075,15 +1077,20 @@ async fn terminate_pid(pid: u32, _signal_name: Option<&str>, timeout: Duration) 
         return Ok(());
     }
 
+    let taskkill_timeout = timeout.max(Duration::from_secs(2));
     let pid_string = pid.to_string();
-    let graceful_status = Command::new("taskkill")
-        .args(["/PID", &pid_string, "/T"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-        .context("failed to run taskkill for graceful stop")?;
+    let graceful_status = tokio_timeout(
+        taskkill_timeout,
+        Command::new("taskkill")
+            .args(["/PID", &pid_string, "/T"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status(),
+    )
+    .await
+    .context("taskkill timed out during graceful stop")?
+    .context("failed to run taskkill for graceful stop")?;
 
     if !graceful_status.success() && !process_exists(pid) {
         return Ok(());
@@ -1098,14 +1105,18 @@ async fn terminate_pid(pid: u32, _signal_name: Option<&str>, timeout: Duration) 
     }
 
     if process_exists(pid) {
-        let force_status = Command::new("taskkill")
-            .args(["/PID", &pid_string, "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-            .context("failed to run taskkill for forced stop")?;
+        let force_status = tokio_timeout(
+            taskkill_timeout,
+            Command::new("taskkill")
+                .args(["/PID", &pid_string, "/T", "/F"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status(),
+        )
+        .await
+        .context("taskkill timed out during forced stop")?
+        .context("failed to run taskkill for forced stop")?;
         if !force_status.success() && process_exists(pid) {
             anyhow::bail!("failed to force-kill process {pid} with taskkill");
         }
