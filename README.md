@@ -4,11 +4,14 @@
 
 It is a modern, production-minded alternative to PM2 for any executable (Node.js, Python, Go, Rust, shell commands, and more).
 
+It can be used as a drop-in replacement for many PM2 setups because Oxmgr supports PM2 ecosystem config format (`ecosystem.config.json`).
+
 Supported platforms: **Linux, macOS, Windows**.
 
 ## Documentation
 
 - [Docs Index](./docs/README.md)
+- [Installation Guide](./docs/install.md)
 - [Oxfile Specification](./docs/OXFILE.md)
 - [Oxfile Examples](./docs/examples)
 
@@ -20,6 +23,7 @@ Supported platforms: **Linux, macOS, Windows**.
 - Explicit restart policies + health checks
 - Idempotent config apply (`oxmgr apply`)
 - Built-in per-process logs and runtime metrics
+- Drop-in migration path via PM2 ecosystem config compatibility
 
 ## Features
 
@@ -31,12 +35,15 @@ Supported platforms: **Linux, macOS, Windows**.
 - CLI auto-starts daemon when needed
 - Persistent state in JSON (`state.json`)
 - Per-process stdout/stderr logs + tail mode
+- Automatic log rotation and retention policy
 - Process statuses: `running`, `stopped`, `crashed`, `restarting`, `errored`
 - Graceful shutdown (SIGTERM, then SIGKILL on timeout)
+- Process-tree aware shutdown (Unix process groups / Windows taskkill tree)
 - Health checks with automatic restart on repeated failures
 - CPU/RAM monitoring in `list` and `status`
 - Resource limits (`max_memory_mb`, `max_cpu_percent`) with auto-restart
-- Ecosystem config import (`ecosystem.config.json` style)
+- Exponential restart backoff with jitter and cooldown reset
+- Ecosystem config import (`ecosystem.config.json` style) for PM2 drop-in compatibility
 - Idempotent config reconcile via `oxmgr apply`
 - Reload without downtime (best-effort hot replacement)
 
@@ -53,7 +60,7 @@ yarn global add oxmgr
 ### Homebrew
 
 ```bash
-brew tap <owner>/<tap-repo>
+brew tap Vladimir-Urik/OxMgr
 brew install oxmgr
 ```
 
@@ -66,7 +73,7 @@ choco install oxmgr -y
 ### APT (Debian/Ubuntu)
 
 ```bash
-echo "deb [trusted=yes] https://vladimir-urik.github.io/oxmgr/apt stable main" | sudo tee /etc/apt/sources.list.d/oxmgr.list
+echo "deb [trusted=yes] https://vladimir-urik.github.io/OxMgr/apt stable main" | sudo tee /etc/apt/sources.list.d/oxmgr.list
 sudo apt update
 sudo apt install oxmgr
 ```
@@ -74,8 +81,8 @@ sudo apt install oxmgr
 ### Build from source
 
 ```bash
-git clone https://github.com/Vladimir-Urik/oxmgr.git
-cd oxmgr
+git clone https://github.com/Vladimir-Urik/OxMgr.git
+cd OxMgr
 cargo build --release
 ```
 
@@ -105,6 +112,9 @@ oxmgr apply ./oxfile.toml --env prod
 
 # Validate oxfile syntax + dependencies + expanded names
 oxmgr validate ./oxfile.toml --env prod
+
+# Install daemon service on current platform
+oxmgr service install --system auto
 
 # Detailed status (includes CPU/RAM + health)
 oxmgr status api
@@ -271,6 +281,28 @@ Print boot autostart setup instructions for daemon.
 ### `oxmgr daemon run`
 
 Run daemon in foreground mode. Normally unnecessary; CLI auto-start handles it.
+
+### `oxmgr daemon stop`
+
+Request graceful daemon shutdown.
+
+### `oxmgr service <install|uninstall|status> [--system <auto|systemd|launchd|task-scheduler>]`
+
+Manage Oxmgr as an OS service directly.
+
+```bash
+oxmgr service install --system auto
+oxmgr service status --system auto
+oxmgr service uninstall --system auto
+```
+
+## Runtime Environment Variables
+
+- `OXMGR_HOME`: override Oxmgr data directory (state/logs)
+- `OXMGR_DAEMON_ADDR`: override daemon bind/connect address (default `127.0.0.1:<derived-port>`)
+- `OXMGR_LOG_MAX_SIZE_MB`: log rotation size threshold in MB (default `20`)
+- `OXMGR_LOG_MAX_FILES`: number of rotated files kept per log (default `5`)
+- `OXMGR_LOG_MAX_DAYS`: maximum rotated log age in days (default `14`)
 
 ## Ecosystem Config (`ecosystem.config.json`)
 

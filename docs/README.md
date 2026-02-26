@@ -4,6 +4,7 @@ Project docs live here.
 
 ## Guides
 
+- [Installation Guide](./install.md)
 - [Oxfile Documentation](./OXFILE.md)
 - [Release Automation](./RELEASE.md)
 

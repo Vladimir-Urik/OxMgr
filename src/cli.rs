@@ -106,6 +106,12 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = InitSystem::Auto)]
         system: InitSystem,
     },
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+        #[arg(long, value_enum, default_value_t = InitSystem::Auto)]
+        system: InitSystem,
+    },
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
@@ -115,6 +121,14 @@ pub enum Commands {
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     Run,
+    Stop,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ServiceCommand {
+    Install,
+    Uninstall,
+    Status,
 }
 
 #[derive(Debug, Copy, Clone, ValueEnum)]

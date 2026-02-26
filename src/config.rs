@@ -4,28 +4,47 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
+use crate::logging::LogRotationPolicy;
+
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub base_dir: PathBuf,
     pub daemon_addr: String,
     pub state_path: PathBuf,
     pub log_dir: PathBuf,
+    pub log_rotation: LogRotationPolicy,
 }
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        let base_dir = dirs::data_local_dir()
-            .unwrap_or_else(env::temp_dir)
-            .join("oxmgr");
-        let daemon_addr = format!("127.0.0.1:{}", daemon_port());
+        let base_dir = env::var("OXMGR_HOME")
+            .map(PathBuf::from)
+            .ok()
+            .unwrap_or_else(|| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(env::temp_dir)
+                    .join("oxmgr")
+            });
+        let daemon_addr = env::var("OXMGR_DAEMON_ADDR")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("127.0.0.1:{}", daemon_port()));
         let state_path = base_dir.join("state.json");
         let log_dir = base_dir.join("logs");
+        let log_rotation = LogRotationPolicy {
+            max_size_bytes: env_u64("OXMGR_LOG_MAX_SIZE_MB", 20)
+                .max(1)
+                .saturating_mul(1024 * 1024),
+            max_files: env_u64("OXMGR_LOG_MAX_FILES", 5).max(1) as u32,
+            max_age_days: env_u64("OXMGR_LOG_MAX_DAYS", 14).max(1),
+        };
 
         let config = Self {
             base_dir,
             daemon_addr,
             state_path,
             log_dir,
+            log_rotation,
         };
         config.ensure_layout()?;
         Ok(config)
@@ -69,4 +88,11 @@ fn current_identity() -> String {
     {
         "oxmgr-generic".to_string()
     }
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(default)
 }

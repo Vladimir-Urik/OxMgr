@@ -35,6 +35,12 @@ impl ProcessManager {
         let mut next_id = state.next_id.max(1);
         for mut process in state.processes {
             next_id = next_id.max(process.id + 1);
+            if process.restart_backoff_cap_secs == 0 {
+                process.restart_backoff_cap_secs = 300;
+            }
+            if process.restart_backoff_reset_secs == 0 {
+                process.restart_backoff_reset_secs = 60;
+            }
             process.health_status = HealthStatus::Unknown;
             process.health_failures = 0;
             process.next_health_check = process
@@ -164,6 +170,9 @@ impl ProcessManager {
             stop_signal,
             stop_timeout_secs: stop_timeout_secs.max(1),
             restart_delay_secs,
+            restart_backoff_cap_secs: 300,
+            restart_backoff_reset_secs: 60,
+            restart_backoff_attempt: 0,
             start_delay_secs,
             resource_limits,
             pid: None,
@@ -181,6 +190,8 @@ impl ProcessManager {
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,
+            last_started_at: None,
+            last_stopped_at: None,
         };
 
         if process.start_delay_secs > 0 {
@@ -222,6 +233,7 @@ impl ProcessManager {
 
         process.pid = None;
         process.status = ProcessStatus::Stopped;
+        process.restart_backoff_attempt = 0;
         process.health_status = HealthStatus::Unknown;
         process.health_failures = 0;
         process.next_health_check = None;
@@ -253,6 +265,7 @@ impl ProcessManager {
                 .get_mut(&name)
                 .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
             process.restart_count = 0;
+            process.restart_backoff_attempt = 0;
             process.last_exit_code = None;
             process.desired_state = DesiredState::Running;
             process.status = ProcessStatus::Restarting;
@@ -364,9 +377,11 @@ impl ProcessManager {
         }
 
         process.pid = None;
+        process.restart_backoff_attempt = 0;
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
         process.last_exit_code = event.exit_code;
+        process.last_stopped_at = Some(now_epoch_secs());
 
         if process.desired_state == DesiredState::Stopped {
             process.status = ProcessStatus::Stopped;
@@ -383,8 +398,11 @@ impl ProcessManager {
             && process.restart_count < process.max_restarts;
 
         if can_restart {
+            maybe_reset_backoff_attempt(&mut process);
+            let restart_delay = compute_restart_delay_secs(&process);
             process.status = ProcessStatus::Restarting;
             process.restart_count = process.restart_count.saturating_add(1);
+            process.restart_backoff_attempt = process.restart_backoff_attempt.saturating_add(1);
             process.health_status = HealthStatus::Unknown;
             process.health_failures = 0;
             process.next_health_check = process
@@ -394,8 +412,8 @@ impl ProcessManager {
             self.processes.insert(process.name.clone(), process.clone());
             self.save()?;
 
-            if process.restart_delay_secs > 0 {
-                sleep(Duration::from_secs(process.restart_delay_secs)).await;
+            if restart_delay > 0 {
+                sleep(Duration::from_secs(restart_delay)).await;
             }
             if let Err(err) = self.spawn_existing(&process.name).await {
                 error!("failed to restart process {}: {err}", process.name);
@@ -433,6 +451,7 @@ impl ProcessManager {
                 }
                 process.pid = None;
                 process.status = ProcessStatus::Stopped;
+                process.restart_backoff_attempt = 0;
                 process.health_status = HealthStatus::Unknown;
                 process.next_health_check = None;
                 process.cpu_percent = 0.0;
@@ -454,6 +473,7 @@ impl ProcessManager {
         process.pid = Some(pid);
         process.status = ProcessStatus::Running;
         process.desired_state = DesiredState::Running;
+        process.last_started_at = Some(now_epoch_secs());
         process.next_health_check = process
             .health_check
             .as_ref()
@@ -469,9 +489,22 @@ impl ProcessManager {
             stdout: process.stdout_log.clone(),
             stderr: process.stderr_log.clone(),
         };
-        let (stdout, stderr) = open_log_writers(&logs)?;
+        let (stdout, stderr) = open_log_writers(&logs, self.config.log_rotation)?;
 
         let mut command = Command::new(&process.command);
+        #[cfg(unix)]
+        {
+            // Put managed children in their own process group so shutdown/restart can target the full tree.
+            unsafe {
+                command.pre_exec(|| {
+                    if nix::libc::setpgid(0, 0) == 0 {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::last_os_error())
+                    }
+                });
+            }
+        }
         command
             .args(&process.args)
             .stdin(Stdio::null())
@@ -870,6 +903,51 @@ fn now_epoch_secs() -> u64 {
         .unwrap_or(0)
 }
 
+fn maybe_reset_backoff_attempt(process: &mut ManagedProcess) {
+    let reset_after = process.restart_backoff_reset_secs;
+    if reset_after == 0 {
+        return;
+    }
+
+    let Some(started_at) = process.last_started_at else {
+        return;
+    };
+    let now = now_epoch_secs();
+    if now.saturating_sub(started_at) >= reset_after {
+        process.restart_backoff_attempt = 0;
+    }
+}
+
+fn compute_restart_delay_secs(process: &ManagedProcess) -> u64 {
+    let base = process.restart_delay_secs.max(1);
+    let exponent = process.restart_backoff_attempt.min(8);
+    let exp_multiplier = 1_u64 << exponent;
+    let cap = process.restart_backoff_cap_secs.max(base);
+
+    let seed = hash_restart_seed(
+        &process.name,
+        process.restart_backoff_attempt,
+        now_epoch_secs(),
+    );
+    let jitter = if base > 1 { seed % base } else { seed % 2 };
+
+    base.saturating_mul(exp_multiplier)
+        .saturating_add(jitter)
+        .min(cap)
+}
+
+fn hash_restart_seed(name: &str, attempt: u32, now: u64) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for byte in name.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    hash ^= attempt as u64;
+    hash = hash.wrapping_mul(1099511628211);
+    hash ^= now;
+    hash
+}
+
 #[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
     use nix::errno::Errno;
@@ -898,13 +976,28 @@ async fn terminate_pid(pid: u32, signal_name: Option<&str>, timeout: Duration) -
     use nix::unistd::Pid;
 
     let os_pid = Pid::from_raw(pid as i32);
+    let pgid = Pid::from_raw(-(pid as i32));
     let signal = unix_signal_from_name(signal_name).unwrap_or(Signal::SIGTERM);
 
-    match kill(os_pid, signal) {
-        Ok(()) => {}
-        Err(Errno::ESRCH) => return Ok(()),
+    let mut delivered = false;
+    match kill(pgid, signal) {
+        Ok(()) => delivered = true,
+        Err(Errno::ESRCH) => {}
         Err(err) => {
-            return Err(anyhow::anyhow!("failed to send {signal:?} to {pid}: {err}"));
+            warn!(
+                "failed to send {:?} to process group {} for pid {}: {}",
+                signal, pgid, pid, err
+            );
+        }
+    }
+
+    if !delivered {
+        match kill(os_pid, signal) {
+            Ok(()) => {}
+            Err(Errno::ESRCH) => return Ok(()),
+            Err(err) => {
+                return Err(anyhow::anyhow!("failed to send {signal:?} to {pid}: {err}"));
+            }
         }
     }
 
@@ -917,6 +1010,7 @@ async fn terminate_pid(pid: u32, signal_name: Option<&str>, timeout: Duration) -
     }
 
     if process_exists(pid) {
+        let _ = kill(pgid, Signal::SIGKILL);
         let _ = kill(os_pid, Signal::SIGKILL);
     }
 
@@ -989,4 +1083,118 @@ async fn terminate_pid(pid: u32, _signal_name: Option<&str>, timeout: Duration) 
 #[cfg(not(any(unix, windows)))]
 async fn terminate_pid(_pid: u32, _signal_name: Option<&str>, _timeout: Duration) -> Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::{compute_restart_delay_secs, maybe_reset_backoff_attempt, now_epoch_secs};
+    use crate::process::{
+        DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
+    };
+
+    #[test]
+    fn restart_backoff_increases_delay() {
+        let mut process = fixture_process();
+        process.restart_delay_secs = 2;
+        process.restart_backoff_cap_secs = 120;
+        process.restart_backoff_attempt = 0;
+        let first = compute_restart_delay_secs(&process);
+
+        process.restart_backoff_attempt = 1;
+        let second = compute_restart_delay_secs(&process);
+
+        assert!(second >= first);
+    }
+
+    #[test]
+    fn restart_backoff_resets_after_cooldown() {
+        let mut process = fixture_process();
+        process.restart_backoff_attempt = 5;
+        process.restart_backoff_reset_secs = 10;
+        process.last_started_at = Some(now_epoch_secs().saturating_sub(30));
+
+        maybe_reset_backoff_attempt(&mut process);
+        assert_eq!(process.restart_backoff_attempt, 0);
+    }
+
+    #[test]
+    fn restart_backoff_respects_cap() {
+        let mut process = fixture_process();
+        process.restart_delay_secs = 30;
+        process.restart_backoff_cap_secs = 40;
+        process.restart_backoff_attempt = 6;
+
+        let delay = compute_restart_delay_secs(&process);
+        assert!(delay <= 40, "delay should be capped, got {}", delay);
+    }
+
+    #[test]
+    fn restart_backoff_does_not_reset_before_cooldown() {
+        let mut process = fixture_process();
+        process.restart_backoff_attempt = 5;
+        process.restart_backoff_reset_secs = 60;
+        process.last_started_at = Some(now_epoch_secs().saturating_sub(10));
+
+        maybe_reset_backoff_attempt(&mut process);
+        assert_eq!(process.restart_backoff_attempt, 5);
+    }
+
+    #[test]
+    fn restart_backoff_has_minimum_delay_when_base_is_zero() {
+        let mut process = fixture_process();
+        process.restart_delay_secs = 0;
+        process.restart_backoff_cap_secs = 5;
+        process.restart_backoff_attempt = 0;
+
+        let delay = compute_restart_delay_secs(&process);
+        assert!(
+            delay >= 1,
+            "delay should be at least one second, got {}",
+            delay
+        );
+        assert!(delay <= 5, "delay should stay under cap, got {}", delay);
+    }
+
+    fn fixture_process() -> ManagedProcess {
+        ManagedProcess {
+            id: 1,
+            name: "api".to_string(),
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            restart_count: 0,
+            namespace: None,
+            stop_signal: Some("SIGTERM".to_string()),
+            stop_timeout_secs: 5,
+            restart_delay_secs: 1,
+            restart_backoff_cap_secs: 300,
+            restart_backoff_reset_secs: 60,
+            restart_backoff_attempt: 0,
+            start_delay_secs: 0,
+            resource_limits: None,
+            pid: Some(1234),
+            status: ProcessStatus::Running,
+            desired_state: DesiredState::Running,
+            last_exit_code: None,
+            stdout_log: PathBuf::from("/tmp/out.log"),
+            stderr_log: PathBuf::from("/tmp/err.log"),
+            health_check: None,
+            health_status: HealthStatus::Unknown,
+            health_failures: 0,
+            last_health_check: None,
+            next_health_check: None,
+            last_health_error: None,
+            cpu_percent: 0.0,
+            memory_bytes: 0,
+            last_metrics_at: None,
+            last_started_at: Some(now_epoch_secs()),
+            last_stopped_at: None,
+        }
+    }
 }

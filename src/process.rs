@@ -123,6 +123,12 @@ pub struct ManagedProcess {
     #[serde(default)]
     pub restart_delay_secs: u64,
     #[serde(default)]
+    pub restart_backoff_cap_secs: u64,
+    #[serde(default)]
+    pub restart_backoff_reset_secs: u64,
+    #[serde(default)]
+    pub restart_backoff_attempt: u32,
+    #[serde(default)]
     pub start_delay_secs: u64,
     #[serde(default)]
     pub resource_limits: Option<ResourceLimits>,
@@ -150,6 +156,10 @@ pub struct ManagedProcess {
     pub memory_bytes: u64,
     #[serde(default)]
     pub last_metrics_at: Option<u64>,
+    #[serde(default)]
+    pub last_started_at: Option<u64>,
+    #[serde(default)]
+    pub last_stopped_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

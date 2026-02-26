@@ -679,6 +679,72 @@ mod tests {
         let _ = fs::remove_file(file_path);
     }
 
+    #[test]
+    fn load_parses_memory_units_for_resource_limits() {
+        let file_path = temp_file("ecosystem-memory-units");
+        let payload = r#"
+{
+  "apps": [
+    {
+      "name": "api",
+      "cmd": "node api.js",
+      "max_memory_restart": "1536K"
+    },
+    {
+      "name": "worker",
+      "cmd": "python worker.py",
+      "max_memory_restart": "1G"
+    }
+  ]
+}
+"#;
+        fs::write(&file_path, payload).expect("failed to write ecosystem fixture");
+
+        let specs = load_with_profile(&file_path, None).expect("failed to parse ecosystem config");
+        assert_eq!(specs.len(), 2);
+
+        let first = &specs[0];
+        assert_eq!(
+            first.resource_limits.as_ref().and_then(|v| v.max_memory_mb),
+            Some(2)
+        );
+        let second = &specs[1];
+        assert_eq!(
+            second
+                .resource_limits
+                .as_ref()
+                .and_then(|v| v.max_memory_mb),
+            Some(1024)
+        );
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn load_rejects_unsupported_memory_unit() {
+        let file_path = temp_file("ecosystem-memory-invalid");
+        let payload = r#"
+{
+  "apps": [
+    {
+      "name": "api",
+      "cmd": "node api.js",
+      "max_memory_restart": "1T"
+    }
+  ]
+}
+"#;
+        fs::write(&file_path, payload).expect("failed to write ecosystem fixture");
+
+        let result = load_with_profile(&file_path, None);
+        assert!(
+            result.is_err(),
+            "expected parser failure for unsupported unit"
+        );
+
+        let _ = fs::remove_file(file_path);
+    }
+
     fn temp_file(prefix: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)

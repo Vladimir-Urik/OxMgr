@@ -142,6 +142,37 @@ jobs:
           set -euo pipefail
           cat release-assets/*.sha256 > release-assets/SHA256SUMS
 
+      - name: Import release signing key
+        if: secrets.RELEASE_GPG_PRIVATE_KEY != '' && secrets.RELEASE_GPG_PASSPHRASE != ''
+        shell: bash
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg-release"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          printf "%s" "$RELEASE_GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
+      - name: Sign release assets
+        if: secrets.RELEASE_GPG_PRIVATE_KEY != '' && secrets.RELEASE_GPG_PASSPHRASE != ''
+        shell: bash
+        env:
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for file in release-assets/*; do
+            [[ -f "$file" ]] || continue
+            gpg \
+              --batch --yes --pinentry-mode loopback \
+              --passphrase "$RELEASE_GPG_PASSPHRASE" \
+              --armor --detach-sign \
+              --output "${file}.asc" \
+              "$file"
+          done
+
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -272,7 +303,7 @@ jobs:
           New-Item -ItemType Directory -Path choco-build/tools -Force | Out-Null
 
           $nuspec = Get-Content "packaging/choco/oxmgr.nuspec.template" -Raw
-          $nuspec = $nuspec.Replace('__VERSION__', $version).Replace('__REPO__', $repo)
+          $nuspec = $nuspec.Replace('__VERSION__', $version)
           Set-Content "choco-build/oxmgr.nuspec" $nuspec -NoNewline
 
           $install = Get-Content "packaging/choco/tools/chocolateyinstall.ps1.template" -Raw
@@ -305,7 +336,7 @@ jobs:
       - name: Install apt repo tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils
+          sudo apt-get install -y dpkg-dev apt-utils gnupg
 
       - name: Build apt repo content
         shell: bash
@@ -317,6 +348,35 @@ jobs:
 
           ./scripts/build_apt_repo.sh "$DEB_PATH" apt-repo "$VERSION"
           sed -i "s|REPLACE_ME|${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/apt|g" apt-repo/index.html
+
+      - name: Sign APT repository metadata
+        if: secrets.APT_GPG_PRIVATE_KEY != '' && secrets.APT_GPG_PASSPHRASE != ''
+        shell: bash
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg-apt"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          printf "%s" "$APT_GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
+
+          RELEASE_FILE="apt-repo/dists/stable/Release"
+
+          gpg \
+            --batch --yes --pinentry-mode loopback \
+            --passphrase "$APT_GPG_PASSPHRASE" \
+            --armor --detach-sign \
+            --output "apt-repo/dists/stable/Release.gpg" \
+            "$RELEASE_FILE"
+
+          gpg \
+            --batch --yes --pinentry-mode loopback \
+            --passphrase "$APT_GPG_PASSPHRASE" \
+            --clearsign \
+            --output "apt-repo/dists/stable/InRelease" \
+            "$RELEASE_FILE"
 
       - name: Publish to gh-pages/apt
         uses: peaceiris/actions-gh-pages@v4

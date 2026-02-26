@@ -20,10 +20,11 @@ git push origin v0.1.0
   - `x86_64-pc-windows-msvc`
 - Build Debian package (`oxmgr_<version>_amd64.deb`)
 - Publish GitHub Release assets + `SHA256SUMS`
+- Optionally sign release assets (`.asc`) with GPG
 - Publish npm package (`oxmgr`) when `NPM_TOKEN` is set
 - Update Homebrew tap formula when Homebrew secrets are set
 - Publish Chocolatey package when `CHOCO_API_KEY` is set
-- Publish APT repository index to `gh-pages/apt`
+- Publish APT repository index to `gh-pages/apt` (optionally signed `Release.gpg` / `InRelease`)
 
 ## Required repository settings
 
@@ -45,7 +46,17 @@ git push origin v0.1.0
 
 - `CHOCO_API_KEY`
 
+### Optional release signing
+
+- `RELEASE_GPG_PRIVATE_KEY`: base64-encoded armored private key
+- `RELEASE_GPG_PASSPHRASE`
+
+### Optional APT metadata signing
+
+- `APT_GPG_PRIVATE_KEY`: base64-encoded armored private key
+- `APT_GPG_PASSPHRASE`
+
 ## Optional notes
 
-- APT repository is published unsigned and intended for use with `trusted=yes`.
-- If you need signed APT metadata, add GPG signing and key distribution in workflow.
+- npm installer verifies downloaded artifact checksum (`.sha256`) before extraction.
+- If APT signing secrets are configured, metadata is signed and you can avoid `trusted=yes`.

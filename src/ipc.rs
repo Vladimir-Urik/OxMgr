@@ -13,6 +13,7 @@ use crate::process::{HealthCheck, ManagedProcess, ResourceLimits, RestartPolicy}
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcRequest {
     Ping,
+    Shutdown,
     Start {
         command: String,
         name: Option<String>,

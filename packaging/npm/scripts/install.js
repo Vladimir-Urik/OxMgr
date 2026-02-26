@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const crypto = require("crypto");
 const { spawnSync } = require("child_process");
 
 const pkg = require("../package.json");
@@ -62,6 +63,35 @@ function download(url, destination) {
   });
 }
 
+function downloadText(url) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    https
+      .get(url, (response) => {
+        if ([301, 302, 307, 308].includes(response.statusCode)) {
+          if (!response.headers.location) {
+            reject(new Error(`Redirect without location for ${url}`));
+            return;
+          }
+          downloadText(response.headers.location).then(resolve).catch(reject);
+          return;
+        }
+
+        if (response.statusCode !== 200) {
+          reject(new Error(`Download failed (${response.statusCode}) for ${url}`));
+          return;
+        }
+
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          data += chunk;
+        });
+        response.on("end", () => resolve(data));
+      })
+      .on("error", reject);
+  });
+}
+
 function ensureSuccess(result, command) {
   if (result.status !== 0) {
     throw new Error(`${command} failed with exit code ${result.status}`);
@@ -89,8 +119,22 @@ async function main() {
   const binName = process.platform === "win32" ? "oxmgr.exe" : "oxmgr";
 
   const downloadUrl = `${base}/${archiveName}`;
+  const checksumUrl = `${downloadUrl}.sha256`;
   console.log(`Downloading ${downloadUrl}`);
   await download(downloadUrl, archivePath);
+
+  console.log(`Verifying checksum ${checksumUrl}`);
+  const checksumText = await downloadText(checksumUrl);
+  const expectedHash = checksumText.trim().split(/\s+/)[0].toLowerCase();
+  const actualHash = crypto
+    .createHash("sha256")
+    .update(fs.readFileSync(archivePath))
+    .digest("hex")
+    .toLowerCase();
+
+  if (!expectedHash || expectedHash !== actualHash) {
+    throw new Error(`Checksum mismatch for ${archiveName}`);
+  }
 
   if (triple.ext === "zip") {
     const unzip = spawnSync(

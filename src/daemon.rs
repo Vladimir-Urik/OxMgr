@@ -18,6 +18,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     let listener = bind_listener(&config.daemon_addr).await?;
 
     let (exit_tx, mut exit_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
     let mut manager = ProcessManager::new(config.clone(), exit_tx)?;
     manager.recover_processes().await?;
 
@@ -31,7 +32,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
             incoming = listener.accept() => {
                 match incoming {
                     Ok((mut stream, _)) => {
-                        if let Err(err) = handle_client(&mut stream, &mut manager).await {
+                        if let Err(err) = handle_client(&mut stream, &mut manager, &shutdown_tx).await {
                             error!("failed to handle IPC client: {err}");
                         }
                     }
@@ -49,6 +50,11 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                 if let Err(err) = manager.run_periodic_tasks().await {
                     error!("periodic manager task failed: {err}");
                 }
+            }
+            Some(_) = shutdown_rx.recv() => {
+                info!("shutdown requested via IPC; stopping managed processes");
+                manager.shutdown_all().await?;
+                break;
             }
             ctrl = tokio::signal::ctrl_c() => {
                 if let Err(err) = ctrl {
@@ -106,15 +112,27 @@ async fn bind_listener(daemon_addr: &str) -> Result<TcpListener> {
         .with_context(|| format!("failed to bind daemon endpoint at {daemon_addr}"))
 }
 
-async fn handle_client(stream: &mut TcpStream, manager: &mut ProcessManager) -> Result<()> {
+async fn handle_client(
+    stream: &mut TcpStream,
+    manager: &mut ProcessManager,
+    shutdown_tx: &mpsc::UnboundedSender<()>,
+) -> Result<()> {
     let request = read_json_line::<IpcRequest, _>(stream).await?;
-    let response = execute_request(request, manager).await;
+    let response = execute_request(request, manager, shutdown_tx).await;
     write_json_line(stream, &response).await
 }
 
-async fn execute_request(request: IpcRequest, manager: &mut ProcessManager) -> IpcResponse {
+async fn execute_request(
+    request: IpcRequest,
+    manager: &mut ProcessManager,
+    shutdown_tx: &mpsc::UnboundedSender<()>,
+) -> IpcResponse {
     match request {
         IpcRequest::Ping => IpcResponse::ok("pong"),
+        IpcRequest::Shutdown => {
+            let _ = shutdown_tx.send(());
+            IpcResponse::ok("daemon shutdown scheduled")
+        }
         IpcRequest::Start {
             command,
             name,

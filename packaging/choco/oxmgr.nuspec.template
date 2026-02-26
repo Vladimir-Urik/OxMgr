@@ -5,12 +5,12 @@
     <version>__VERSION__</version>
     <title>Oxmgr</title>
     <authors>Oxmgr Contributors</authors>
-    <projectUrl>https://github.com/__REPO__</projectUrl>
-    <licenseUrl>https://github.com/__REPO__/blob/main/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/Vladimir-Urik/OxMgr</projectUrl>
+    <licenseUrl>https://github.com/Vladimir-Urik/OxMgr/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>Oxmgr is a lightweight, cross-platform process manager.</description>
     <tags>rust process-manager pm2 daemon</tags>
-    <packageSourceUrl>https://github.com/__REPO__</packageSourceUrl>
+    <packageSourceUrl>https://github.com/Vladimir-Urik/OxMgr</packageSourceUrl>
   </metadata>
   <files>
     <file src="tools\\**" target="tools" />
