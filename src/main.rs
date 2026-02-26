@@ -1,3 +1,4 @@
+mod cgroup;
 mod cli;
 mod config;
 mod daemon;
@@ -81,6 +82,8 @@ async fn run_cli_command(command: Commands, config: &AppConfig) -> Result<()> {
             namespace,
             max_memory_mb,
             max_cpu_percent,
+            cgroup_enforce,
+            deny_gpu,
         } => {
             let health_check = build_health_check(
                 health_cmd,
@@ -88,7 +91,8 @@ async fn run_cli_command(command: Commands, config: &AppConfig) -> Result<()> {
                 health_timeout,
                 health_max_failures,
             );
-            let resource_limits = build_resource_limits(max_memory_mb, max_cpu_percent);
+            let resource_limits =
+                build_resource_limits(max_memory_mb, max_cpu_percent, cgroup_enforce, deny_gpu);
 
             let response = send_request(
                 &config.daemon_addr,
@@ -176,14 +180,19 @@ async fn run_cli_command(command: Commands, config: &AppConfig) -> Result<()> {
             println!("RAM:         {} MB", process.memory_bytes / (1024 * 1024));
             if let Some(limits) = process.resource_limits.as_ref() {
                 println!(
-                    "Limits:      memory={} cpu={}",
+                    "Limits:      memory={} cpu={} cgroup_enforce={} deny_gpu={}",
                     limits
                         .max_memory_mb
                         .map_or_else(|| "-".to_string(), |v| format!("{v} MB")),
                     limits
                         .max_cpu_percent
                         .map_or_else(|| "-".to_string(), |v| format!("{v:.1}%")),
+                    limits.cgroup_enforce,
+                    limits.deny_gpu,
                 );
+            }
+            if let Some(cgroup_path) = process.cgroup_path.as_deref() {
+                println!("Cgroup:      {}", cgroup_path);
             }
             println!(
                 "Command:     {} {}",
@@ -1650,6 +1659,7 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: desired.start_delay_secs,
             resource_limits: desired.resource_limits.clone(),
+            cgroup_path: None,
             pid,
             status,
             desired_state: DesiredState::Running,

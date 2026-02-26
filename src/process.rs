@@ -97,6 +97,10 @@ pub struct ResourceLimits {
     pub max_memory_mb: Option<u64>,
     #[serde(default)]
     pub max_cpu_percent: Option<f32>,
+    #[serde(default)]
+    pub cgroup_enforce: bool,
+    #[serde(default)]
+    pub deny_gpu: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +153,8 @@ pub struct ManagedProcess {
     pub start_delay_secs: u64,
     #[serde(default)]
     pub resource_limits: Option<ResourceLimits>,
+    #[serde(default)]
+    pub cgroup_path: Option<String>,
     pub pid: Option<u32>,
     pub status: ProcessStatus,
     pub desired_state: DesiredState,

@@ -45,7 +45,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cargo e2e tests
+      - name: Cargo e2e tests (Unix)
+        if: runner.os != 'Windows'
         env:
           OXMGR_RUN_E2E: "1"
         run: cargo test --test e2e_cli -- --nocapture
+
+      - name: Cargo e2e tests (Windows)
+        if: runner.os == 'Windows'
+        env:
+          OXMGR_RUN_E2E: "1"
+        run: cargo test --test e2e_cli -- --nocapture --test-threads=1

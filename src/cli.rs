@@ -48,6 +48,10 @@ pub enum Commands {
         max_memory_mb: Option<u64>,
         #[arg(long = "max-cpu-percent")]
         max_cpu_percent: Option<f32>,
+        #[arg(long = "cgroup-enforce", default_value_t = false)]
+        cgroup_enforce: bool,
+        #[arg(long = "deny-gpu", default_value_t = false)]
+        deny_gpu: bool,
     },
     Stop {
         target: String,
@@ -177,13 +181,17 @@ pub fn build_health_check(
 pub fn build_resource_limits(
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,
+    cgroup_enforce: bool,
+    deny_gpu: bool,
 ) -> Option<ResourceLimits> {
-    if max_memory_mb.is_none() && max_cpu_percent.is_none() {
+    if max_memory_mb.is_none() && max_cpu_percent.is_none() && !cgroup_enforce && !deny_gpu {
         None
     } else {
         Some(ResourceLimits {
             max_memory_mb,
             max_cpu_percent,
+            cgroup_enforce,
+            deny_gpu,
         })
     }
 }

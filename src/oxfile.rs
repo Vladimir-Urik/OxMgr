@@ -55,6 +55,8 @@ struct OxDefaults {
     health_max_failures: Option<u32>,
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,
+    cgroup_enforce: Option<bool>,
+    deny_gpu: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +82,8 @@ struct OxApp {
     health_max_failures: Option<u32>,
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,
+    cgroup_enforce: Option<bool>,
+    deny_gpu: Option<bool>,
     profiles: Option<HashMap<String, OxProfile>>,
     disabled: Option<bool>,
 }
@@ -105,6 +109,8 @@ struct OxProfile {
     health_max_failures: Option<u32>,
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,
+    cgroup_enforce: Option<bool>,
+    deny_gpu: Option<bool>,
     disabled: Option<bool>,
 }
 
@@ -170,6 +176,10 @@ struct OxAppOut {
     max_memory_mb: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_cpu_percent: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cgroup_enforce: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deny_gpu: Option<bool>,
 }
 
 pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<EcosystemProcessSpec>> {
@@ -274,6 +284,11 @@ fn resolve_app(
         resource_limits: normalize_resource_limits(ResourceLimits {
             max_memory_mb: app.max_memory_mb.or(defaults.max_memory_mb),
             max_cpu_percent: app.max_cpu_percent.or(defaults.max_cpu_percent),
+            cgroup_enforce: app
+                .cgroup_enforce
+                .or(defaults.cgroup_enforce)
+                .unwrap_or(false),
+            deny_gpu: app.deny_gpu.or(defaults.deny_gpu).unwrap_or(false),
         }),
         disabled: app.disabled.unwrap_or(false),
     };
@@ -383,6 +398,16 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) {
         limits.max_cpu_percent = Some(max_cpu_percent);
         resolved.resource_limits = normalize_resource_limits(limits);
     }
+    if let Some(cgroup_enforce) = profile.cgroup_enforce {
+        let mut limits = resolved.resource_limits.clone().unwrap_or_default();
+        limits.cgroup_enforce = cgroup_enforce;
+        resolved.resource_limits = normalize_resource_limits(limits);
+    }
+    if let Some(deny_gpu) = profile.deny_gpu {
+        let mut limits = resolved.resource_limits.clone().unwrap_or_default();
+        limits.deny_gpu = deny_gpu;
+        resolved.resource_limits = normalize_resource_limits(limits);
+    }
 }
 
 fn health_from_parts(
@@ -406,7 +431,11 @@ fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimit
     if matches!(limits.max_cpu_percent, Some(v) if v <= 0.0) {
         limits.max_cpu_percent = None;
     }
-    if limits.max_memory_mb.is_none() && limits.max_cpu_percent.is_none() {
+    if limits.max_memory_mb.is_none()
+        && limits.max_cpu_percent.is_none()
+        && !limits.cgroup_enforce
+        && !limits.deny_gpu
+    {
         None
     } else {
         Some(limits)
@@ -450,6 +479,14 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
                 .resource_limits
                 .as_ref()
                 .and_then(|limits| limits.max_cpu_percent),
+            cgroup_enforce: spec
+                .resource_limits
+                .as_ref()
+                .and_then(|limits| limits.cgroup_enforce.then_some(true)),
+            deny_gpu: spec
+                .resource_limits
+                .as_ref()
+                .and_then(|limits| limits.deny_gpu.then_some(true)),
         });
     }
 
@@ -551,6 +588,8 @@ NODE_ENV = "production"
             resource_limits: Some(ResourceLimits {
                 max_memory_mb: Some(256),
                 max_cpu_percent: Some(60.0),
+                cgroup_enforce: false,
+                deny_gpu: false,
             }),
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 5,

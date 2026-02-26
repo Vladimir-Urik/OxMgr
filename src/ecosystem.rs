@@ -66,6 +66,8 @@ struct EcosystemApp {
     max_memory_restart: Option<Value>,
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,
+    cgroup_enforce: Option<bool>,
+    deny_gpu: Option<bool>,
     #[serde(flatten)]
     extra: HashMap<String, Value>,
 }
@@ -143,6 +145,8 @@ impl EcosystemApp {
                 self.max_memory_restart,
                 self.max_memory_mb,
                 self.max_cpu_percent,
+                self.cgroup_enforce,
+                self.deny_gpu,
             )?,
             start_order: self.priority.or(self.start_order).unwrap_or(default_order),
             depends_on: self.depends_on.unwrap_or_default(),
@@ -340,6 +344,18 @@ fn apply_profile_overrides(
                 };
                 set_cpu_limit_percent(settings, parsed as f32);
             }
+            "cgroup_enforce" => {
+                let Some(parsed) = value.as_bool() else {
+                    anyhow::bail!("cgroup_enforce override must be true/false");
+                };
+                set_cgroup_enforce(settings, parsed);
+            }
+            "deny_gpu" => {
+                let Some(parsed) = value.as_bool() else {
+                    anyhow::bail!("deny_gpu override must be true/false");
+                };
+                set_deny_gpu(settings, parsed);
+            }
             "health_cmd" => {
                 if let Some(parsed) = value.as_str() {
                     let mut check = settings.health_check.clone().unwrap_or(HealthCheck {
@@ -441,6 +457,8 @@ fn resource_limits_from(
     max_memory_restart: Option<Value>,
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,
+    cgroup_enforce: Option<bool>,
+    deny_gpu: Option<bool>,
 ) -> Result<Option<ResourceLimits>> {
     let mut limits = ResourceLimits::default();
 
@@ -460,6 +478,8 @@ fn resource_limits_from(
             limits.max_memory_mb = Some(parsed);
         }
     }
+    limits.cgroup_enforce = cgroup_enforce.unwrap_or(false);
+    limits.deny_gpu = deny_gpu.unwrap_or(false);
 
     Ok(normalize_resource_limits(limits))
 }
@@ -527,6 +547,18 @@ fn set_cpu_limit_percent(settings: &mut ResolvedSettings, value_percent: f32) {
     settings.resource_limits = normalize_resource_limits(limits);
 }
 
+fn set_cgroup_enforce(settings: &mut ResolvedSettings, enabled: bool) {
+    let mut limits = settings.resource_limits.clone().unwrap_or_default();
+    limits.cgroup_enforce = enabled;
+    settings.resource_limits = normalize_resource_limits(limits);
+}
+
+fn set_deny_gpu(settings: &mut ResolvedSettings, deny: bool) {
+    let mut limits = settings.resource_limits.clone().unwrap_or_default();
+    limits.deny_gpu = deny;
+    settings.resource_limits = normalize_resource_limits(limits);
+}
+
 fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimits> {
     if matches!(limits.max_memory_mb, Some(0)) {
         limits.max_memory_mb = None;
@@ -534,7 +566,11 @@ fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimit
     if matches!(limits.max_cpu_percent, Some(v) if v <= 0.0) {
         limits.max_cpu_percent = None;
     }
-    if limits.max_memory_mb.is_none() && limits.max_cpu_percent.is_none() {
+    if limits.max_memory_mb.is_none()
+        && limits.max_cpu_percent.is_none()
+        && !limits.cgroup_enforce
+        && !limits.deny_gpu
+    {
         None
     } else {
         Some(limits)

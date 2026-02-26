@@ -42,6 +42,7 @@ Supported platforms: **Linux, macOS, Windows**.
 - Health checks with automatic restart on repeated failures
 - CPU/RAM monitoring in `list` and `status`
 - Resource limits (`max_memory_mb`, `max_cpu_percent`) with auto-restart
+- Optional Linux cgroup v2 hard limits (`--cgroup-enforce`) and GPU deny env masking (`--deny-gpu`)
 - Exponential restart backoff with jitter and cooldown reset
 - Ecosystem config import (`ecosystem.config.json` style) for PM2 drop-in compatibility
 - Idempotent config reconcile via `oxmgr apply`
@@ -153,6 +154,8 @@ Options:
 - `--namespace <name>`
 - `--max-memory-mb <n>`
 - `--max-cpu-percent <n>`
+- `--cgroup-enforce` (Linux only, requires cgroup permissions)
+- `--deny-gpu` (sets common GPU visibility env vars to disable GPU use)
 
 Example:
 
@@ -166,7 +169,9 @@ oxmgr start "python app.py" \
   --health-timeout 3 \
   --health-max-failures 3 \
   --max-memory-mb 512 \
-  --max-cpu-percent 80
+  --max-cpu-percent 80 \
+  --cgroup-enforce \
+  --deny-gpu
 ```
 
 ### `oxmgr stop <name|id>`

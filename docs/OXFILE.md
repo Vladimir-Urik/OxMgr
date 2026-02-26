@@ -91,7 +91,7 @@ Details:
 - `env` map: merged by key (`defaults.env` -> `apps.env` -> `profiles.<name>.env`).
 - `depends_on`: replaced when profile specifies it.
 - Health check exists only when a command is defined (`health_cmd`).
-- Resource limits exist only when at least one non-zero limit is set.
+- Resource limits exist only when at least one non-zero limit is set (or when `cgroup_enforce` / `deny_gpu` is enabled).
 
 ## Supported Fields
 
@@ -122,6 +122,8 @@ Details:
 - `health_max_failures`: integer
 - `max_memory_mb`: integer
 - `max_cpu_percent`: float
+- `cgroup_enforce`: bool (Linux only; applies hard limits via cgroup v2)
+- `deny_gpu`: bool (best-effort GPU visibility disable via environment variables)
 
 ### `[[apps]]` fields
 
@@ -164,6 +166,8 @@ Behavior:
 ```toml
 max_memory_mb = 512
 max_cpu_percent = 80.0
+cgroup_enforce = true
+deny_gpu = true
 ```
 
 Behavior:
@@ -171,6 +175,7 @@ Behavior:
 - limits are checked during daemon maintenance ticks
 - when exceeded, Oxmgr triggers restart logic
 - if restart budget is exhausted, process is marked `errored`
+- if `cgroup_enforce = true`, Linux cgroup v2 hard limits are applied at spawn time
 
 ## Dependencies and Start Ordering
 

@@ -12,6 +12,7 @@ use tokio::time::sleep;
 use tokio::time::timeout as tokio_timeout;
 use tracing::{error, info, warn};
 
+use crate::cgroup;
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
 use crate::logging::{open_log_writers, process_logs, ProcessLogs};
@@ -52,6 +53,7 @@ impl ProcessManager {
             process.cpu_percent = 0.0;
             process.memory_bytes = 0;
             process.last_metrics_at = None;
+            process.cgroup_path = None;
             processes.insert(process.name.clone(), process);
         }
 
@@ -96,6 +98,7 @@ impl ProcessManager {
             .collect();
 
         for process in self.processes.values_mut() {
+            cleanup_process_cgroup(process);
             process.pid = None;
             process.status = ProcessStatus::Stopped;
             process.health_status = HealthStatus::Unknown;
@@ -178,6 +181,7 @@ impl ProcessManager {
             restart_backoff_attempt: 0,
             start_delay_secs,
             resource_limits,
+            cgroup_path: None,
             pid: None,
             status: ProcessStatus::Stopped,
             desired_state: DesiredState::Running,
@@ -235,6 +239,7 @@ impl ProcessManager {
         }
 
         process.pid = None;
+        cleanup_process_cgroup(&mut process);
         process.status = ProcessStatus::Stopped;
         process.restart_backoff_attempt = 0;
         process.health_status = HealthStatus::Unknown;
@@ -283,6 +288,7 @@ impl ProcessManager {
             process.desired_state = DesiredState::Running;
             process.status = ProcessStatus::Restarting;
             process.pid = None;
+            cleanup_process_cgroup(process);
             process.health_status = HealthStatus::Unknown;
             process.health_failures = 0;
             process.next_health_check = process
@@ -308,6 +314,7 @@ impl ProcessManager {
         }
 
         let old_pid = existing.pid.context("missing old pid for reload")?;
+        let old_cgroup = existing.cgroup_path.clone();
 
         let mut replacement = existing.clone();
         let new_pid = self.spawn_child(&mut replacement).await?;
@@ -332,6 +339,11 @@ impl ProcessManager {
                 name, new_pid, old_pid, err
             );
         }
+        if let Some(path) = old_cgroup.as_deref() {
+            if let Err(err) = cgroup::cleanup(path) {
+                warn!("failed to cleanup cgroup for process {}: {}", name, err);
+            }
+        }
 
         Ok(replacement)
     }
@@ -343,6 +355,11 @@ impl ProcessManager {
             if let Some(pid) = process.pid {
                 let timeout = Duration::from_secs(process.stop_timeout_secs.max(1));
                 let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
+            }
+            if let Some(path) = process.cgroup_path.as_deref() {
+                if let Err(err) = cgroup::cleanup(path) {
+                    warn!("failed to cleanup cgroup for process {}: {}", name, err);
+                }
             }
         }
 
@@ -390,6 +407,7 @@ impl ProcessManager {
         }
 
         process.pid = None;
+        cleanup_process_cgroup(&mut process);
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
         process.last_exit_code = event.exit_code;
@@ -464,6 +482,7 @@ impl ProcessManager {
                     let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
                 }
                 process.pid = None;
+                cleanup_process_cgroup(&mut process);
                 process.status = ProcessStatus::Stopped;
                 process.restart_backoff_attempt = 0;
                 process.health_status = HealthStatus::Unknown;
@@ -531,11 +550,43 @@ impl ProcessManager {
         if !process.env.is_empty() {
             command.envs(&process.env);
         }
+        if process
+            .resource_limits
+            .as_ref()
+            .map(|limits| limits.deny_gpu)
+            .unwrap_or(false)
+        {
+            command.env("CUDA_VISIBLE_DEVICES", "");
+            command.env("NVIDIA_VISIBLE_DEVICES", "none");
+            command.env("HIP_VISIBLE_DEVICES", "");
+            command.env("ROCR_VISIBLE_DEVICES", "");
+        }
 
         let mut child = command
             .spawn()
             .with_context(|| format!("failed to spawn {}", process.command))?;
         let pid = child.id().context("spawned child has no pid")?;
+        process.cgroup_path = None;
+        if let Some(limits) = process.resource_limits.as_ref() {
+            match cgroup::apply_limits(&process.name, process.id, pid, limits) {
+                Ok(path) => {
+                    process.cgroup_path = path;
+                }
+                Err(err) => {
+                    let _ = terminate_pid(
+                        pid,
+                        process.stop_signal.as_deref(),
+                        Duration::from_secs(process.stop_timeout_secs.max(1)),
+                    )
+                    .await;
+                    anyhow::bail!(
+                        "failed to apply resource controls for process {}: {}",
+                        process.name,
+                        err
+                    );
+                }
+            }
+        }
 
         let tx = self.exit_tx.clone();
         let name = process.name.clone();
@@ -619,8 +670,18 @@ impl ProcessManager {
     }
 
     fn refresh_resource_metrics(&mut self) {
-        self.system.refresh_processes(ProcessesToUpdate::All, true);
         let now = now_epoch_secs();
+        let tracked_pids: Vec<SysPid> = self
+            .processes
+            .values()
+            .filter(|process| process.status == ProcessStatus::Running)
+            .filter_map(|process| process.pid.map(SysPid::from_u32))
+            .collect();
+
+        if !tracked_pids.is_empty() {
+            self.system
+                .refresh_processes(ProcessesToUpdate::Some(&tracked_pids), true);
+        }
 
         for process in self.processes.values_mut() {
             if process.status != ProcessStatus::Running {
@@ -694,6 +755,7 @@ impl ProcessManager {
 
                 if let Some(process) = self.processes.get_mut(&name) {
                     process.pid = None;
+                    cleanup_process_cgroup(process);
                     process.desired_state = DesiredState::Stopped;
                     process.status = ProcessStatus::Errored;
                     process.cpu_percent = 0.0;
@@ -818,6 +880,7 @@ impl ProcessManager {
                     }
                     if let Some(process) = self.processes.get_mut(&name) {
                         process.pid = None;
+                        cleanup_process_cgroup(process);
                         process.desired_state = DesiredState::Stopped;
                         process.status = ProcessStatus::Errored;
                         process.cpu_percent = 0.0;
@@ -1130,6 +1193,18 @@ async fn terminate_pid(_pid: u32, _signal_name: Option<&str>, _timeout: Duration
     Ok(())
 }
 
+fn cleanup_process_cgroup(process: &mut ManagedProcess) {
+    let Some(path) = process.cgroup_path.take() else {
+        return;
+    };
+    if let Err(err) = cgroup::cleanup(&path) {
+        warn!(
+            "failed to cleanup cgroup for process {}: {}",
+            process.name, err
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1223,6 +1298,7 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             resource_limits: None,
+            cgroup_path: None,
             pid: Some(1234),
             status: ProcessStatus::Running,
             desired_state: DesiredState::Running,
