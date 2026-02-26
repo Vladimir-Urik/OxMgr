@@ -68,8 +68,7 @@ pub fn save_state(path: &Path, state: &PersistedState) -> Result<()> {
 
     fs::write(&tmp_path, payload)
         .with_context(|| format!("failed to write temporary state {}", tmp_path.display()))?;
-    fs::rename(&tmp_path, path)
-        .with_context(|| format!("failed to replace state file {}", path.display()))?;
+    replace_state_file(&tmp_path, path)?;
 
     Ok(())
 }
@@ -84,6 +83,29 @@ fn corrupted_backup_path(path: &Path) -> PathBuf {
 
 fn tmp_state_path(path: &Path) -> PathBuf {
     path.with_extension("tmp")
+}
+
+fn replace_state_file(tmp_path: &Path, path: &Path) -> Result<()> {
+    match fs::rename(tmp_path, path) {
+        Ok(()) => Ok(()),
+        Err(rename_err) => {
+            #[cfg(windows)]
+            {
+                if path.exists() {
+                    fs::remove_file(path).with_context(|| {
+                        format!("failed to remove state file {}", path.display())
+                    })?;
+                    fs::rename(tmp_path, path).with_context(|| {
+                        format!("failed to replace state file {}", path.display())
+                    })?;
+                    return Ok(());
+                }
+            }
+
+            Err(rename_err)
+                .with_context(|| format!("failed to replace state file {}", path.display()))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +127,28 @@ mod tests {
         let loaded = load_state(&path).expect("failed to load test state");
 
         assert_eq!(loaded.next_id, 42);
+        assert!(loaded.processes.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_state_overwrites_existing_file() {
+        let path = temp_state_file("overwrite");
+        let first = PersistedState {
+            next_id: 7,
+            processes: Vec::new(),
+        };
+        let second = PersistedState {
+            next_id: 9,
+            processes: Vec::new(),
+        };
+
+        save_state(&path, &first).expect("failed to save first state");
+        save_state(&path, &second).expect("failed to overwrite existing state");
+        let loaded = load_state(&path).expect("failed to load overwritten state");
+
+        assert_eq!(loaded.next_id, 9);
         assert!(loaded.processes.is_empty());
 
         let _ = fs::remove_file(path);

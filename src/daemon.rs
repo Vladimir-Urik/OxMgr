@@ -133,38 +133,7 @@ async fn execute_request(
             let _ = shutdown_tx.send(());
             IpcResponse::ok("daemon shutdown scheduled")
         }
-        IpcRequest::Start {
-            command,
-            name,
-            restart_policy,
-            max_restarts,
-            cwd,
-            env,
-            health_check,
-            stop_signal,
-            stop_timeout_secs,
-            restart_delay_secs,
-            start_delay_secs,
-            namespace,
-            resource_limits,
-        } => match manager
-            .start_process(
-                command,
-                name,
-                restart_policy,
-                max_restarts,
-                cwd,
-                env,
-                health_check,
-                stop_signal,
-                stop_timeout_secs,
-                restart_delay_secs,
-                start_delay_secs,
-                namespace,
-                resource_limits,
-            )
-            .await
-        {
+        IpcRequest::Start { spec } => match manager.start_process(*spec).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("started {}", process.target_label()));
                 response.process = Some(process);

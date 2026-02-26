@@ -64,16 +64,12 @@ pub enum DesiredState {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum HealthStatus {
+    #[default]
     Unknown,
     Healthy,
     Unhealthy,
-}
-
-impl Default for HealthStatus {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 impl std::fmt::Display for HealthStatus {
@@ -101,6 +97,27 @@ pub struct ResourceLimits {
     pub max_memory_mb: Option<u64>,
     #[serde(default)]
     pub max_cpu_percent: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartProcessSpec {
+    pub command: String,
+    pub name: Option<String>,
+    pub restart_policy: RestartPolicy,
+    pub max_restarts: u32,
+    pub cwd: Option<PathBuf>,
+    pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub health_check: Option<HealthCheck>,
+    #[serde(default)]
+    pub stop_signal: Option<String>,
+    pub stop_timeout_secs: u64,
+    pub restart_delay_secs: u64,
+    pub start_delay_secs: u64,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub resource_limits: Option<ResourceLimits>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,53 +1,24 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 use crate::logging::ProcessLogs;
-use crate::process::{HealthCheck, ManagedProcess, ResourceLimits, RestartPolicy};
+use crate::process::{ManagedProcess, StartProcessSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IpcRequest {
     Ping,
     Shutdown,
-    Start {
-        command: String,
-        name: Option<String>,
-        restart_policy: RestartPolicy,
-        max_restarts: u32,
-        cwd: Option<PathBuf>,
-        env: HashMap<String, String>,
-        health_check: Option<HealthCheck>,
-        stop_signal: Option<String>,
-        stop_timeout_secs: u64,
-        restart_delay_secs: u64,
-        start_delay_secs: u64,
-        namespace: Option<String>,
-        resource_limits: Option<ResourceLimits>,
-    },
-    Stop {
-        target: String,
-    },
-    Restart {
-        target: String,
-    },
-    Reload {
-        target: String,
-    },
-    Delete {
-        target: String,
-    },
+    Start { spec: Box<StartProcessSpec> },
+    Stop { target: String },
+    Restart { target: String },
+    Reload { target: String },
+    Delete { target: String },
     List,
-    Status {
-        target: String,
-    },
-    Logs {
-        target: String,
-    },
+    Status { target: String },
+    Logs { target: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

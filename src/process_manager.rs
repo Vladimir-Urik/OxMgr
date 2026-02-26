@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,7 +15,7 @@ use crate::errors::OxmgrError;
 use crate::logging::{open_log_writers, process_logs, ProcessLogs};
 use crate::process::{
     DesiredState, HealthCheck, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus,
-    ResourceLimits, RestartPolicy,
+    StartProcessSpec,
 };
 use crate::storage::{load_state, save_state, PersistedState};
 
@@ -123,22 +123,23 @@ impl ProcessManager {
         self.run_health_checks().await
     }
 
-    pub async fn start_process(
-        &mut self,
-        command_line: String,
-        name: Option<String>,
-        restart_policy: RestartPolicy,
-        max_restarts: u32,
-        cwd: Option<PathBuf>,
-        env: HashMap<String, String>,
-        health_check: Option<HealthCheck>,
-        stop_signal: Option<String>,
-        stop_timeout_secs: u64,
-        restart_delay_secs: u64,
-        start_delay_secs: u64,
-        namespace: Option<String>,
-        resource_limits: Option<ResourceLimits>,
-    ) -> Result<ManagedProcess> {
+    pub async fn start_process(&mut self, spec: StartProcessSpec) -> Result<ManagedProcess> {
+        let StartProcessSpec {
+            command: command_line,
+            name,
+            restart_policy,
+            max_restarts,
+            cwd,
+            env,
+            health_check,
+            stop_signal,
+            stop_timeout_secs,
+            restart_delay_secs,
+            start_delay_secs,
+            namespace,
+            resource_limits,
+        } = spec;
+
         let (command, args) = parse_command_line(&command_line)?;
 
         let resolved_name = match name {
@@ -190,7 +191,7 @@ impl ProcessManager {
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,
-            last_started_at: None,
+            last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
         };
 
@@ -377,7 +378,6 @@ impl ProcessManager {
         }
 
         process.pid = None;
-        process.restart_backoff_attempt = 0;
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
         process.last_exit_code = event.exit_code;
@@ -385,6 +385,7 @@ impl ProcessManager {
 
         if process.desired_state == DesiredState::Stopped {
             process.status = ProcessStatus::Stopped;
+            process.restart_backoff_attempt = 0;
             process.health_status = HealthStatus::Unknown;
             process.next_health_check = None;
             self.processes.insert(process.name.clone(), process);
@@ -432,6 +433,7 @@ impl ProcessManager {
         } else {
             ProcessStatus::Crashed
         };
+        process.restart_backoff_attempt = 0;
         process.health_status = HealthStatus::Unknown;
         process.next_health_check = None;
 
@@ -642,9 +644,7 @@ impl ProcessManager {
                     return None;
                 }
 
-                let Some(limits) = process.resource_limits.as_ref() else {
-                    return None;
-                };
+                let limits = process.resource_limits.as_ref()?;
 
                 let memory_exceeded = limits
                     .max_memory_mb

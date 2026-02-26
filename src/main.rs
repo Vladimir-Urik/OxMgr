@@ -28,7 +28,9 @@ use crate::cli::{
 use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest, IpcResponse};
 use crate::logging::{read_last_lines, ProcessLogs};
-use crate::process::{HealthCheck, ManagedProcess, ResourceLimits, RestartPolicy};
+use crate::process::{
+    HealthCheck, ManagedProcess, ResourceLimits, RestartPolicy, StartProcessSpec,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -91,19 +93,21 @@ async fn run_cli_command(command: Commands, config: &AppConfig) -> Result<()> {
             let response = send_request(
                 &config.daemon_addr,
                 &IpcRequest::Start {
-                    command,
-                    name,
-                    restart_policy: restart.into(),
-                    max_restarts,
-                    cwd,
-                    env: env_pairs_to_map(env),
-                    health_check,
-                    stop_signal: kill_signal,
-                    stop_timeout_secs: stop_timeout.max(1),
-                    restart_delay_secs: restart_delay,
-                    start_delay_secs: start_delay,
-                    namespace,
-                    resource_limits,
+                    spec: Box::new(StartProcessSpec {
+                        command,
+                        name,
+                        restart_policy: restart.into(),
+                        max_restarts,
+                        cwd,
+                        env: env_pairs_to_map(env),
+                        health_check,
+                        stop_signal: kill_signal,
+                        stop_timeout_secs: stop_timeout.max(1),
+                        restart_delay_secs: restart_delay,
+                        start_delay_secs: start_delay,
+                        namespace,
+                        resource_limits,
+                    }),
                 },
             )
             .await?;
@@ -252,19 +256,21 @@ async fn run_cli_command(command: Commands, config: &AppConfig) -> Result<()> {
                     let response = send_request(
                         &config.daemon_addr,
                         &IpcRequest::Start {
-                            command: spec.command.clone(),
-                            name,
-                            restart_policy: spec.restart_policy.clone(),
-                            max_restarts: spec.max_restarts,
-                            cwd: spec.cwd.clone(),
-                            env: env_vars,
-                            health_check: spec.health_check.clone(),
-                            stop_signal: spec.stop_signal.clone(),
-                            stop_timeout_secs: spec.stop_timeout_secs.max(1),
-                            restart_delay_secs: spec.restart_delay_secs,
-                            start_delay_secs: spec.start_delay_secs,
-                            namespace: spec.namespace.clone(),
-                            resource_limits: spec.resource_limits.clone(),
+                            spec: Box::new(StartProcessSpec {
+                                command: spec.command.clone(),
+                                name,
+                                restart_policy: spec.restart_policy.clone(),
+                                max_restarts: spec.max_restarts,
+                                cwd: spec.cwd.clone(),
+                                env: env_vars,
+                                health_check: spec.health_check.clone(),
+                                stop_signal: spec.stop_signal.clone(),
+                                stop_timeout_secs: spec.stop_timeout_secs.max(1),
+                                restart_delay_secs: spec.restart_delay_secs,
+                                start_delay_secs: spec.start_delay_secs,
+                                namespace: spec.namespace.clone(),
+                                resource_limits: spec.resource_limits.clone(),
+                            }),
                         },
                     )
                     .await?;
@@ -704,19 +710,21 @@ fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
 
 fn start_request_from_spec(spec: DesiredProcessSpec) -> IpcRequest {
     IpcRequest::Start {
-        command: spec.command,
-        name: Some(spec.name),
-        restart_policy: spec.restart_policy,
-        max_restarts: spec.max_restarts,
-        cwd: spec.cwd,
-        env: spec.env,
-        health_check: spec.health_check,
-        stop_signal: spec.stop_signal,
-        stop_timeout_secs: spec.stop_timeout_secs.max(1),
-        restart_delay_secs: spec.restart_delay_secs,
-        start_delay_secs: spec.start_delay_secs,
-        namespace: spec.namespace,
-        resource_limits: spec.resource_limits,
+        spec: Box::new(StartProcessSpec {
+            command: spec.command,
+            name: Some(spec.name),
+            restart_policy: spec.restart_policy,
+            max_restarts: spec.max_restarts,
+            cwd: spec.cwd,
+            env: spec.env,
+            health_check: spec.health_check,
+            stop_signal: spec.stop_signal,
+            stop_timeout_secs: spec.stop_timeout_secs.max(1),
+            restart_delay_secs: spec.restart_delay_secs,
+            start_delay_secs: spec.start_delay_secs,
+            namespace: spec.namespace,
+            resource_limits: spec.resource_limits,
+        }),
     }
 }
 
