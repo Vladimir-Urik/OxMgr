@@ -186,7 +186,7 @@ jobs:
     name: Publish npm package
     runs-on: ubuntu-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr' && env.NPM_TOKEN != ''
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr'
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     permissions:
@@ -203,6 +203,7 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Publish
+        if: env.NPM_TOKEN != ''
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
@@ -221,7 +222,7 @@ jobs:
     name: Update Homebrew Tap
     runs-on: ubuntu-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr' && env.HOMEBREW_TAP_TOKEN != '' && env.HOMEBREW_TAP_REPO != ''
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr'
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       HOMEBREW_TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
@@ -238,6 +239,7 @@ jobs:
           merge-multiple: true
 
       - name: Update tap formula
+        if: env.HOMEBREW_TAP_TOKEN != '' && env.HOMEBREW_TAP_REPO != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -280,7 +282,7 @@ jobs:
     name: Publish Chocolatey package
     runs-on: windows-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr' && env.CHOCO_API_KEY != ''
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr'
     env:
       CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
     permissions:
@@ -296,6 +298,7 @@ jobs:
           merge-multiple: true
 
       - name: Build and publish package
+        if: env.CHOCO_API_KEY != ''
         shell: pwsh
         run: |
           $tag = "${env:GITHUB_REF_NAME}"
