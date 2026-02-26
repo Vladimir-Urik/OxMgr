@@ -5,8 +5,8 @@ use std::process::{Command, Output};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serial_test::serial;
 use serde_json::json;
+use serial_test::serial;
 
 struct TestEnv {
     home: PathBuf,

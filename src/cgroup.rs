@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
 #[cfg(target_os = "linux")]
 use anyhow::Context;
+use anyhow::{bail, Result};
 
 #[cfg(target_os = "linux")]
 use std::fs;
