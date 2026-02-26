@@ -1021,7 +1021,7 @@ fn print_startup_instructions(system: InitSystem, config: &AppConfig) -> Result<
             println!("  <key>Label</key><string>io.oxmgr.daemon</string>");
             println!("  <key>ProgramArguments</key>");
             println!("  <array>");
-            println!("    <string>{}</string>", executable.display());
+            println!("    <string>{}</string>", to_launchd_path(&executable));
             println!("    <string>daemon</string>");
             println!("    <string>run</string>");
             println!("  </array>");
@@ -1029,11 +1029,11 @@ fn print_startup_instructions(system: InitSystem, config: &AppConfig) -> Result<
             println!("  <key>KeepAlive</key><true/>");
             println!(
                 "  <key>StandardOutPath</key><string>{}</string>",
-                config.base_dir.join("daemon.out.log").display()
+                to_launchd_path(&config.base_dir.join("daemon.out.log"))
             );
             println!(
                 "  <key>StandardErrorPath</key><string>{}</string>",
-                config.base_dir.join("daemon.err.log").display()
+                to_launchd_path(&config.base_dir.join("daemon.err.log"))
             );
             println!("</dict>");
             println!("</plist>");
@@ -1295,12 +1295,16 @@ fn escape_systemd_exec_arg(path: &Path) -> String {
     escaped
 }
 
+fn to_launchd_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 fn render_launchd_plist(executable: &Path, config: &AppConfig) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>io.oxmgr.daemon</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>{}</string>\n    <string>daemon</string>\n    <string>run</string>\n  </array>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n  <key>StandardOutPath</key><string>{}</string>\n  <key>StandardErrorPath</key><string>{}</string>\n</dict>\n</plist>\n",
-        executable.display(),
-        config.base_dir.join("daemon.out.log").display(),
-        config.base_dir.join("daemon.err.log").display()
+        to_launchd_path(executable),
+        to_launchd_path(&config.base_dir.join("daemon.out.log")),
+        to_launchd_path(&config.base_dir.join("daemon.err.log"))
     )
 }
 
@@ -1577,6 +1581,26 @@ mod tests {
         assert!(plist.contains("io.oxmgr.daemon"));
         assert!(plist.contains("/tmp/oxmgr/daemon.out.log"));
         assert!(plist.contains("/tmp/oxmgr/daemon.err.log"));
+    }
+
+    #[test]
+    fn render_launchd_plist_normalizes_backslashes() {
+        let cfg = AppConfig {
+            base_dir: Path::new(r"C:\tmp\oxmgr").to_path_buf(),
+            daemon_addr: "127.0.0.1:50000".to_string(),
+            state_path: Path::new(r"C:\tmp\oxmgr\state.json").to_path_buf(),
+            log_dir: Path::new(r"C:\tmp\oxmgr\logs").to_path_buf(),
+            log_rotation: LogRotationPolicy {
+                max_size_bytes: 1024,
+                max_files: 3,
+                max_age_days: 7,
+            },
+        };
+
+        let plist = render_launchd_plist(Path::new(r"C:\usr\local\bin\oxmgr"), &cfg);
+        assert!(plist.contains("C:/usr/local/bin/oxmgr"));
+        assert!(plist.contains("C:/tmp/oxmgr/daemon.out.log"));
+        assert!(plist.contains("C:/tmp/oxmgr/daemon.err.log"));
     }
 
     fn desired_spec(name: &str, command: &str) -> DesiredProcessSpec {
