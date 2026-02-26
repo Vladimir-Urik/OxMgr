@@ -174,9 +174,10 @@ pub fn read_last_lines(path: &Path, max_lines: usize) -> Result<Vec<String>> {
 mod tests {
     use std::fs;
     use std::io::Write;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{open_log_writers, LogRotationPolicy, ProcessLogs};
+    use super::{open_log_writers, process_logs, read_last_lines, LogRotationPolicy, ProcessLogs};
 
     #[test]
     fn open_log_writers_rotates_when_size_exceeded() {
@@ -254,6 +255,39 @@ mod tests {
         assert!(!tmp.join("app.out.log.3").exists());
 
         let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn read_last_lines_returns_only_tail() {
+        let tmp = temp_dir("read-tail");
+        fs::create_dir_all(&tmp).expect("failed to create temp directory");
+        let path = tmp.join("app.out.log");
+        fs::write(&path, "line1\nline2\nline3\nline4\n").expect("failed to write test log file");
+
+        let lines = read_last_lines(&path, 2).expect("failed reading tail lines");
+        assert_eq!(lines, vec!["line3".to_string(), "line4".to_string()]);
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn read_last_lines_with_zero_limit_returns_empty() {
+        let tmp = temp_dir("read-zero");
+        fs::create_dir_all(&tmp).expect("failed to create temp directory");
+        let path = tmp.join("app.out.log");
+        fs::write(&path, "line1\nline2\n").expect("failed to write test log file");
+
+        let lines = read_last_lines(&path, 0).expect("failed reading lines");
+        assert!(lines.is_empty());
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn process_logs_builds_expected_file_paths() {
+        let logs = process_logs(Path::new("/tmp/oxmgr/logs"), "worker");
+        assert_eq!(logs.stdout, Path::new("/tmp/oxmgr/logs/worker.out.log"));
+        assert_eq!(logs.stderr, Path::new("/tmp/oxmgr/logs/worker.err.log"));
     }
 
     fn temp_dir(prefix: &str) -> std::path::PathBuf {

@@ -206,7 +206,13 @@ fn default_stop_timeout_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::RestartPolicy;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::{
+        default_stop_timeout_secs, DesiredState, HealthStatus, ManagedProcess, ProcessStatus,
+        RestartPolicy,
+    };
 
     #[test]
     fn restart_policy_always_restarts_on_success_and_failure() {
@@ -224,5 +230,79 @@ mod tests {
     fn restart_policy_never_does_not_restart() {
         assert!(!RestartPolicy::Never.should_restart(true));
         assert!(!RestartPolicy::Never.should_restart(false));
+    }
+
+    #[test]
+    fn display_impls_use_expected_strings() {
+        assert_eq!(RestartPolicy::Always.to_string(), "always");
+        assert_eq!(RestartPolicy::OnFailure.to_string(), "on-failure");
+        assert_eq!(RestartPolicy::Never.to_string(), "never");
+
+        assert_eq!(ProcessStatus::Running.to_string(), "running");
+        assert_eq!(ProcessStatus::Stopped.to_string(), "stopped");
+        assert_eq!(ProcessStatus::Crashed.to_string(), "crashed");
+        assert_eq!(ProcessStatus::Restarting.to_string(), "restarting");
+        assert_eq!(ProcessStatus::Errored.to_string(), "errored");
+
+        assert_eq!(HealthStatus::Unknown.to_string(), "unknown");
+        assert_eq!(HealthStatus::Healthy.to_string(), "healthy");
+        assert_eq!(HealthStatus::Unhealthy.to_string(), "unhealthy");
+    }
+
+    #[test]
+    fn health_status_default_is_unknown() {
+        assert_eq!(HealthStatus::default(), HealthStatus::Unknown);
+    }
+
+    #[test]
+    fn managed_process_target_label_contains_name_and_id() {
+        let process = fixture_process();
+        assert_eq!(process.target_label(), "api (42)");
+    }
+
+    #[test]
+    fn stop_timeout_default_is_five_seconds() {
+        assert_eq!(default_stop_timeout_secs(), 5);
+    }
+
+    fn fixture_process() -> ManagedProcess {
+        ManagedProcess {
+            id: 42,
+            name: "api".to_string(),
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            restart_count: 0,
+            namespace: None,
+            stop_signal: Some("SIGTERM".to_string()),
+            stop_timeout_secs: 5,
+            restart_delay_secs: 0,
+            restart_backoff_cap_secs: 0,
+            restart_backoff_reset_secs: 0,
+            restart_backoff_attempt: 0,
+            start_delay_secs: 0,
+            resource_limits: None,
+            cgroup_path: None,
+            pid: Some(1234),
+            status: ProcessStatus::Running,
+            desired_state: DesiredState::Running,
+            last_exit_code: None,
+            stdout_log: PathBuf::from("/tmp/api.out.log"),
+            stderr_log: PathBuf::from("/tmp/api.err.log"),
+            health_check: None,
+            health_status: HealthStatus::Unknown,
+            health_failures: 0,
+            last_health_check: None,
+            next_health_check: None,
+            last_health_error: None,
+            cpu_percent: 0.0,
+            memory_bytes: 0,
+            last_metrics_at: None,
+            last_started_at: None,
+            last_stopped_at: None,
+        }
     }
 }

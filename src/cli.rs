@@ -207,3 +207,135 @@ fn parse_env_var(value: &str) -> Result<(String, String), String> {
 
     Ok((key.to_string(), val.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{
+        build_health_check, build_resource_limits, env_pairs_to_map, parse_env_var, Cli, Commands,
+        RestartArg,
+    };
+    use crate::process::RestartPolicy;
+
+    #[test]
+    fn parse_env_var_accepts_values_with_equals_sign() {
+        let parsed = parse_env_var("DATABASE_URL=postgres://a:b@localhost/db?sslmode=disable")
+            .expect("expected valid KEY=VALUE format");
+        assert_eq!(parsed.0, "DATABASE_URL");
+        assert_eq!(
+            parsed.1,
+            "postgres://a:b@localhost/db?sslmode=disable".to_string()
+        );
+    }
+
+    #[test]
+    fn parse_env_var_rejects_missing_separator() {
+        let err = parse_env_var("NO_EQUALS").expect_err("expected parser failure");
+        assert!(
+            err.contains("KEY=VALUE"),
+            "unexpected parse error message: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_env_var_rejects_empty_key() {
+        let err = parse_env_var("=value").expect_err("expected parser failure");
+        assert!(
+            err.contains("key cannot be empty"),
+            "unexpected parse error message: {err}"
+        );
+    }
+
+    #[test]
+    fn env_pairs_to_map_keeps_last_value_for_duplicate_key() {
+        let env = env_pairs_to_map(vec![
+            ("PORT".to_string(), "3000".to_string()),
+            ("PORT".to_string(), "8080".to_string()),
+            ("HOST".to_string(), "127.0.0.1".to_string()),
+        ]);
+
+        assert_eq!(env.len(), 2);
+        assert_eq!(env.get("PORT").map(String::as_str), Some("8080"));
+        assert_eq!(env.get("HOST").map(String::as_str), Some("127.0.0.1"));
+    }
+
+    #[test]
+    fn build_health_check_normalizes_minimum_thresholds() {
+        let check =
+            build_health_check(Some("curl -f http://localhost/health".to_string()), 0, 0, 0)
+                .expect("expected health check to be present");
+
+        assert_eq!(check.interval_secs, 1);
+        assert_eq!(check.timeout_secs, 1);
+        assert_eq!(check.max_failures, 1);
+    }
+
+    #[test]
+    fn build_health_check_returns_none_when_command_is_missing() {
+        assert!(build_health_check(None, 30, 5, 3).is_none());
+    }
+
+    #[test]
+    fn build_resource_limits_returns_none_without_any_limits() {
+        assert!(build_resource_limits(None, None, false, false).is_none());
+    }
+
+    #[test]
+    fn build_resource_limits_includes_flags_without_numeric_limits() {
+        let limits = build_resource_limits(None, None, true, true)
+            .expect("expected resource limits to be present");
+        assert_eq!(limits.max_memory_mb, None);
+        assert_eq!(limits.max_cpu_percent, None);
+        assert!(limits.cgroup_enforce);
+        assert!(limits.deny_gpu);
+    }
+
+    #[test]
+    fn restart_arg_maps_to_restart_policy() {
+        assert_eq!(
+            RestartPolicy::from(RestartArg::Always),
+            RestartPolicy::Always
+        );
+        assert_eq!(
+            RestartPolicy::from(RestartArg::OnFailure),
+            RestartPolicy::OnFailure
+        );
+        assert_eq!(RestartPolicy::from(RestartArg::Never), RestartPolicy::Never);
+    }
+
+    #[test]
+    fn clap_start_command_parses_env_flags() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "start",
+            "node server.js",
+            "--name",
+            "api",
+            "--env",
+            "A=1",
+            "--env",
+            "B=two",
+            "--restart",
+            "never",
+        ])
+        .expect("expected CLI parsing success");
+
+        match cli.command {
+            Commands::Start {
+                name, env, restart, ..
+            } => {
+                assert_eq!(name.as_deref(), Some("api"));
+                assert_eq!(
+                    env,
+                    vec![
+                        ("A".to_string(), "1".to_string()),
+                        ("B".to_string(), "two".to_string())
+                    ]
+                );
+                assert!(matches!(restart, RestartArg::Never));
+            }
+            _ => panic!("expected start subcommand"),
+        }
+    }
+}
