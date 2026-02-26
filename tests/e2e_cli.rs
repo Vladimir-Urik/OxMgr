@@ -1,7 +1,7 @@
 use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -44,6 +44,8 @@ impl TestEnv {
             .env("OXMGR_LOG_MAX_SIZE_MB", "1")
             .env("OXMGR_LOG_MAX_FILES", "3")
             .env("OXMGR_LOG_MAX_DAYS", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("failed to spawn oxmgr command");
 

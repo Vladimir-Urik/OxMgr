@@ -11,6 +11,7 @@ Thumbs.db
 
 # Local release/publish artifacts
 /release-assets/
+/errors/
 /apt-repo/
 /tap/
 /choco-build/
