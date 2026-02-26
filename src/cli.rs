@@ -106,6 +106,7 @@ pub enum Commands {
         #[arg(long, value_delimiter = ',')]
         only: Vec<String>,
     },
+    Doctor,
     Startup {
         #[arg(long, value_enum, default_value_t = InitSystem::Auto)]
         system: InitSystem,
@@ -337,5 +338,11 @@ mod tests {
             }
             _ => panic!("expected start subcommand"),
         }
+    }
+
+    #[test]
+    fn clap_parses_doctor_command() {
+        let cli = Cli::try_parse_from(["oxmgr", "doctor"]).expect("expected CLI parsing success");
+        assert!(matches!(cli.command, Commands::Doctor));
     }
 }

@@ -1,0 +1,119 @@
+mod apply;
+mod common;
+mod convert;
+mod daemon_stop;
+mod delete;
+mod doctor;
+mod import;
+mod list;
+mod logs;
+mod reload;
+mod restart;
+mod service;
+mod start;
+mod startup;
+mod status;
+mod stop;
+mod validate;
+
+use anyhow::Result;
+
+use crate::cli::{Commands, DaemonCommand};
+use crate::config::AppConfig;
+
+pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
+    let needs_daemon = !matches!(
+        command,
+        Commands::Startup { .. }
+            | Commands::Service { .. }
+            | Commands::Convert { .. }
+            | Commands::Validate { .. }
+            | Commands::Doctor
+            | Commands::Daemon {
+                command: DaemonCommand::Stop,
+            }
+    );
+
+    if needs_daemon {
+        crate::daemon::ensure_daemon_running(config).await?;
+    }
+
+    match command {
+        Commands::Start {
+            command,
+            name,
+            restart,
+            max_restarts,
+            cwd,
+            env,
+            health_cmd,
+            health_interval,
+            health_timeout,
+            health_max_failures,
+            kill_signal,
+            stop_timeout,
+            restart_delay,
+            start_delay,
+            namespace,
+            max_memory_mb,
+            max_cpu_percent,
+            cgroup_enforce,
+            deny_gpu,
+        } => {
+            start::run(
+                config,
+                start::StartArgs {
+                    command,
+                    name,
+                    restart,
+                    max_restarts,
+                    cwd,
+                    env,
+                    health_cmd,
+                    health_interval,
+                    health_timeout,
+                    health_max_failures,
+                    kill_signal,
+                    stop_timeout,
+                    restart_delay,
+                    start_delay,
+                    namespace,
+                    max_memory_mb,
+                    max_cpu_percent,
+                    cgroup_enforce,
+                    deny_gpu,
+                },
+            )
+            .await
+        }
+        Commands::Stop { target } => stop::run(config, target).await,
+        Commands::Restart { target } => restart::run(config, target).await,
+        Commands::Reload { target } => reload::run(config, target).await,
+        Commands::Delete { target } => delete::run(config, target).await,
+        Commands::List => list::run(config).await,
+        Commands::Status { target } => status::run(config, target).await,
+        Commands::Logs {
+            target,
+            follow,
+            lines,
+        } => logs::run(config, target, follow, lines).await,
+        Commands::Import { path, env, only } => import::run(config, path, env, only).await,
+        Commands::Apply {
+            path,
+            env,
+            only,
+            prune,
+        } => apply::run(config, path, env, only, prune).await,
+        Commands::Convert { input, out, env } => convert::run(input, out, env),
+        Commands::Validate { path, env, only } => validate::run(&path, env.as_deref(), &only),
+        Commands::Doctor => doctor::run(config).await,
+        Commands::Startup { system } => startup::run(system, config),
+        Commands::Service { command, system } => service::run(command, system, config),
+        Commands::Daemon {
+            command: DaemonCommand::Run,
+        } => unreachable!("daemon mode is handled before CLI dispatch"),
+        Commands::Daemon {
+            command: DaemonCommand::Stop,
+        } => daemon_stop::run(config).await,
+    }
+}

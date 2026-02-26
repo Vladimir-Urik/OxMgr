@@ -116,6 +116,9 @@ oxmgr apply ./oxfile.toml --env prod
 # Validate oxfile syntax + dependencies + expanded names
 oxmgr validate ./oxfile.toml --env prod
 
+# Run environment + daemon diagnostics
+oxmgr doctor
+
 # Install daemon service on current platform
 oxmgr service install --system auto
 
@@ -280,6 +283,19 @@ Options:
 
 - `--env <name>` profile selector
 - `--only <names>` comma-separated app filter
+
+### `oxmgr doctor`
+
+Run local environment diagnostics.
+
+Checks include:
+
+- base/log directories existence + writability
+- daemon address resolution
+- state file readability and JSON shape
+- daemon IPC reachability (`ping`) and process listing (if daemon is running)
+
+Exit code is non-zero only when at least one check fails.
 
 ### `oxmgr startup [--system <auto|systemd|launchd|task-scheduler>]`
 
