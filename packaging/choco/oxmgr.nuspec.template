@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>oxmgr</id>
+    <version>__VERSION__</version>
+    <title>Oxmgr</title>
+    <authors>Oxmgr Contributors</authors>
+    <projectUrl>https://github.com/__REPO__</projectUrl>
+    <licenseUrl>https://github.com/__REPO__/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Oxmgr is a lightweight, cross-platform process manager.</description>
+    <tags>rust process-manager pm2 daemon</tags>
+    <packageSourceUrl>https://github.com/__REPO__</packageSourceUrl>
+  </metadata>
+  <files>
+    <file src="tools\\**" target="tools" />
+  </files>
+</package>

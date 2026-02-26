@@ -1,0 +1,8 @@
+version = 1
+
+[[apps]]
+name = "api"
+command = "node server.js"
+restart_policy = "on_failure"
+max_restarts = 10
+stop_timeout_secs = 5

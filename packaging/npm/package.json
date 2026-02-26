@@ -1,0 +1,25 @@
+{
+  "name": "oxmgr",
+  "version": "0.0.0-development",
+  "description": "Oxmgr - lightweight cross-platform process manager",
+  "license": "MIT",
+  "bin": {
+    "oxmgr": "bin/oxmgr.js"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "vendor/.gitkeep",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/REPO_OWNER/REPO_NAME.git"
+  }
+}

@@ -1,0 +1,25 @@
+# Rust build outputs
+/target/
+
+# IDE/editor settings
+/.idea/
+/.vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Local release/publish artifacts
+/release-assets/
+/apt-repo/
+/tap/
+/choco-build/
+*.deb
+*.nupkg
+SHA256SUMS
+
+# npm packaging temporary download/extract outputs
+/packaging/npm/oxmgr-v*-*.tar.gz
+/packaging/npm/oxmgr-v*-*.zip
+/packaging/npm/vendor/*
+!/packaging/npm/vendor/.gitkeep

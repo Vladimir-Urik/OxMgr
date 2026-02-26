@@ -1,0 +1,41 @@
+version = 1
+
+[defaults]
+restart_policy = "on_failure"
+max_restarts = 8
+stop_timeout_secs = 5
+
+# This file is designed for idempotent `oxmgr apply` usage.
+# Keep names stable and explicit.
+
+[[apps]]
+name = "frontend"
+command = "npm run start"
+cwd = "./apps/frontend"
+max_memory_mb = 512
+
+[apps.env]
+NODE_ENV = "production"
+PORT = "4000"
+
+[[apps]]
+name = "api"
+command = "node server.js"
+cwd = "./apps/api"
+depends_on = ["frontend"]
+max_memory_mb = 768
+max_cpu_percent = 80.0
+health_cmd = "curl -fsS http://127.0.0.1:5000/health"
+
+[apps.env]
+NODE_ENV = "production"
+PORT = "5000"
+
+[[apps]]
+name = "migration-once"
+command = "./scripts/migrate.sh"
+restart_policy = "never"
+max_restarts = 0
+
+[apps.profiles.prod]
+disabled = true

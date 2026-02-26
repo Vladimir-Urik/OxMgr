@@ -1,0 +1,49 @@
+version = 1
+
+[defaults]
+restart_policy = "on_failure"
+max_restarts = 15
+stop_signal = "SIGTERM"
+stop_timeout_secs = 8
+health_interval_secs = 15
+health_timeout_secs = 3
+health_max_failures = 3
+max_memory_mb = 768
+
+[[apps]]
+name = "db"
+command = "docker compose up db"
+start_order = 0
+max_restarts = 3
+health_cmd = "docker ps --filter name=db --format '{{.Names}}' | grep -q db"
+
+[[apps]]
+name = "redis"
+command = "docker compose up redis"
+start_order = 1
+health_cmd = "redis-cli -h 127.0.0.1 ping | grep -q PONG"
+
+[[apps]]
+name = "api"
+command = "node server.js"
+cwd = "./services/api"
+depends_on = ["db", "redis"]
+start_order = 10
+restart_delay_secs = 2
+namespace = "backend"
+max_cpu_percent = 85.0
+
+[apps.env]
+NODE_ENV = "production"
+PORT = "3000"
+
+[[apps]]
+name = "worker"
+command = "python worker.py --queue critical"
+cwd = "./services/worker"
+depends_on = ["redis"]
+namespace = "jobs"
+max_memory_mb = 512
+
+[apps.env]
+PYTHONUNBUFFERED = "1"

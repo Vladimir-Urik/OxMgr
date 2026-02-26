@@ -1,0 +1,60 @@
+version = 1
+
+[defaults]
+restart_policy = "on_failure"
+max_restarts = 10
+stop_timeout_secs = 5
+health_interval_secs = 20
+health_timeout_secs = 4
+health_max_failures = 3
+
+[[apps]]
+name = "api"
+command = "node server.js"
+cwd = "./apps/api"
+instances = 1
+instance_var = "INSTANCE_ID"
+max_memory_mb = 384
+max_cpu_percent = 70.0
+health_cmd = "curl -fsS http://127.0.0.1:3000/health"
+
+[apps.env]
+NODE_ENV = "development"
+PORT = "3000"
+
+[apps.profiles.staging]
+instances = 2
+max_memory_mb = 512
+max_cpu_percent = 75.0
+
+[apps.profiles.staging.env]
+NODE_ENV = "staging"
+PORT = "3100"
+
+[apps.profiles.prod]
+restart_policy = "always"
+instances = 4
+start_delay_secs = 3
+restart_delay_secs = 2
+max_memory_mb = 768
+max_cpu_percent = 85.0
+
+[apps.profiles.prod.env]
+NODE_ENV = "production"
+PORT = "8080"
+
+[[apps]]
+name = "worker"
+command = "python worker.py"
+cwd = "./apps/worker"
+max_memory_mb = 256
+
+[apps.env]
+PYTHONUNBUFFERED = "1"
+
+[apps.profiles.prod]
+instances = 2
+max_memory_mb = 512
+
+[apps.profiles.dev]
+disabled = true

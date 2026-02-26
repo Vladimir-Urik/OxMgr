@@ -1,0 +1,85 @@
+version = 1
+
+[defaults]
+restart_policy = "on_failure"
+max_restarts = 20
+stop_signal = "SIGINT"
+stop_timeout_secs = 10
+namespace = "platform"
+
+[[apps]]
+name = "gateway"
+command = "./target/release/gateway"
+cwd = "./services/gateway"
+start_order = 50
+depends_on = ["auth", "billing", "notifications"]
+health_cmd = "curl -fsS http://127.0.0.1:8080/health"
+max_memory_mb = 1024
+max_cpu_percent = 90.0
+
+[apps.env]
+RUST_LOG = "info"
+HTTP_PORT = "8080"
+
+[[apps]]
+name = "auth"
+command = "./target/release/auth-service"
+cwd = "./services/auth"
+start_order = 10
+depends_on = ["postgres"]
+namespace = "core"
+health_cmd = "curl -fsS http://127.0.0.1:8081/health"
+max_memory_mb = 512
+
+[apps.env]
+HTTP_PORT = "8081"
+DATABASE_URL = "postgres://app:app@127.0.0.1:5432/auth"
+
+[[apps]]
+name = "billing"
+command = "./target/release/billing-service"
+cwd = "./services/billing"
+start_order = 20
+depends_on = ["postgres", "redis"]
+namespace = "core"
+health_cmd = "curl -fsS http://127.0.0.1:8082/health"
+max_memory_mb = 512
+
+[apps.env]
+HTTP_PORT = "8082"
+DATABASE_URL = "postgres://app:app@127.0.0.1:5432/billing"
+
+[[apps]]
+name = "notifications"
+command = "./target/release/notifications"
+cwd = "./services/notifications"
+start_order = 30
+depends_on = ["redis"]
+namespace = "edge"
+instances = 2
+instance_var = "INSTANCE_ID"
+health_cmd = "curl -fsS http://127.0.0.1:8083/health"
+max_memory_mb = 256
+
+[apps.env]
+HTTP_PORT = "8083"
+REDIS_URL = "redis://127.0.0.1:6379"
+
+[[apps]]
+name = "postgres"
+command = "docker compose up postgres"
+start_order = 0
+max_restarts = 5
+
+[[apps]]
+name = "redis"
+command = "docker compose up redis"
+start_order = 1
+max_restarts = 5
+
+[apps.profiles.dev]
+max_memory_mb = 256
+
+[apps.profiles.prod]
+restart_policy = "always"
+max_memory_mb = 128

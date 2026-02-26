@@ -1,0 +1,327 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-artifacts:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --release --target "${{ matrix.target }}"
+
+          BIN_PATH="target/${{ matrix.target }}/release/oxmgr"
+          ASSET="oxmgr-${TAG}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          cp "$BIN_PATH" "$RUNNER_TEMP/oxmgr"
+          tar -czf "$RUNNER_TEMP/$ASSET" -C "$RUNNER_TEMP" oxmgr
+
+          SHA=$(shasum -a 256 "$RUNNER_TEMP/$ASSET" | awk '{print $1}')
+          printf "%s  %s\n" "$SHA" "$ASSET" > "$RUNNER_TEMP/$ASSET.sha256"
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release --target "${{ matrix.target }}"
+
+          $asset = "oxmgr-$env:TAG-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          $binPath = "target/${{ matrix.target }}/release/oxmgr.exe"
+          $stagedExe = Join-Path $env:RUNNER_TEMP "oxmgr.exe"
+          Copy-Item $binPath $stagedExe -Force
+
+          $assetPath = Join-Path $env:RUNNER_TEMP $asset
+          Compress-Archive -Path $stagedExe -DestinationPath $assetPath -Force
+
+          $hash = (Get-FileHash $assetPath -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File -FilePath "$assetPath.sha256" -Encoding utf8NoBOM
+
+      - name: Build Debian package
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEB_ROOT="$RUNNER_TEMP/deb-root"
+          DEB_NAME="oxmgr_${VERSION}_amd64.deb"
+
+          mkdir -p "$DEB_ROOT/DEBIAN" "$DEB_ROOT/usr/bin"
+          install -m 0755 "target/${{ matrix.target }}/release/oxmgr" "$DEB_ROOT/usr/bin/oxmgr"
+
+          cat > "$DEB_ROOT/DEBIAN/control" <<CONTROL
+          Package: oxmgr
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Oxmgr Contributors <maintainers@example.com>
+          Description: Oxmgr lightweight process manager
+          CONTROL
+
+          dpkg-deb --build "$DEB_ROOT" "$RUNNER_TEMP/$DEB_NAME"
+          SHA=$(shasum -a 256 "$RUNNER_TEMP/$DEB_NAME" | awk '{print $1}')
+          printf "%s  %s\n" "$SHA" "$DEB_NAME" > "$RUNNER_TEMP/$DEB_NAME.sha256"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/oxmgr-${{ env.TAG }}-${{ matrix.target }}.${{ matrix.archive_ext }}
+            ${{ runner.temp }}/oxmgr-${{ env.TAG }}-${{ matrix.target }}.${{ matrix.archive_ext }}.sha256
+          if-no-files-found: error
+
+      - name: Upload Debian artifact
+        if: matrix.target == 'x86_64-unknown-linux-gnu' && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-deb
+          path: |
+            ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_amd64.deb
+            ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_amd64.deb.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-artifacts
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Build SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat release-assets/*.sha256 > release-assets/SHA256SUMS
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+
+  publish-npm:
+    name: Publish npm package
+    runs-on: ubuntu-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && secrets.NPM_TOKEN != ''
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          cd packaging/npm
+          npm version "$VERSION" --no-git-tag-version
+          npm pkg set repository.url="https://github.com/${GITHUB_REPOSITORY}.git"
+          npm publish --access public --provenance
+
+  publish-homebrew:
+    name: Update Homebrew Tap
+    runs-on: ubuntu-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_REPO != ''
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Update tap formula
+        shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_REPO: ${{ secrets.HOMEBREW_TAP_REPO }}
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          LINUX_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          MAC_INTEL_ASSET="oxmgr-${TAG}-x86_64-apple-darwin.tar.gz"
+          MAC_ARM_ASSET="oxmgr-${TAG}-aarch64-apple-darwin.tar.gz"
+
+          LINUX_SHA=$(awk '$2=="'"$LINUX_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
+          MAC_INTEL_SHA=$(awk '$2=="'"$MAC_INTEL_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
+          MAC_ARM_SHA=$(awk '$2=="'"$MAC_ARM_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
+
+          LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/${LINUX_ASSET}"
+          MAC_INTEL_URL="https://github.com/${REPO}/releases/download/${TAG}/${MAC_INTEL_ASSET}"
+          MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/${MAC_ARM_ASSET}"
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+
+          ./scripts/generate_homebrew_formula.sh \
+            "$VERSION" \
+            "$REPO" \
+            "$LINUX_URL" "$LINUX_SHA" \
+            "$MAC_INTEL_URL" "$MAC_INTEL_SHA" \
+            "$MAC_ARM_URL" "$MAC_ARM_SHA" \
+            > tap/Formula/oxmgr.rb
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/oxmgr.rb
+          git diff --staged --quiet || git commit -m "oxmgr ${VERSION}"
+          git push
+
+  publish-chocolatey:
+    name: Publish Chocolatey package
+    runs-on: windows-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v') && secrets.CHOCO_API_KEY != ''
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Build and publish package
+        shell: pwsh
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          $tag = "${env:GITHUB_REF_NAME}"
+          $version = $tag.TrimStart('v')
+          $repo = "${env:GITHUB_REPOSITORY}"
+          $asset = "oxmgr-$tag-x86_64-pc-windows-msvc.zip"
+          $url = "https://github.com/$repo/releases/download/$tag/$asset"
+
+          $shaLine = Get-Content "release-assets/$asset.sha256"
+          $sha = ($shaLine -split '\s+')[0]
+
+          New-Item -ItemType Directory -Path choco-build/tools -Force | Out-Null
+
+          $nuspec = Get-Content "packaging/choco/oxmgr.nuspec.template" -Raw
+          $nuspec = $nuspec.Replace('__VERSION__', $version).Replace('__REPO__', $repo)
+          Set-Content "choco-build/oxmgr.nuspec" $nuspec -NoNewline
+
+          $install = Get-Content "packaging/choco/tools/chocolateyinstall.ps1.template" -Raw
+          $install = $install.Replace('__URL__', $url).Replace('__SHA256__', $sha)
+          Set-Content "choco-build/tools/chocolateyinstall.ps1" $install -NoNewline
+
+          Copy-Item "packaging/choco/tools/chocolateyuninstall.ps1" "choco-build/tools/chocolateyuninstall.ps1" -Force
+
+          choco pack "choco-build/oxmgr.nuspec" --outputdirectory "choco-build"
+          $nupkg = Get-ChildItem choco-build -Filter "oxmgr.$version.nupkg" | Select-Object -First 1
+          choco push $nupkg.FullName --api-key "$env:CHOCO_API_KEY" --source "https://push.chocolatey.org/"
+
+  publish-apt:
+    name: Publish APT repository
+    runs-on: ubuntu-latest
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Install apt repo tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Build apt repo content
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          DEB_PATH="release-assets/oxmgr_${VERSION}_amd64.deb"
+
+          ./scripts/build_apt_repo.sh "$DEB_PATH" apt-repo "$VERSION"
+          sed -i "s|REPLACE_ME|${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/apt|g" apt-repo/index.html
+
+      - name: Publish to gh-pages/apt
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apt-repo
+          destination_dir: apt
+          keep_files: true
