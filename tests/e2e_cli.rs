@@ -1,7 +1,8 @@
 use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, ExitStatus, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -12,6 +13,8 @@ struct TestEnv {
     home: PathBuf,
     daemon_addr: String,
 }
+
+static COMMAND_SEQ: AtomicU64 = AtomicU64::new(0);
 
 impl TestEnv {
     fn new(prefix: &str) -> Self {
@@ -37,6 +40,12 @@ impl TestEnv {
 
     fn run(&self, args: &[&str]) -> Output {
         let bin = env!("CARGO_BIN_EXE_oxmgr");
+        let command_id = COMMAND_SEQ.fetch_add(1, Ordering::Relaxed);
+        let stdout_path = self.home.join(format!("cmd-{command_id}.stdout.log"));
+        let stderr_path = self.home.join(format!("cmd-{command_id}.stderr.log"));
+        let stdout_file = fs::File::create(&stdout_path).expect("failed to create stdout capture");
+        let stderr_file = fs::File::create(&stderr_path).expect("failed to create stderr capture");
+
         let mut child = Command::new(bin)
             .args(args)
             .env("OXMGR_HOME", &self.home)
@@ -44,8 +53,8 @@ impl TestEnv {
             .env("OXMGR_LOG_MAX_SIZE_MB", "1")
             .env("OXMGR_LOG_MAX_FILES", "3")
             .env("OXMGR_LOG_MAX_DAYS", "1")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(Stdio::from(stdout_file))
+            .stderr(Stdio::from(stderr_file))
             .spawn()
             .expect("failed to spawn oxmgr command");
 
@@ -54,16 +63,16 @@ impl TestEnv {
         loop {
             match child.try_wait() {
                 Ok(Some(_)) => {
-                    return child
-                        .wait_with_output()
-                        .expect("failed to collect oxmgr command output");
+                    let status = child.wait().expect("failed to wait for oxmgr command");
+                    return read_command_output(status, &stdout_path, &stderr_path);
                 }
                 Ok(None) => {
                     if Instant::now() >= deadline {
                         let _ = child.kill();
-                        let output = child
-                            .wait_with_output()
-                            .expect("failed to collect timed out oxmgr command output");
+                        let status = child
+                            .wait()
+                            .expect("failed to wait for timed out oxmgr command");
+                        let output = read_command_output(status, &stdout_path, &stderr_path);
                         panic!(
                             "oxmgr command timed out after {:?}: {:?}\nstdout:\n{}\nstderr:\n{}",
                             timeout,
@@ -93,6 +102,19 @@ impl TestEnv {
         }
         fs::write(&path, contents).expect("failed to write fixture file");
         path
+    }
+}
+
+fn read_command_output(status: ExitStatus, stdout_path: &Path, stderr_path: &Path) -> Output {
+    let stdout = fs::read(stdout_path).expect("failed to read captured stdout");
+    let stderr = fs::read(stderr_path).expect("failed to read captured stderr");
+    let _ = fs::remove_file(stdout_path);
+    let _ = fs::remove_file(stderr_path);
+
+    Output {
+        status,
+        stdout,
+        stderr,
     }
 }
 
