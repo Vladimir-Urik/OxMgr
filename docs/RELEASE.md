@@ -11,6 +11,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+Release publish jobs execute only for the canonical repository:
+
+- `Vladimir-Urik/OxMgr`
+
 ## What happens
 
 - Build release binaries for:
@@ -46,6 +50,10 @@ git push origin v0.1.0
 
 - `CHOCO_API_KEY`
 
+### For APT publish (unsigned metadata)
+
+- no extra secret required (publishes repo files to `gh-pages/apt`)
+
 ### Optional release signing
 
 - `RELEASE_GPG_PRIVATE_KEY`: base64-encoded armored private key
@@ -55,6 +63,11 @@ git push origin v0.1.0
 
 - `APT_GPG_PRIVATE_KEY`: base64-encoded armored private key
 - `APT_GPG_PASSPHRASE`
+
+When `APT_GPG_*` secrets are set, workflow also publishes:
+
+- `apt/keyrings/oxmgr-archive-keyring.asc`
+- `apt/keyrings/oxmgr-archive-keyring.gpg`
 
 ## Optional notes
 

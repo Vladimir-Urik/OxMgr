@@ -78,6 +78,8 @@ sudo apt update
 sudo apt install oxmgr
 ```
 
+Signed-key setup (recommended when signing is enabled) is documented in [docs/install.md](./docs/install.md).
+
 ### Build from source
 
 ```bash

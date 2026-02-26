@@ -949,6 +949,18 @@ async fn follow_file(path: PathBuf, label: &'static str) -> Result<()> {
             for line in text.lines() {
                 println!("[{label}] {line}");
             }
+        } else {
+            let current_pos = file.seek(std::io::SeekFrom::Current(0)).await?;
+            if let Ok(meta) = tokio::fs::metadata(&path).await {
+                if meta.len() < current_pos {
+                    // Log was rotated/truncated; reopen the active path.
+                    file = tokio::fs::OpenOptions::new()
+                        .read(true)
+                        .open(&path)
+                        .await
+                        .with_context(|| format!("failed to reopen {}", path.display()))?;
+                }
+            }
         }
         sleep(Duration::from_millis(300)).await;
     }
@@ -981,7 +993,10 @@ fn print_startup_instructions(system: InitSystem, config: &AppConfig) -> Result<
             println!();
             println!("[Service]");
             println!("Type=simple");
-            println!("ExecStart={} daemon run", executable.display());
+            println!(
+                "ExecStart={} daemon run",
+                escape_systemd_exec_arg(&executable)
+            );
             println!("Restart=always");
             println!("RestartSec=2");
             println!();
@@ -1262,10 +1277,22 @@ fn status_windows_task_service() -> Result<()> {
 }
 
 fn render_systemd_service(executable: &Path) -> String {
+    let escaped_exec = escape_systemd_exec_arg(executable);
     format!(
         "[Unit]\nDescription=Oxmgr daemon\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={} daemon run\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n",
-        executable.display()
+        escaped_exec
     )
+}
+
+fn escape_systemd_exec_arg(path: &Path) -> String {
+    let mut escaped = String::new();
+    for ch in path.display().to_string().chars() {
+        if matches!(ch, '\\' | ' ' | '\t' | '\n' | '"' | '\'') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 
 fn render_launchd_plist(executable: &Path, config: &AppConfig) -> String {
@@ -1524,6 +1551,12 @@ mod tests {
         let service = render_systemd_service(Path::new("/usr/local/bin/oxmgr"));
         assert!(service.contains("ExecStart=/usr/local/bin/oxmgr daemon run"));
         assert!(service.contains("[Service]"));
+    }
+
+    #[test]
+    fn render_systemd_service_escapes_spaces_in_execstart() {
+        let service = render_systemd_service(Path::new("/opt/ox mgr/bin/oxmgr"));
+        assert!(service.contains("ExecStart=/opt/ox\\ mgr/bin/oxmgr daemon run"));
     }
 
     #[test]

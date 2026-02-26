@@ -247,6 +247,14 @@ impl ProcessManager {
     }
 
     pub async fn restart_process(&mut self, target: &str) -> Result<ManagedProcess> {
+        self.restart_process_internal(target, true).await
+    }
+
+    async fn restart_process_internal(
+        &mut self,
+        target: &str,
+        reset_restart_count: bool,
+    ) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
 
         let existing = self
@@ -265,7 +273,9 @@ impl ProcessManager {
                 .processes
                 .get_mut(&name)
                 .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
-            process.restart_count = 0;
+            if reset_restart_count {
+                process.restart_count = 0;
+            }
             process.restart_backoff_attempt = 0;
             process.last_exit_code = None;
             process.desired_state = DesiredState::Running;
@@ -698,7 +708,7 @@ impl ProcessManager {
                 name, memory_exceeded, cpu_exceeded
             );
 
-            match self.restart_process(&name).await {
+            match self.restart_process_internal(&name, false).await {
                 Ok(_) => {
                     if let Some(process) = self.processes.get_mut(&name) {
                         process.restart_count = snapshot.restart_count.saturating_add(1);
@@ -795,11 +805,33 @@ impl ProcessManager {
             }
 
             if should_restart {
+                if snapshot.restart_count >= snapshot.max_restarts {
+                    warn!(
+                        "health checks failed for process {} and max_restarts reached; stopping process",
+                        name
+                    );
+                    if let Some(pid) = snapshot.pid {
+                        let timeout = Duration::from_secs(snapshot.stop_timeout_secs.max(1));
+                        let _ = terminate_pid(pid, snapshot.stop_signal.as_deref(), timeout).await;
+                    }
+                    if let Some(process) = self.processes.get_mut(&name) {
+                        process.pid = None;
+                        process.desired_state = DesiredState::Stopped;
+                        process.status = ProcessStatus::Errored;
+                        process.cpu_percent = 0.0;
+                        process.memory_bytes = 0;
+                        process.last_health_error =
+                            Some("health checks failed and max_restarts reached".to_string());
+                    }
+                    should_save = true;
+                    continue;
+                }
+
                 warn!(
                     "health checks failed for process {} repeatedly; restarting process",
                     name
                 );
-                if let Err(err) = self.restart_process(&name).await {
+                if let Err(err) = self.restart_process_internal(&name, false).await {
                     error!("health-check restart failed for process {}: {}", name, err);
                     if let Some(process) = self.processes.get_mut(&name) {
                         process.status = ProcessStatus::Errored;
@@ -807,6 +839,8 @@ impl ProcessManager {
                             Some(format!("health restart failed after max failures: {err}"));
                     }
                     should_save = true;
+                } else if let Some(process) = self.processes.get_mut(&name) {
+                    process.restart_count = snapshot.restart_count.saturating_add(1);
                 }
             }
         }

@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-artifacts:
     name: Build (${{ matrix.target }})
@@ -183,7 +187,7 @@ jobs:
     name: Publish npm package
     runs-on: ubuntu-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && secrets.NPM_TOKEN != ''
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr' && secrets.NPM_TOKEN != ''
     permissions:
       contents: read
       id-token: write
@@ -207,14 +211,16 @@ jobs:
 
           cd packaging/npm
           npm version "$VERSION" --no-git-tag-version
-          npm pkg set repository.url="https://github.com/${GITHUB_REPOSITORY}.git"
+          npm pkg set repository.url="https://github.com/Vladimir-Urik/OxMgr.git"
+          npm pkg set bugs.url="https://github.com/Vladimir-Urik/OxMgr/issues"
+          npm pkg set homepage="https://github.com/Vladimir-Urik/OxMgr"
           npm publish --access public --provenance
 
   publish-homebrew:
     name: Update Homebrew Tap
     runs-on: ubuntu-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_REPO != ''
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr' && secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_REPO != ''
     permissions:
       contents: read
     steps:
@@ -273,7 +279,7 @@ jobs:
     name: Publish Chocolatey package
     runs-on: windows-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && secrets.CHOCO_API_KEY != ''
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr' && secrets.CHOCO_API_KEY != ''
     permissions:
       contents: read
     steps:
@@ -320,7 +326,7 @@ jobs:
     name: Publish APT repository
     runs-on: ubuntu-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr'
     permissions:
       contents: write
     steps:
@@ -377,6 +383,10 @@ jobs:
             --clearsign \
             --output "apt-repo/dists/stable/InRelease" \
             "$RELEASE_FILE"
+
+          mkdir -p apt-repo/keyrings
+          gpg --batch --yes --armor --export > apt-repo/keyrings/oxmgr-archive-keyring.asc
+          gpg --batch --yes --export > apt-repo/keyrings/oxmgr-archive-keyring.gpg
 
       - name: Publish to gh-pages/apt
         uses: peaceiris/actions-gh-pages@v4

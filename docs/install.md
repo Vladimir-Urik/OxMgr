@@ -45,7 +45,17 @@ sudo apt update
 sudo apt install oxmgr
 ```
 
-If signed APT metadata is enabled for your release pipeline, prefer standard key-based setup.
+Signed repository (recommended, if APT signing is enabled in release workflow):
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://vladimir-urik.github.io/OxMgr/apt/keyrings/oxmgr-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/oxmgr-archive-keyring.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/oxmgr-archive-keyring.gpg] https://vladimir-urik.github.io/OxMgr/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/oxmgr.list
+sudo apt update
+sudo apt install oxmgr
+```
 
 ## Install From Source
 
