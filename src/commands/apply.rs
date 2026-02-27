@@ -25,6 +25,8 @@ struct DesiredProcessSpec {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    cluster_mode: bool,
+    cluster_instances: Option<u32>,
     namespace: Option<String>,
     resource_limits: Option<ResourceLimits>,
 }
@@ -206,6 +208,8 @@ fn expand_specs_for_apply(
                 stop_timeout_secs: spec.stop_timeout_secs.max(1),
                 restart_delay_secs: spec.restart_delay_secs,
                 start_delay_secs: spec.start_delay_secs,
+                cluster_mode: spec.cluster_mode,
+                cluster_instances: spec.cluster_instances,
                 namespace: spec.namespace.clone(),
                 resource_limits: spec.resource_limits.clone(),
             });
@@ -279,6 +283,8 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.stop_timeout_secs == desired.stop_timeout_secs
         && existing.restart_delay_secs == desired.restart_delay_secs
         && existing.start_delay_secs == desired.start_delay_secs
+        && existing.cluster_mode == desired.cluster_mode
+        && existing.cluster_instances == desired.cluster_instances
         && existing.namespace == desired.namespace
         && existing.resource_limits == desired.resource_limits
 }
@@ -307,6 +313,9 @@ fn start_request_from_spec(spec: DesiredProcessSpec) -> IpcRequest {
             stop_timeout_secs: spec.stop_timeout_secs.max(1),
             restart_delay_secs: spec.restart_delay_secs,
             start_delay_secs: spec.start_delay_secs,
+            watch: false,
+            cluster_mode: spec.cluster_mode,
+            cluster_instances: spec.cluster_instances,
             namespace: spec.namespace,
             resource_limits: spec.resource_limits,
         }),
@@ -387,6 +396,8 @@ mod tests {
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
             start_delay_secs: 0,
+            cluster_mode: false,
+            cluster_instances: None,
             namespace: Some("default".to_string()),
             resource_limits: None,
         }
@@ -420,6 +431,9 @@ mod tests {
             restart_backoff_reset_secs: 60,
             restart_backoff_attempt: 0,
             start_delay_secs: desired.start_delay_secs,
+            watch: false,
+            cluster_mode: desired.cluster_mode,
+            cluster_instances: desired.cluster_instances,
             resource_limits: desired.resource_limits.clone(),
             cgroup_path: None,
             pid,

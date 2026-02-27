@@ -81,6 +81,7 @@ fn validate_resolved_specs(specs: &[EcosystemProcessSpec]) -> Result<OxfileValid
         if tokens.is_empty() {
             anyhow::bail!("app command cannot be empty");
         }
+        validate_cluster_settings(spec, &tokens)?;
 
         if let Some(check) = &spec.health_check {
             let health_tokens = shell_words::split(&check.command)
@@ -141,6 +142,52 @@ fn validate_resolved_specs(specs: &[EcosystemProcessSpec]) -> Result<OxfileValid
         expanded_process_count,
         unnamed_count,
     })
+}
+
+fn validate_cluster_settings(spec: &EcosystemProcessSpec, command_tokens: &[String]) -> Result<()> {
+    if !spec.cluster_mode {
+        if spec.cluster_instances.is_some() {
+            anyhow::bail!(
+                "app {:?} sets cluster_instances but cluster_mode is disabled",
+                spec.name
+            );
+        }
+        return Ok(());
+    }
+
+    if !is_node_command_token(&command_tokens[0]) {
+        anyhow::bail!(
+            "app {:?} enables cluster_mode but command is not Node.js: {}",
+            spec.name,
+            command_tokens[0]
+        );
+    }
+    if command_tokens.len() < 2 {
+        anyhow::bail!(
+            "app {:?} enables cluster_mode but command has no script argument",
+            spec.name
+        );
+    }
+    if command_tokens[1].starts_with('-') {
+        anyhow::bail!(
+            "app {:?} enables cluster_mode with unsupported Node flags before script path",
+            spec.name
+        );
+    }
+
+    Ok(())
+}
+
+fn is_node_command_token(token: &str) -> bool {
+    let executable = std::path::Path::new(token)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(token)
+        .to_ascii_lowercase();
+    matches!(
+        executable.as_str(),
+        "node" | "node.exe" | "nodejs" | "nodejs.exe"
+    )
 }
 
 #[cfg(test)]
@@ -227,6 +274,36 @@ mod tests {
     }
 
     #[test]
+    fn validate_resolved_specs_rejects_cluster_mode_for_non_node_command() {
+        let mut spec = fixture_spec("api", "python app.py", vec![], 1);
+        spec.cluster_mode = true;
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("cluster_mode but command is not Node.js"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_cluster_instances_without_cluster_mode() {
+        let mut spec = fixture_spec("api", "node app.js", vec![], 1);
+        spec.cluster_instances = Some(2);
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("cluster_instances but cluster_mode is disabled"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
     fn validate_resolved_specs_rejects_duplicate_expanded_names() {
         let specs = vec![
             fixture_spec("api", "node server.js", vec![], 2),
@@ -257,6 +334,8 @@ mod tests {
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
             start_delay_secs: 0,
+            cluster_mode: false,
+            cluster_instances: None,
             namespace: None,
             resource_limits: None,
             start_order: 0,
@@ -308,6 +387,8 @@ mod tests {
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
             start_delay_secs: 0,
+            cluster_mode: false,
+            cluster_instances: None,
             namespace: None,
             resource_limits: None,
             start_order: 0,

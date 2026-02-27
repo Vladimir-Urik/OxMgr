@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -25,6 +26,7 @@ use crate::storage::{load_state, save_state, PersistedState};
 pub struct ProcessManager {
     config: AppConfig,
     processes: HashMap<String, ManagedProcess>,
+    watch_fingerprints: HashMap<String, u64>,
     next_id: u64,
     exit_tx: UnboundedSender<ProcessExitEvent>,
     system: System,
@@ -60,6 +62,7 @@ impl ProcessManager {
         Ok(Self {
             config,
             processes,
+            watch_fingerprints: HashMap::new(),
             next_id,
             exit_tx,
             system: System::new_all(),
@@ -108,6 +111,7 @@ impl ProcessManager {
                 .as_ref()
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
         }
+        self.watch_fingerprints.clear();
         self.save()?;
 
         for name in should_start {
@@ -125,6 +129,7 @@ impl ProcessManager {
     pub async fn run_periodic_tasks(&mut self) -> Result<()> {
         self.refresh_resource_metrics();
         self.run_resource_limit_checks().await?;
+        self.run_watch_checks().await?;
         self.run_health_checks().await
     }
 
@@ -141,6 +146,9 @@ impl ProcessManager {
             stop_timeout_secs,
             restart_delay_secs,
             start_delay_secs,
+            watch,
+            cluster_mode,
+            cluster_instances,
             namespace,
             resource_limits,
         } = spec;
@@ -180,6 +188,9 @@ impl ProcessManager {
             restart_backoff_reset_secs: 60,
             restart_backoff_attempt: 0,
             start_delay_secs,
+            watch,
+            cluster_mode,
+            cluster_instances: normalize_cluster_instances(cluster_instances),
             resource_limits,
             cgroup_path: None,
             pid: None,
@@ -220,6 +231,7 @@ impl ProcessManager {
         );
 
         self.processes.insert(process.name.clone(), process.clone());
+        self.update_watch_fingerprint(&process);
         self.save()?;
         Ok(process)
     }
@@ -248,6 +260,7 @@ impl ProcessManager {
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
 
+        self.watch_fingerprints.remove(&name);
         self.processes.insert(name, process.clone());
         self.save()?;
         Ok(process)
@@ -288,6 +301,7 @@ impl ProcessManager {
             process.desired_state = DesiredState::Running;
             process.status = ProcessStatus::Restarting;
             process.pid = None;
+            self.watch_fingerprints.remove(&name);
             cleanup_process_cgroup(process);
             process.health_status = HealthStatus::Unknown;
             process.health_failures = 0;
@@ -330,6 +344,7 @@ impl ProcessManager {
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
 
         self.processes.insert(name.clone(), replacement.clone());
+        self.update_watch_fingerprint(&replacement);
         self.save()?;
 
         let timeout = Duration::from_secs(existing.stop_timeout_secs.max(1));
@@ -367,6 +382,7 @@ impl ProcessManager {
             .processes
             .remove(&name)
             .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
+        self.watch_fingerprints.remove(&name);
         self.save()?;
         Ok(removed)
     }
@@ -407,6 +423,7 @@ impl ProcessManager {
         }
 
         process.pid = None;
+        self.watch_fingerprints.remove(&process.name);
         cleanup_process_cgroup(&mut process);
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
@@ -489,6 +506,7 @@ impl ProcessManager {
                 process.next_health_check = None;
                 process.cpu_percent = 0.0;
                 process.memory_bytes = 0;
+                self.watch_fingerprints.remove(&name);
                 self.processes.insert(name, process);
             }
         }
@@ -513,6 +531,7 @@ impl ProcessManager {
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
 
         self.processes.insert(name.to_string(), process.clone());
+        self.update_watch_fingerprint(&process);
         self.save()?;
         Ok(process)
     }
@@ -523,8 +542,9 @@ impl ProcessManager {
             stderr: process.stderr_log.clone(),
         };
         let (stdout, stderr) = open_log_writers(&logs, self.config.log_rotation)?;
+        let spawn = resolve_spawn_program(process, &self.config.base_dir)?;
 
-        let mut command = Command::new(&process.command);
+        let mut command = Command::new(&spawn.program);
         #[cfg(unix)]
         {
             // Put managed children in their own process group so shutdown/restart can target the full tree.
@@ -539,7 +559,7 @@ impl ProcessManager {
             }
         }
         command
-            .args(&process.args)
+            .args(&spawn.args)
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
@@ -549,6 +569,9 @@ impl ProcessManager {
         }
         if !process.env.is_empty() {
             command.envs(&process.env);
+        }
+        if !spawn.extra_env.is_empty() {
+            command.envs(&spawn.extra_env);
         }
         if process
             .resource_limits
@@ -615,6 +638,34 @@ impl ProcessManager {
         });
 
         Ok(pid)
+    }
+
+    fn update_watch_fingerprint(&mut self, process: &ManagedProcess) {
+        if !process.watch || process.status != ProcessStatus::Running {
+            self.watch_fingerprints.remove(&process.name);
+            return;
+        }
+
+        let Some(cwd) = process.cwd.as_ref() else {
+            self.watch_fingerprints.remove(&process.name);
+            return;
+        };
+
+        match watch_fingerprint_for_dir(cwd) {
+            Ok(fingerprint) => {
+                self.watch_fingerprints
+                    .insert(process.name.clone(), fingerprint);
+            }
+            Err(err) => {
+                warn!(
+                    "failed to initialize watch fingerprint for process {} in {}: {}",
+                    process.name,
+                    cwd.display(),
+                    err
+                );
+                self.watch_fingerprints.remove(&process.name);
+            }
+        }
     }
 
     fn save(&self) -> Result<()> {
@@ -805,6 +856,79 @@ impl ProcessManager {
         Ok(())
     }
 
+    async fn run_watch_checks(&mut self) -> Result<()> {
+        let candidates: Vec<String> = self
+            .processes
+            .values()
+            .filter(|process| {
+                process.watch
+                    && process.status == ProcessStatus::Running
+                    && process.pid.is_some()
+                    && process.cwd.is_some()
+            })
+            .map(|process| process.name.clone())
+            .collect();
+
+        for name in candidates {
+            let Some(snapshot) = self.processes.get(&name).cloned() else {
+                continue;
+            };
+            let Some(cwd) = snapshot.cwd.as_ref() else {
+                continue;
+            };
+
+            let current_fingerprint = match watch_fingerprint_for_dir(cwd) {
+                Ok(value) => value,
+                Err(err) => {
+                    warn!(
+                        "watch scan failed for process {} in {}: {}",
+                        name,
+                        cwd.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            let Some(previous_fingerprint) = self.watch_fingerprints.get(&name).copied() else {
+                self.watch_fingerprints
+                    .insert(name.clone(), current_fingerprint);
+                continue;
+            };
+
+            if previous_fingerprint == current_fingerprint {
+                continue;
+            }
+
+            warn!(
+                "filesystem change detected for process {}; triggering restart",
+                name
+            );
+
+            match self.restart_process_internal(&name, false).await {
+                Ok(_) => {
+                    if let Some(process) = self.processes.get_mut(&name) {
+                        process.restart_count = snapshot.restart_count.saturating_add(1);
+                        process.last_health_error = Some("watch-triggered restart".to_string());
+                    }
+                    self.watch_fingerprints
+                        .insert(name.clone(), current_fingerprint);
+                    self.save()?;
+                }
+                Err(err) => {
+                    error!("watch restart failed for process {}: {}", name, err);
+                    if let Some(process) = self.processes.get_mut(&name) {
+                        process.status = ProcessStatus::Errored;
+                        process.last_health_error = Some(format!("watch restart failed: {err}"));
+                    }
+                    self.save()?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn run_health_checks(&mut self) -> Result<()> {
         let now = now_epoch_secs();
         let due_names: Vec<String> = self
@@ -960,6 +1084,91 @@ fn parse_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
     Ok((command, args))
 }
 
+#[derive(Debug, Clone)]
+struct SpawnProgram {
+    program: String,
+    args: Vec<String>,
+    extra_env: HashMap<String, String>,
+}
+
+fn resolve_spawn_program(process: &ManagedProcess, base_dir: &Path) -> Result<SpawnProgram> {
+    if !process.cluster_mode {
+        return Ok(SpawnProgram {
+            program: process.command.clone(),
+            args: process.args.clone(),
+            extra_env: HashMap::new(),
+        });
+    }
+
+    if !is_node_binary(&process.command) {
+        anyhow::bail!("cluster mode requires a Node.js command (expected `node <script> ...`)");
+    }
+    let Some(script) = process.args.first() else {
+        anyhow::bail!("cluster mode requires a script argument (expected `node <script> ...`)");
+    };
+    if script.starts_with('-') {
+        anyhow::bail!(
+            "cluster mode currently does not support Node runtime flags before script path"
+        );
+    }
+
+    let bootstrap = ensure_node_cluster_bootstrap(base_dir)?;
+    let mut args = Vec::with_capacity(process.args.len() + 2);
+    args.push(bootstrap.display().to_string());
+    args.push("--".to_string());
+    args.extend(process.args.clone());
+
+    let mut extra_env = HashMap::new();
+    extra_env.insert(
+        "OXMGR_CLUSTER_INSTANCES".to_string(),
+        process
+            .cluster_instances
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "auto".to_string()),
+    );
+
+    Ok(SpawnProgram {
+        program: process.command.clone(),
+        args,
+        extra_env,
+    })
+}
+
+fn ensure_node_cluster_bootstrap(base_dir: &Path) -> Result<PathBuf> {
+    let runtime_dir = base_dir.join("runtime");
+    fs::create_dir_all(&runtime_dir).with_context(|| {
+        format!(
+            "failed to create runtime directory {}",
+            runtime_dir.display()
+        )
+    })?;
+
+    let bootstrap_path = runtime_dir.join("node_cluster_bootstrap.cjs");
+    fs::write(&bootstrap_path, NODE_CLUSTER_BOOTSTRAP).with_context(|| {
+        format!(
+            "failed to write node cluster bootstrap at {}",
+            bootstrap_path.display()
+        )
+    })?;
+    Ok(bootstrap_path)
+}
+
+fn normalize_cluster_instances(value: Option<u32>) -> Option<u32> {
+    value.filter(|instances| *instances > 0)
+}
+
+fn is_node_binary(command: &str) -> bool {
+    let executable = Path::new(command)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(command)
+        .to_ascii_lowercase();
+    matches!(
+        executable.as_str(),
+        "node" | "node.exe" | "nodejs" | "nodejs.exe"
+    )
+}
+
 fn validate_process_name(name: &str) -> Result<()> {
     if name.is_empty() {
         return Err(OxmgrError::InvalidProcessName("name cannot be empty".to_string()).into());
@@ -994,6 +1203,151 @@ fn sanitize_name(input: &str) -> String {
         trimmed.to_ascii_lowercase()
     }
 }
+
+fn watch_fingerprint_for_dir(root: &Path) -> Result<u64> {
+    if !root.exists() {
+        anyhow::bail!("watch path does not exist: {}", root.display());
+    }
+
+    let mut hash = 1469598103934665603_u64;
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let mut children: Vec<PathBuf> = fs::read_dir(&dir)
+            .with_context(|| format!("failed to read watch directory {}", dir.display()))?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect();
+        children.sort();
+
+        for child in children {
+            let relative = child
+                .strip_prefix(root)
+                .unwrap_or(child.as_path())
+                .to_string_lossy();
+            hash_bytes(&mut hash, relative.as_bytes());
+
+            let metadata = fs::symlink_metadata(&child)
+                .with_context(|| format!("failed to read metadata for {}", child.display()))?;
+            let file_type_tag = if metadata.file_type().is_dir() {
+                1_u64
+            } else if metadata.file_type().is_symlink() {
+                2_u64
+            } else {
+                3_u64
+            };
+            hash_u64(&mut hash, file_type_tag);
+            hash_u64(&mut hash, metadata.len());
+            hash_u64(
+                &mut hash,
+                metadata
+                    .modified()
+                    .ok()
+                    .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                    .map(|value| value.as_secs())
+                    .unwrap_or(0),
+            );
+            hash_u64(
+                &mut hash,
+                metadata
+                    .modified()
+                    .ok()
+                    .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                    .map(|value| value.subsec_nanos() as u64)
+                    .unwrap_or(0),
+            );
+
+            if metadata.file_type().is_dir() {
+                stack.push(child);
+            }
+        }
+    }
+
+    Ok(hash)
+}
+
+fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= *byte as u64;
+        *hash = hash.wrapping_mul(1099511628211);
+    }
+}
+
+fn hash_u64(hash: &mut u64, value: u64) {
+    hash_bytes(hash, &value.to_le_bytes());
+}
+
+const NODE_CLUSTER_BOOTSTRAP: &str = r#""use strict";
+const cluster = require("node:cluster");
+const os = require("node:os");
+const path = require("node:path");
+const process = require("node:process");
+
+function parseDesiredInstances(raw) {
+  if (!raw || raw === "auto") return 0;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed;
+}
+
+function cpuCount() {
+  if (typeof os.availableParallelism === "function") {
+    const value = os.availableParallelism();
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  const cpus = os.cpus();
+  return Array.isArray(cpus) && cpus.length > 0 ? cpus.length : 1;
+}
+
+const argv = process.argv.slice(2);
+if (argv[0] === "--") argv.shift();
+const script = argv.shift();
+
+if (!script) {
+  console.error("[oxmgr] cluster mode needs a script argument (expected: node <script> ...)");
+  process.exit(2);
+}
+
+const desired = parseDesiredInstances(process.env.OXMGR_CLUSTER_INSTANCES || "");
+const workerCount = desired > 0 ? desired : cpuCount();
+
+cluster.setupPrimary({
+  exec: path.resolve(script),
+  args: argv
+});
+
+let shuttingDown = false;
+let nextInstance = 0;
+
+function forkWorker() {
+  const env = { NODE_APP_INSTANCE: String(nextInstance) };
+  nextInstance += 1;
+  return cluster.fork(env);
+}
+
+for (let idx = 0; idx < workerCount; idx += 1) {
+  forkWorker();
+}
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const workers = Object.values(cluster.workers).filter(Boolean);
+  for (const worker of workers) {
+    worker.process.kill(signal);
+  }
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+cluster.on("exit", (worker) => {
+  if (shuttingDown) return;
+  if (worker.exitedAfterDisconnect) return;
+  forkWorker();
+});
+"#;
 
 fn now_epoch_secs() -> u64 {
     SystemTime::now()
@@ -1221,11 +1575,15 @@ fn cleanup_process_cgroup(process: &mut ManagedProcess) {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[cfg(unix)]
+    use super::graceful_wait_before_force_kill;
     use super::{
-        compute_restart_delay_secs, graceful_wait_before_force_kill, maybe_reset_backoff_attempt,
-        now_epoch_secs,
+        compute_restart_delay_secs, maybe_reset_backoff_attempt, now_epoch_secs,
+        resolve_spawn_program, watch_fingerprint_for_dir,
     };
     use crate::process::{
         DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
@@ -1310,6 +1668,90 @@ mod tests {
         assert_eq!(grace, timeout);
     }
 
+    #[test]
+    fn watch_fingerprint_changes_when_file_changes() {
+        let dir = temp_watch_dir("watch-change");
+        fs::create_dir_all(&dir).expect("failed to create watch directory");
+        let file = dir.join("app.js");
+        fs::write(&file, "console.log('a');").expect("failed writing seed file");
+
+        let before = watch_fingerprint_for_dir(&dir).expect("failed to compute first fingerprint");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        fs::write(&file, "console.log('b');").expect("failed rewriting watched file");
+        let after = watch_fingerprint_for_dir(&dir).expect("failed to compute second fingerprint");
+
+        assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watch_fingerprint_changes_when_new_file_is_added() {
+        let dir = temp_watch_dir("watch-add");
+        fs::create_dir_all(dir.join("nested")).expect("failed to create nested watch directory");
+        fs::write(dir.join("nested/one.txt"), "1").expect("failed writing initial file");
+
+        let before = watch_fingerprint_for_dir(&dir).expect("failed to compute first fingerprint");
+        fs::write(dir.join("nested/two.txt"), "2").expect("failed writing new watched file");
+        let after = watch_fingerprint_for_dir(&dir).expect("failed to compute second fingerprint");
+
+        assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_spawn_program_passthrough_when_cluster_disabled() {
+        let process = fixture_process();
+        let tmp = std::env::temp_dir();
+        let spawn =
+            resolve_spawn_program(&process, &tmp).expect("expected passthrough spawn program");
+        assert_eq!(spawn.program, "node");
+        assert_eq!(spawn.args, vec!["server.js".to_string()]);
+        assert!(spawn.extra_env.is_empty());
+    }
+
+    #[test]
+    fn resolve_spawn_program_rejects_non_node_cluster_mode() {
+        let mut process = fixture_process();
+        process.command = "python".to_string();
+        process.cluster_mode = true;
+        process.cluster_instances = Some(4);
+
+        let tmp = std::env::temp_dir();
+        let err = resolve_spawn_program(&process, &tmp)
+            .expect_err("expected non-node command to fail for cluster mode");
+        assert!(
+            err.to_string().contains("requires a Node.js command"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_spawn_program_builds_bootstrap_for_cluster_mode() {
+        let runtime = temp_watch_dir("cluster-runtime");
+        let mut process = fixture_process();
+        process.cluster_mode = true;
+        process.cluster_instances = Some(3);
+
+        let spawn = resolve_spawn_program(&process, &runtime)
+            .expect("expected cluster spawn command to be generated");
+        assert_eq!(spawn.program, "node");
+        assert_eq!(spawn.args[1], "--");
+        assert_eq!(spawn.args[2], "server.js");
+        assert_eq!(
+            spawn
+                .extra_env
+                .get("OXMGR_CLUSTER_INSTANCES")
+                .map(String::as_str),
+            Some("3")
+        );
+        assert!(
+            Path::new(&spawn.args[0]).exists(),
+            "expected bootstrap script to be written"
+        );
+
+        let _ = fs::remove_dir_all(&runtime);
+    }
+
     fn fixture_process() -> ManagedProcess {
         ManagedProcess {
             id: 1,
@@ -1329,6 +1771,9 @@ mod tests {
             restart_backoff_reset_secs: 60,
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
             resource_limits: None,
             cgroup_path: None,
             pid: Some(1234),
@@ -1349,5 +1794,13 @@ mod tests {
             last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
         }
+    }
+
+    fn temp_watch_dir(prefix: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        std::env::temp_dir().join(format!("oxmgr-{prefix}-{nonce}"))
     }
 }

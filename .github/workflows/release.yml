@@ -332,7 +332,21 @@ jobs:
           if (-not $nupkg) {
             throw "Failed to create Chocolatey package oxmgr.$version.nupkg"
           }
-          choco push $nupkg.FullName --api-key "$env:CHOCO_API_KEY" --source "https://push.chocolatey.org/"
+
+          $pushOutput = choco push $nupkg.FullName --api-key "$env:CHOCO_API_KEY" --source "https://push.chocolatey.org/" 2>&1
+          $pushExitCode = $LASTEXITCODE
+          $pushText = ($pushOutput | Out-String)
+          Write-Output $pushText
+
+          if ($pushExitCode -ne 0) {
+            if ($pushText -match "previous version in a submitted state") {
+              Write-Warning "Chocolatey package is pending moderation from a previous submission. Keeping workflow green."
+              Write-Warning "Review queue: https://community.chocolatey.org/packages/oxmgr"
+              $global:LASTEXITCODE = 0
+            } else {
+              throw "Chocolatey push failed (exit $pushExitCode):`n$pushText"
+            }
+          }
 
   publish-apt:
     name: Publish APT repository

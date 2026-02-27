@@ -5,6 +5,9 @@ Project docs live here.
 ## Guides
 
 - [Installation Guide](./install.md)
+- [CLI Reference](./CLI.md)
+- [Deployment Guide](./DEPLOY.md)
+- [Service Bundles](./BUNDLES.md)
 - [Oxfile Documentation](./OXFILE.md)
 - [Release Automation](./RELEASE.md)
 

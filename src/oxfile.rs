@@ -44,6 +44,8 @@ struct OxDefaults {
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
     start_delay_secs: Option<u64>,
+    cluster_mode: Option<bool>,
+    cluster_instances: Option<u32>,
     namespace: Option<String>,
     start_order: Option<i32>,
     depends_on: Option<Vec<String>>,
@@ -71,6 +73,8 @@ struct OxApp {
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
     start_delay_secs: Option<u64>,
+    cluster_mode: Option<bool>,
+    cluster_instances: Option<u32>,
     namespace: Option<String>,
     start_order: Option<i32>,
     depends_on: Option<Vec<String>>,
@@ -98,6 +102,8 @@ struct OxProfile {
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
     start_delay_secs: Option<u64>,
+    cluster_mode: Option<bool>,
+    cluster_instances: Option<u32>,
     namespace: Option<String>,
     start_order: Option<i32>,
     depends_on: Option<Vec<String>>,
@@ -124,6 +130,8 @@ struct Resolved {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    cluster_mode: bool,
+    cluster_instances: Option<u32>,
     namespace: Option<String>,
     start_order: i32,
     depends_on: Vec<String>,
@@ -156,6 +164,10 @@ struct OxAppOut {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    #[serde(skip_serializing_if = "is_false", default)]
+    cluster_mode: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cluster_instances: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
     start_order: i32,
@@ -213,6 +225,8 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             stop_timeout_secs: resolved.stop_timeout_secs,
             restart_delay_secs: resolved.restart_delay_secs,
             start_delay_secs: resolved.start_delay_secs,
+            cluster_mode: resolved.cluster_mode,
+            cluster_instances: resolved.cluster_instances,
             namespace: resolved.namespace,
             resource_limits: resolved.resource_limits,
             start_order: resolved.start_order,
@@ -258,6 +272,10 @@ fn resolve_app(
             .start_delay_secs
             .or(defaults.start_delay_secs)
             .unwrap_or(0),
+        cluster_mode: app.cluster_mode.or(defaults.cluster_mode).unwrap_or(false),
+        cluster_instances: normalize_cluster_instances(
+            app.cluster_instances.or(defaults.cluster_instances),
+        ),
         namespace: app.namespace.clone().or_else(|| defaults.namespace.clone()),
         start_order: app
             .start_order
@@ -307,6 +325,10 @@ fn resolve_app(
         }
     }
 
+    if !resolved.cluster_mode {
+        resolved.cluster_instances = None;
+    }
+
     resolved
 }
 
@@ -339,6 +361,12 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) {
     }
     if let Some(start_delay_secs) = profile.start_delay_secs {
         resolved.start_delay_secs = start_delay_secs;
+    }
+    if let Some(cluster_mode) = profile.cluster_mode {
+        resolved.cluster_mode = cluster_mode;
+    }
+    if profile.cluster_instances.is_some() {
+        resolved.cluster_instances = normalize_cluster_instances(profile.cluster_instances);
     }
     if let Some(namespace) = &profile.namespace {
         resolved.namespace = Some(namespace.clone());
@@ -424,6 +452,10 @@ fn health_from_parts(
     })
 }
 
+fn normalize_cluster_instances(value: Option<u32>) -> Option<u32> {
+    value.and_then(|instances| (instances > 0).then_some(instances))
+}
+
 fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimits> {
     if matches!(limits.max_memory_mb, Some(0)) {
         limits.max_memory_mb = None;
@@ -442,6 +474,10 @@ fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimit
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<()> {
     let mut apps = Vec::with_capacity(specs.len());
     for spec in specs {
@@ -456,6 +492,8 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             stop_timeout_secs: spec.stop_timeout_secs,
             restart_delay_secs: spec.restart_delay_secs,
             start_delay_secs: spec.start_delay_secs,
+            cluster_mode: spec.cluster_mode,
+            cluster_instances: spec.cluster_instances,
             namespace: spec.namespace.clone(),
             start_order: spec.start_order,
             depends_on: spec.depends_on.clone(),
@@ -526,6 +564,8 @@ restart_policy = "on-failure"
 max_restarts = 5
 start_order = 20
 max_memory_mb = 256
+cluster_mode = true
+cluster_instances = 2
 
 [[apps]]
 name = "api"
@@ -542,6 +582,7 @@ start_order = 2
 restart_policy = "always"
 max_memory_mb = 512
 max_cpu_percent = 80
+cluster_instances = 4
 
 [apps.profiles.prod.env]
 NODE_ENV = "production"
@@ -555,6 +596,8 @@ NODE_ENV = "production"
         assert_eq!(app.instances, 3);
         assert_eq!(app.start_order, 2);
         assert_eq!(app.restart_policy, RestartPolicy::Always);
+        assert!(app.cluster_mode);
+        assert_eq!(app.cluster_instances, Some(4));
         assert_eq!(
             app.env.get("NODE_ENV").map(String::as_str),
             Some("production")
@@ -595,6 +638,8 @@ NODE_ENV = "production"
             stop_timeout_secs: 5,
             restart_delay_secs: 1,
             start_delay_secs: 2,
+            cluster_mode: true,
+            cluster_instances: Some(2),
             namespace: Some("core".to_string()),
             start_order: 1,
             depends_on: vec!["db".to_string()],
@@ -609,6 +654,8 @@ NODE_ENV = "production"
         assert!(rendered.contains("depends_on = [\"db\"]"));
         assert!(rendered.contains("max_memory_mb = 256"));
         assert!(rendered.contains("max_cpu_percent = 60.0"));
+        assert!(rendered.contains("cluster_mode = true"));
+        assert!(rendered.contains("cluster_instances = 2"));
 
         let _ = fs::remove_file(path);
     }

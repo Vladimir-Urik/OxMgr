@@ -44,6 +44,12 @@ pub enum Commands {
         restart_delay: u64,
         #[arg(long = "start-delay", default_value_t = 0)]
         start_delay: u64,
+        #[arg(long, default_value_t = false)]
+        watch: bool,
+        #[arg(long, default_value_t = false)]
+        cluster: bool,
+        #[arg(long = "cluster-instances")]
+        cluster_instances: Option<u32>,
         #[arg(long)]
         namespace: Option<String>,
         #[arg(long = "max-memory-mb")]
@@ -67,6 +73,7 @@ pub enum Commands {
     Delete {
         target: String,
     },
+    #[command(alias = "ls")]
     List,
     Ui {
         #[arg(long, default_value_t = 800)]
@@ -83,11 +90,18 @@ pub enum Commands {
         target: String,
     },
     Import {
-        path: PathBuf,
+        source: String,
         #[arg(long)]
         env: Option<String>,
         #[arg(long, value_delimiter = ',')]
         only: Vec<String>,
+        #[arg(long)]
+        sha256: Option<String>,
+    },
+    Export {
+        target: String,
+        #[arg(long, short = 'o')]
+        out: Option<PathBuf>,
     },
     Apply {
         path: PathBuf,
@@ -111,6 +125,14 @@ pub enum Commands {
         env: Option<String>,
         #[arg(long, value_delimiter = ',')]
         only: Vec<String>,
+    },
+    Deploy {
+        #[arg(long, short = 'c')]
+        config: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        force: bool,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     Doctor,
     Startup {
@@ -350,5 +372,119 @@ mod tests {
     fn clap_parses_doctor_command() {
         let cli = Cli::try_parse_from(["oxmgr", "doctor"]).expect("expected CLI parsing success");
         assert!(matches!(cli.command, Commands::Doctor));
+    }
+
+    #[test]
+    fn clap_parses_list_alias_ls() {
+        let cli = Cli::try_parse_from(["oxmgr", "ls"]).expect("expected CLI parsing success");
+        assert!(matches!(cli.command, Commands::List));
+    }
+
+    #[test]
+    fn clap_parses_deploy_with_positional_tokens() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "deploy",
+            "ecosystem.config.js",
+            "production",
+            "setup",
+        ])
+        .expect("expected deploy parsing success");
+
+        match cli.command {
+            Commands::Deploy {
+                config,
+                force,
+                args,
+            } => {
+                assert!(config.is_none());
+                assert!(!force);
+                assert_eq!(
+                    args,
+                    vec![
+                        "ecosystem.config.js".to_string(),
+                        "production".to_string(),
+                        "setup".to_string()
+                    ]
+                );
+            }
+            _ => panic!("expected deploy subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_deploy_with_config_flag_and_force() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "deploy",
+            "--config",
+            "ecosystem.config.js",
+            "--force",
+            "production",
+            "update",
+        ])
+        .expect("expected deploy parsing success");
+
+        match cli.command {
+            Commands::Deploy {
+                config,
+                force,
+                args,
+            } => {
+                assert_eq!(
+                    config,
+                    Some(std::path::PathBuf::from("ecosystem.config.js"))
+                );
+                assert!(force);
+                assert_eq!(args, vec!["production".to_string(), "update".to_string()]);
+            }
+            _ => panic!("expected deploy subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_import_with_sha256_pin() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "import",
+            "https://example.com/api.oxpkg",
+            "--sha256",
+            "0de9dbf5a7b951f684d5d2be08150795ee93fe01d0c246960534721dd30595f7",
+            "--only",
+            "api,worker",
+        ])
+        .expect("expected import parsing success");
+
+        match cli.command {
+            Commands::Import {
+                source,
+                env,
+                only,
+                sha256,
+            } => {
+                assert_eq!(source, "https://example.com/api.oxpkg");
+                assert!(env.is_none());
+                assert_eq!(only, vec!["api".to_string(), "worker".to_string()]);
+                assert_eq!(
+                    sha256.as_deref(),
+                    Some("0de9dbf5a7b951f684d5d2be08150795ee93fe01d0c246960534721dd30595f7")
+                );
+            }
+            _ => panic!("expected import subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_export_with_output_path() {
+        let cli = Cli::try_parse_from(["oxmgr", "export", "api", "--out", "./bundle.oxpkg"])
+            .expect("expected export parsing success");
+
+        match cli.command {
+            Commands::Export { target, out } => {
+                assert_eq!(target, "api");
+                assert_eq!(out, Some(std::path::PathBuf::from("./bundle.oxpkg")));
+            }
+            _ => panic!("expected export subcommand"),
+        }
     }
 }

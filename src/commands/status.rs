@@ -31,6 +31,18 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
         "Restarts",
         format!("{}/{}", process.restart_count, process.max_restarts),
     );
+    print_field("Watch", if process.watch { "enabled" } else { "disabled" });
+    print_field(
+        "Cluster",
+        if process.cluster_mode {
+            process
+                .cluster_instances
+                .map(|instances| format!("enabled ({instances} workers)"))
+                .unwrap_or_else(|| "enabled (auto workers)".to_string())
+        } else {
+            "disabled".to_string()
+        },
+    );
     print_field("Policy", process.restart_policy.to_string());
     if let Some(namespace) = process.namespace.as_deref() {
         print_field("Namespace", namespace);

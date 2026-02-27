@@ -12,6 +12,9 @@ Supported platforms: **Linux, macOS, Windows**.
 
 - [Docs Index](./docs/README.md)
 - [Installation Guide](./docs/install.md)
+- [CLI Reference](./docs/CLI.md)
+- [Deployment Guide](./docs/DEPLOY.md)
+- [Service Bundles](./docs/BUNDLES.md)
 - [Oxfile Specification](./docs/OXFILE.md)
 - [Oxfile Examples](./docs/examples)
 
@@ -31,22 +34,27 @@ Supported platforms: **Linux, macOS, Windows**.
 - Named processes (`--name`) with safe auto-generated names
 - Restart policies: `always`, `on-failure`, `never`
 - Configurable max restart count (`--max-restarts`)
+- Optional file watching restart loop (`--watch`)
 - Background daemon with local IPC over localhost TCP
 - CLI auto-starts daemon when needed
 - Persistent state in JSON (`state.json`)
 - Per-process stdout/stderr logs + tail mode
+- Interactive terminal UI (`oxmgr ui`) with keyboard and mouse controls
 - Automatic log rotation and retention policy
 - Process statuses: `running`, `stopped`, `crashed`, `restarting`, `errored`
 - Graceful shutdown (SIGTERM, then SIGKILL on timeout)
 - Process-tree aware shutdown (Unix process groups / Windows taskkill tree)
+- Node.js cluster mode (`--cluster`, `--cluster-instances`) for network server fan-out
 - Health checks with automatic restart on repeated failures
 - CPU/RAM monitoring in `list` and `status`
 - Resource limits (`max_memory_mb`, `max_cpu_percent`) with auto-restart
 - Optional Linux cgroup v2 hard limits (`--cgroup-enforce`) and GPU deny env masking (`--deny-gpu`)
 - Exponential restart backoff with jitter and cooldown reset
 - Ecosystem config import (`ecosystem.config.json` style) for PM2 drop-in compatibility
+- Compact service export/import bundles (`.oxpkg`) with local + HTTPS import support
 - Idempotent config reconcile via `oxmgr apply`
 - Reload without downtime (best-effort hot replacement)
+- PM2-style remote deployment workflow (`oxmgr deploy ...`)
 
 ## Installation
 
@@ -125,6 +133,9 @@ oxmgr service install --system auto
 # Detailed status (includes CPU/RAM + health)
 oxmgr status api
 
+# Launch interactive dashboard
+oxmgr ui
+
 # Reload with minimal disruption (best effort)
 oxmgr reload api
 
@@ -154,6 +165,9 @@ Options:
 - `--stop-timeout <seconds>` (default: `5`)
 - `--restart-delay <seconds>` (default: `0`)
 - `--start-delay <seconds>` (default: `0`)
+- `--watch` (restart on working-directory file changes)
+- `--cluster` (Node.js cluster mode)
+- `--cluster-instances <n>` (optional worker count; default uses all CPUs)
 - `--namespace <name>`
 - `--max-memory-mb <n>`
 - `--max-cpu-percent <n>`
@@ -177,6 +191,12 @@ oxmgr start "python app.py" \
   --deny-gpu
 ```
 
+Cluster mode notes:
+
+- Cluster mode currently supports `node <script> [args...]`.
+- Node runtime flags before script path are not supported in cluster mode.
+- `--cluster-instances` requires `--cluster`.
+
 ### `oxmgr stop <name|id>`
 
 Gracefully stop process.
@@ -193,15 +213,23 @@ Start a replacement instance, then terminate the old one (best effort no-downtim
 
 Remove process definition (stops it first if running).
 
-### `oxmgr list`
+### `oxmgr list` / `oxmgr ls`
 
 Show all managed processes with runtime metrics.
 
-Columns include: `ID NAME STATUS PID RESTARTS CPU% RAM(MB) HEALTH`.
+Columns include: `ID NAME STATUS MODE PID UPTIME RESTARTS CPU% RAM(MB) HEALTH`.
 
 ### `oxmgr status <name|id>`
 
-Show detailed process metadata, logs, health state, CPU, and RAM.
+Show detailed process metadata, watch/cluster settings, logs, health state, CPU, and RAM.
+
+### `oxmgr ui`
+
+Open interactive terminal dashboard.
+
+Options:
+
+- `--interval-ms <n>` refresh interval in milliseconds (default `800`)
 
 ### `oxmgr logs <name|id>`
 
@@ -212,21 +240,41 @@ Options:
 - `-f, --follow` stream continuously
 - `--lines <n>` number of lines from each log file (default `100`)
 
-### `oxmgr import <path>`
+### `oxmgr export <name|id>`
 
-Import process definitions from `ecosystem.config.json` or `oxfile.toml`.
+Export one managed service into a compact `.oxpkg` bundle.
+
+Example:
+
+```bash
+oxmgr export api
+oxmgr export 2 --out ./release/api.oxpkg
+```
+
+### `oxmgr import <source>`
+
+Import process definitions from:
+
+- local `ecosystem.config.json`
+- local `oxfile.toml`
+- local `.oxpkg` bundle
+- remote `https://...` `.oxpkg` bundle
 
 Example:
 
 ```bash
 oxmgr import ./ecosystem.config.json
 oxmgr import ./ecosystem.config.json --env prod --only api,worker
+oxmgr import ./api.oxpkg
+oxmgr import https://example.com/api.oxpkg --sha256 0123abcd... --only api
 ```
 
 Options:
 
 - `--env <name>`: applies profile overrides (`env_<name>` for ecosystem, `[apps.profiles.<name>]` for oxfile)
 - `--only <names>`: comma-separated app names filter
+- `--sha256 <hex>`: optional remote checksum pin (recommended for URL imports)
+- remote URL import requires `curl` available in `PATH`
 
 ### `oxmgr apply <path>`
 
@@ -268,6 +316,7 @@ Checks include:
 
 - TOML parse + profile resolution
 - command syntax sanity
+- cluster mode command validity (`node <script> ...` when enabled)
 - duplicate app names
 - `depends_on` references
 - duplicate expanded names (`instances` expansion)
@@ -283,6 +332,38 @@ Options:
 
 - `--env <name>` profile selector
 - `--only <names>` comma-separated app filter
+
+### `oxmgr deploy ...`
+
+PM2-style deployment syntax:
+
+```bash
+oxmgr deploy <config_file> <environment> <command>
+```
+
+Default config auto-discovery syntax:
+
+```bash
+oxmgr deploy <environment> <command>
+```
+
+Supported commands:
+
+- `setup`
+- `update`
+- `revert [n]`
+- `current|curr`
+- `previous|prev`
+- `list`
+- `exec|run "<cmd>"`
+- `<ref>` (deploy explicit git ref/tag/branch)
+
+Flags:
+
+- `--config <path>`
+- `--force` (for `update`/`<ref>`)
+
+Full lifecycle hooks and multi-host examples: [docs/DEPLOY.md](./docs/DEPLOY.md)
 
 ### `oxmgr doctor`
 
@@ -348,9 +429,20 @@ Supported fields per app:
 - `kill_signal` / `pm2_kill_signal`
 - `stop_timeout` / `kill_timeout`
 - `max_memory_restart` (e.g. `"256M"`), `max_memory_mb`, `max_cpu_percent`
+- `exec_mode` (`cluster` / `cluster_mode`) for PM2-style cluster import
+- `cluster_mode`, `cluster_instances`
 - `namespace`
 - `instances`, `instance_var`
 - `env_<profile>` object overrides (used via `oxmgr import --env <profile>`)
+
+Cluster import note:
+
+- `exec_mode: "cluster"` maps to Oxmgr cluster mode.
+- in that mode, ecosystem `instances` is interpreted as cluster worker count.
+
+Deployment note:
+
+- top-level `deploy` environments are used by `oxmgr deploy ...`
 
 Example:
 
@@ -379,10 +471,10 @@ Example:
       "max_restarts": 10
     },
     {
-      "name": "api",
+      "name": "api-cluster",
       "cmd": "node api.js",
+      "exec_mode": "cluster",
       "instances": 2,
-      "instance_var": "INSTANCE_ID",
       "priority": 10,
       "restart_delay": 5,
       "delay_start": 3,
@@ -391,7 +483,7 @@ Example:
       "max_memory_restart": "256M",
       "env_prod": {
         "NODE_ENV": "production",
-        "instances": 4,
+        "instances": 6,
         "priority": 1,
         "max_memory_restart": "1024M"
       }
@@ -424,8 +516,8 @@ start_order = 0
 name = "api"
 command = "node server.js"
 depends_on = ["db"]
-instances = 2
-instance_var = "INSTANCE_ID"
+cluster_mode = true
+cluster_instances = 4
 restart_delay_secs = 2
 start_delay_secs = 1
 stop_signal = "SIGINT"
@@ -437,7 +529,7 @@ max_cpu_percent = 80
 BASE = "1"
 
 [apps.profiles.prod]
-instances = 4
+cluster_instances = 8
 start_order = 1
 max_memory_mb = 768
 
@@ -451,6 +543,7 @@ Supported oxfile features include:
 - per-app `depends_on` (startup ordering)
 - per-profile overrides in `[apps.profiles.<name>]`
 - `instances` and `instance_var`
+- `cluster_mode` and `cluster_instances`
 - restart/stop delay and signal settings
 - namespace and health checks
 - resource limits (`max_memory_mb`, `max_cpu_percent`)

@@ -24,6 +24,9 @@ pub(crate) struct StartArgs {
     pub(crate) stop_timeout: u64,
     pub(crate) restart_delay: u64,
     pub(crate) start_delay: u64,
+    pub(crate) watch: bool,
+    pub(crate) cluster: bool,
+    pub(crate) cluster_instances: Option<u32>,
     pub(crate) namespace: Option<String>,
     pub(crate) max_memory_mb: Option<u64>,
     pub(crate) max_cpu_percent: Option<f32>,
@@ -32,6 +35,16 @@ pub(crate) struct StartArgs {
 }
 
 pub(crate) async fn run(config: &AppConfig, args: StartArgs) -> Result<()> {
+    if args.cluster_instances.is_some() && !args.cluster {
+        anyhow::bail!("--cluster-instances requires --cluster");
+    }
+
+    let cwd = if args.watch {
+        args.cwd.clone().or_else(|| std::env::current_dir().ok())
+    } else {
+        args.cwd.clone()
+    };
+
     let health_check = build_health_check(
         args.health_cmd,
         args.health_interval,
@@ -53,13 +66,16 @@ pub(crate) async fn run(config: &AppConfig, args: StartArgs) -> Result<()> {
                 name: args.name,
                 restart_policy: args.restart.into(),
                 max_restarts: args.max_restarts,
-                cwd: args.cwd,
+                cwd,
                 env: env_pairs_to_map(args.env),
                 health_check,
                 stop_signal: args.kill_signal,
                 stop_timeout_secs: args.stop_timeout.max(1),
                 restart_delay_secs: args.restart_delay,
                 start_delay_secs: args.start_delay,
+                watch: args.watch,
+                cluster_mode: args.cluster,
+                cluster_instances: args.cluster_instances.map(|value| value.max(1)),
                 namespace: args.namespace,
                 resource_limits,
             }),

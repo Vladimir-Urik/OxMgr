@@ -3,7 +3,9 @@ mod common;
 mod convert;
 mod daemon_stop;
 mod delete;
+mod deploy;
 mod doctor;
+mod export;
 mod import;
 mod list;
 mod logs;
@@ -29,6 +31,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             | Commands::Service { .. }
             | Commands::Convert { .. }
             | Commands::Validate { .. }
+            | Commands::Deploy { .. }
             | Commands::Doctor
             | Commands::Daemon {
                 command: DaemonCommand::Stop,
@@ -55,6 +58,9 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             stop_timeout,
             restart_delay,
             start_delay,
+            watch,
+            cluster,
+            cluster_instances,
             namespace,
             max_memory_mb,
             max_cpu_percent,
@@ -78,6 +84,9 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
                     stop_timeout,
                     restart_delay,
                     start_delay,
+                    watch,
+                    cluster,
+                    cluster_instances,
                     namespace,
                     max_memory_mb,
                     max_cpu_percent,
@@ -99,7 +108,13 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             follow,
             lines,
         } => logs::run(config, target, follow, lines).await,
-        Commands::Import { path, env, only } => import::run(config, path, env, only).await,
+        Commands::Import {
+            source,
+            env,
+            only,
+            sha256,
+        } => import::run(config, source, env, only, sha256).await,
+        Commands::Export { target, out } => export::run(config, target, out).await,
         Commands::Apply {
             path,
             env,
@@ -108,6 +123,11 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         } => apply::run(config, path, env, only, prune).await,
         Commands::Convert { input, out, env } => convert::run(input, out, env),
         Commands::Validate { path, env, only } => validate::run(&path, env.as_deref(), &only),
+        Commands::Deploy {
+            config,
+            force,
+            args,
+        } => deploy::run(config, force, args).await,
         Commands::Doctor => doctor::run(config).await,
         Commands::Startup { system } => startup::run(system, config),
         Commands::Service { command, system } => service::run(command, system, config),

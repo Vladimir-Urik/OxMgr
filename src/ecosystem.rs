@@ -21,6 +21,8 @@ pub struct EcosystemProcessSpec {
     pub stop_timeout_secs: u64,
     pub restart_delay_secs: u64,
     pub start_delay_secs: u64,
+    pub cluster_mode: bool,
+    pub cluster_instances: Option<u32>,
     pub namespace: Option<String>,
     pub resource_limits: Option<ResourceLimits>,
     pub start_order: i32,
@@ -48,6 +50,9 @@ struct EcosystemApp {
     restart_delay: Option<u64>,
     delay_start: Option<u64>,
     start_delay: Option<u64>,
+    exec_mode: Option<String>,
+    cluster_mode: Option<bool>,
+    cluster_instances: Option<u32>,
     start_order: Option<i32>,
     priority: Option<i32>,
     depends_on: Option<Vec<String>>,
@@ -98,6 +103,8 @@ struct ResolvedSettings {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    cluster_mode: bool,
+    cluster_instances: Option<u32>,
     namespace: Option<String>,
     resource_limits: Option<ResourceLimits>,
     start_order: i32,
@@ -123,6 +130,24 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
 impl EcosystemApp {
     fn into_spec(self, profile: Option<&str>, default_order: i32) -> Result<EcosystemProcessSpec> {
         let command = self.resolve_command()?;
+        let inferred_cluster_mode = self
+            .exec_mode
+            .as_deref()
+            .map(is_cluster_exec_mode)
+            .unwrap_or(false);
+        let explicit_cluster_instances = normalize_cluster_instances(self.cluster_instances);
+        let inferred_cluster_instances = if inferred_cluster_mode {
+            normalize_cluster_instances(self.instances)
+        } else {
+            None
+        };
+        let cluster_mode = self.cluster_mode.unwrap_or(inferred_cluster_mode);
+        let cluster_instances = explicit_cluster_instances.or(inferred_cluster_instances);
+        let instances = if inferred_cluster_mode {
+            1
+        } else {
+            self.instances.unwrap_or(1).max(1)
+        };
 
         let mut settings = ResolvedSettings {
             restart_policy: restart_policy_from(self.restart_policy, self.autorestart),
@@ -140,6 +165,8 @@ impl EcosystemApp {
             stop_timeout_secs: self.kill_timeout.or(self.stop_timeout).unwrap_or(5).max(1),
             restart_delay_secs: self.restart_delay.unwrap_or(0),
             start_delay_secs: self.start_delay.or(self.delay_start).unwrap_or(0),
+            cluster_mode,
+            cluster_instances,
             namespace: self.namespace,
             resource_limits: resource_limits_from(
                 self.max_memory_restart,
@@ -150,7 +177,7 @@ impl EcosystemApp {
             )?,
             start_order: self.priority.or(self.start_order).unwrap_or(default_order),
             depends_on: self.depends_on.unwrap_or_default(),
-            instances: self.instances.unwrap_or(1).max(1),
+            instances,
             instance_var: self.instance_var,
         };
 
@@ -174,6 +201,8 @@ impl EcosystemApp {
             stop_timeout_secs: settings.stop_timeout_secs,
             restart_delay_secs: settings.restart_delay_secs,
             start_delay_secs: settings.start_delay_secs,
+            cluster_mode: settings.cluster_mode,
+            cluster_instances: settings.cluster_instances,
             namespace: settings.namespace,
             resource_limits: settings.resource_limits,
             start_order: settings.start_order,
@@ -209,6 +238,10 @@ impl EcosystemApp {
     }
 }
 
+fn normalize_cluster_instances(value: Option<u32>) -> Option<u32> {
+    value.map(|instances| instances.max(1))
+}
+
 fn restart_policy_from(policy: Option<RestartPolicy>, autorestart: Option<bool>) -> RestartPolicy {
     if let Some(policy) = policy {
         policy
@@ -217,6 +250,11 @@ fn restart_policy_from(policy: Option<RestartPolicy>, autorestart: Option<bool>)
     } else {
         RestartPolicy::OnFailure
     }
+}
+
+fn is_cluster_exec_mode(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    normalized == "cluster" || normalized == "cluster_mode"
 }
 
 fn health_check_from(
@@ -303,9 +341,33 @@ fn apply_profile_overrides(
                     settings.namespace = Some(parsed.to_string());
                 }
             }
+            "exec_mode" => {
+                if let Some(parsed) = value.as_str() {
+                    settings.cluster_mode = is_cluster_exec_mode(parsed);
+                    if settings.cluster_mode {
+                        settings.instances = 1;
+                    }
+                }
+            }
+            "cluster_mode" => {
+                let Some(parsed) = value.as_bool() else {
+                    anyhow::bail!("cluster_mode override must be true/false");
+                };
+                settings.cluster_mode = parsed;
+            }
+            "cluster_instances" => {
+                let Some(parsed) = value.as_u64() else {
+                    anyhow::bail!("cluster_instances override must be a positive integer");
+                };
+                settings.cluster_instances = Some((parsed as u32).max(1));
+            }
             "instances" => {
                 if let Some(parsed) = value.as_u64() {
-                    settings.instances = (parsed as u32).max(1);
+                    if settings.cluster_mode {
+                        settings.cluster_instances = Some((parsed as u32).max(1));
+                    } else {
+                        settings.instances = (parsed as u32).max(1);
+                    }
                 }
             }
             "instance_var" => {
@@ -656,6 +718,33 @@ mod tests {
         assert_eq!(app.name.as_deref(), Some("worker"));
         assert_eq!(app.command, "python worker.py --threads 4");
         assert_eq!(app.restart_policy, RestartPolicy::Never);
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn load_maps_exec_mode_cluster_to_cluster_settings() {
+        let file_path = temp_file("ecosystem-cluster");
+        let payload = r#"
+{
+  "apps": [
+    {
+      "name": "api",
+      "cmd": "node server.js",
+      "exec_mode": "cluster",
+      "instances": 3
+    }
+  ]
+}
+"#;
+        fs::write(&file_path, payload).expect("failed to write ecosystem fixture");
+
+        let specs = load_with_profile(&file_path, None).expect("failed to parse ecosystem config");
+        assert_eq!(specs.len(), 1);
+        let app = &specs[0];
+        assert!(app.cluster_mode);
+        assert_eq!(app.cluster_instances, Some(3));
+        assert_eq!(app.instances, 1);
 
         let _ = fs::remove_file(file_path);
     }

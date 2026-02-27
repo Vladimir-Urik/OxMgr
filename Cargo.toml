@@ -10,8 +10,10 @@ anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
 crossterm = "0.29"
+json5 = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 shell-words = "1.1"
 sysinfo = "0.33"
 thiserror = "1.0"
@@ -29,6 +31,8 @@ tokio = { version = "1.44", features = [
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+url = "2.5"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal", "process", "user"] }

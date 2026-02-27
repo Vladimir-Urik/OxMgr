@@ -1,3 +1,4 @@
+mod bundle;
 mod cgroup;
 mod cli;
 mod commands;

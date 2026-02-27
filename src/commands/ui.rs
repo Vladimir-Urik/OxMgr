@@ -4,7 +4,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use crossterm::cursor;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
+    MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     self, disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
@@ -25,8 +28,10 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
     let mut state = DashboardState::default();
     let mut processes = Vec::<ManagedProcess>::new();
     let mut next_refresh_at = Instant::now();
+    let mut needs_full_clear = true;
+    let mut should_exit = false;
 
-    loop {
+    while !should_exit {
         if Instant::now() >= next_refresh_at {
             match fetch_processes(config).await {
                 Ok(items) => {
@@ -41,66 +46,102 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
             next_refresh_at = Instant::now() + refresh_interval;
         }
 
-        draw_frame(&processes, &state, refresh_interval)?;
+        let frame_info = draw_frame(&processes, &state, refresh_interval, needs_full_clear)?;
+        needs_full_clear = false;
 
         if event::poll(Duration::from_millis(90)).context("failed polling terminal input")? {
             match event::read().context("failed reading terminal input")? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if state.selected > 0 {
-                            state.selected -= 1;
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if state.selected + 1 < processes.len() {
-                            state.selected += 1;
-                        }
-                    }
-                    KeyCode::Char('g') => {
-                        next_refresh_at = Instant::now();
-                    }
-                    KeyCode::Char('s') => {
-                        if let Some(target) = selected_name(&processes, state.selected) {
-                            match send_request(
-                                &config.daemon_addr,
-                                &IpcRequest::Stop {
-                                    target: target.to_string(),
-                                },
-                            )
-                            .await
-                            {
-                                Ok(response) => match expect_ok(response) {
-                                    Ok(ok) => state.set_info(ok.message),
-                                    Err(err) => state.set_error(err.to_string()),
-                                },
-                                Err(err) => state.set_error(err.to_string()),
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if state.esc_menu_open {
+                        match key.code {
+                            KeyCode::Esc => {
+                                state.close_menu();
+                                needs_full_clear = true;
                             }
+                            KeyCode::Left
+                            | KeyCode::Up
+                            | KeyCode::Char('h')
+                            | KeyCode::Char('k') => {
+                                state.esc_menu_selected = EscMenuChoice::Resume;
+                            }
+                            KeyCode::Right
+                            | KeyCode::Down
+                            | KeyCode::Tab
+                            | KeyCode::Char('l')
+                            | KeyCode::Char('j') => {
+                                state.esc_menu_selected = EscMenuChoice::Quit;
+                            }
+                            KeyCode::Enter => match state.esc_menu_selected {
+                                EscMenuChoice::Resume => {
+                                    state.close_menu();
+                                    needs_full_clear = true;
+                                }
+                                EscMenuChoice::Quit => {
+                                    should_exit = true;
+                                }
+                            },
+                            KeyCode::Char('q') => should_exit = true,
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    match key.code {
+                        KeyCode::Char('q') => should_exit = true,
+                        KeyCode::Esc => {
+                            state.toggle_menu();
+                            needs_full_clear = true;
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if state.selected > 0 {
+                                state.selected -= 1;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if state.selected + 1 < processes.len() {
+                                state.selected += 1;
+                            }
+                        }
+                        KeyCode::Char('g') => {
                             next_refresh_at = Instant::now();
                         }
-                    }
-                    KeyCode::Char('r') => {
-                        if let Some(target) = selected_name(&processes, state.selected) {
-                            match send_request(
-                                &config.daemon_addr,
-                                &IpcRequest::Restart {
-                                    target: target.to_string(),
-                                },
-                            )
-                            .await
-                            {
-                                Ok(response) => match expect_ok(response) {
-                                    Ok(ok) => state.set_info(ok.message),
-                                    Err(err) => state.set_error(err.to_string()),
-                                },
-                                Err(err) => state.set_error(err.to_string()),
-                            }
+                        KeyCode::Char('s') => {
+                            stop_selected(config, &processes, &mut state).await;
                             next_refresh_at = Instant::now();
                         }
+                        KeyCode::Char('r') => {
+                            restart_selected(config, &processes, &mut state).await;
+                            next_refresh_at = Instant::now();
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
-                Event::Resize(_, _) => {}
+                }
+                Event::Mouse(mouse) => {
+                    if state.esc_menu_open {
+                        if let Some(layout) = frame_info.menu_layout {
+                            if let Some(action) = handle_menu_mouse(mouse, layout) {
+                                match action {
+                                    EscMenuChoice::Resume => {
+                                        state.close_menu();
+                                        needs_full_clear = true;
+                                    }
+                                    EscMenuChoice::Quit => should_exit = true,
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    handle_table_mouse_selection(
+                        mouse,
+                        &frame_info.table_view,
+                        &mut state,
+                        processes.len(),
+                    );
+                }
+                Event::Resize(_, _) => {
+                    needs_full_clear = true;
+                }
                 _ => {}
             }
         }
@@ -115,6 +156,8 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
 struct DashboardState {
     selected: usize,
     flash: Option<FlashMessage>,
+    esc_menu_open: bool,
+    esc_menu_selected: EscMenuChoice,
 }
 
 #[derive(Debug)]
@@ -128,6 +171,36 @@ struct FlashMessage {
 enum FlashLevel {
     Info,
     Error,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+enum EscMenuChoice {
+    #[default]
+    Resume,
+    Quit,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct EscMenuLayout {
+    box_x: u16,
+    box_y: u16,
+    box_width: u16,
+    box_height: u16,
+    resume_x: u16,
+    quit_x: u16,
+    buttons_y: u16,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct TableView {
+    start_index: usize,
+    visible_rows: usize,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct FrameInfo {
+    table_view: TableView,
+    menu_layout: Option<EscMenuLayout>,
 }
 
 impl DashboardState {
@@ -174,6 +247,23 @@ impl DashboardState {
             self.flash = None;
         }
     }
+
+    fn open_menu(&mut self) {
+        self.esc_menu_open = true;
+        self.esc_menu_selected = EscMenuChoice::Resume;
+    }
+
+    fn close_menu(&mut self) {
+        self.esc_menu_open = false;
+    }
+
+    fn toggle_menu(&mut self) {
+        if self.esc_menu_open {
+            self.close_menu();
+        } else {
+            self.open_menu();
+        }
+    }
 }
 
 struct TerminalGuard;
@@ -182,7 +272,7 @@ impl TerminalGuard {
     fn enter() -> Result<Self> {
         enable_raw_mode().context("failed enabling raw mode")?;
         let mut out = stdout();
-        execute!(out, EnterAlternateScreen, cursor::Hide)
+        execute!(out, EnterAlternateScreen, cursor::Hide, EnableMouseCapture)
             .context("failed entering alternate screen")?;
         Ok(Self)
     }
@@ -192,7 +282,7 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut out = stdout();
-        let _ = execute!(out, cursor::Show, LeaveAlternateScreen);
+        let _ = execute!(out, DisableMouseCapture, cursor::Show, LeaveAlternateScreen);
     }
 }
 
@@ -209,41 +299,198 @@ fn selected_name(processes: &[ManagedProcess], selected: usize) -> Option<&str> 
     processes.get(selected).map(|process| process.name.as_str())
 }
 
+async fn stop_selected(
+    config: &AppConfig,
+    processes: &[ManagedProcess],
+    state: &mut DashboardState,
+) {
+    if let Some(target) = selected_name(processes, state.selected) {
+        match send_request(
+            &config.daemon_addr,
+            &IpcRequest::Stop {
+                target: target.to_string(),
+            },
+        )
+        .await
+        {
+            Ok(response) => match expect_ok(response) {
+                Ok(ok) => state.set_info(ok.message),
+                Err(err) => state.set_error(err.to_string()),
+            },
+            Err(err) => state.set_error(err.to_string()),
+        }
+    }
+}
+
+async fn restart_selected(
+    config: &AppConfig,
+    processes: &[ManagedProcess],
+    state: &mut DashboardState,
+) {
+    if let Some(target) = selected_name(processes, state.selected) {
+        match send_request(
+            &config.daemon_addr,
+            &IpcRequest::Restart {
+                target: target.to_string(),
+            },
+        )
+        .await
+        {
+            Ok(response) => match expect_ok(response) {
+                Ok(ok) => state.set_info(ok.message),
+                Err(err) => state.set_error(err.to_string()),
+            },
+            Err(err) => state.set_error(err.to_string()),
+        }
+    }
+}
+
+fn compute_table_view(height: usize, selected: usize) -> TableView {
+    let visible_rows = height.saturating_sub(14).max(3);
+    let start_index = if selected >= visible_rows {
+        selected + 1 - visible_rows
+    } else {
+        0
+    };
+
+    TableView {
+        start_index,
+        visible_rows,
+    }
+}
+
+fn esc_menu_layout(width: usize, height: usize) -> Option<EscMenuLayout> {
+    if width < 30 || height < 10 {
+        return None;
+    }
+
+    let box_width = 34_u16.min(width as u16 - 2);
+    let box_height = 7_u16.min(height as u16 - 2);
+    let box_x = ((width as u16).saturating_sub(box_width)) / 2;
+    let box_y = ((height as u16).saturating_sub(box_height)) / 2;
+
+    Some(EscMenuLayout {
+        box_x,
+        box_y,
+        box_width,
+        box_height,
+        resume_x: box_x + 3,
+        quit_x: box_x + box_width.saturating_sub(12),
+        buttons_y: box_y + 4,
+    })
+}
+
+fn handle_menu_mouse(mouse: MouseEvent, layout: EscMenuLayout) -> Option<EscMenuChoice> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return None;
+    }
+
+    let x = mouse.column;
+    let y = mouse.row;
+    if y != layout.buttons_y {
+        return None;
+    }
+
+    if x >= layout.resume_x && x < layout.resume_x + 8 {
+        return Some(EscMenuChoice::Resume);
+    }
+    if x >= layout.quit_x && x < layout.quit_x + 6 {
+        return Some(EscMenuChoice::Quit);
+    }
+    None
+}
+
+fn handle_table_mouse_selection(
+    mouse: MouseEvent,
+    view: &TableView,
+    state: &mut DashboardState,
+    process_count: usize,
+) {
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let table_first_row = 8_u16;
+            let table_last_row = table_first_row + view.visible_rows.saturating_sub(1) as u16;
+            if mouse.row < table_first_row || mouse.row > table_last_row {
+                return;
+            }
+            let relative = (mouse.row - table_first_row) as usize;
+            let idx = view.start_index.saturating_add(relative);
+            if idx < process_count {
+                state.selected = idx;
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if state.selected > 0 {
+                state.selected -= 1;
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if state.selected + 1 < process_count {
+                state.selected += 1;
+            }
+        }
+        _ => {}
+    }
+}
+
 fn draw_frame(
     processes: &[ManagedProcess],
     state: &DashboardState,
     refresh: Duration,
-) -> Result<()> {
+    clear_all: bool,
+) -> Result<FrameInfo> {
     let (width, height) = terminal::size().context("failed reading terminal size")?;
     let width = width as usize;
     let height = height as usize;
+    let table_view = compute_table_view(height, state.selected);
+    let menu_layout = if state.esc_menu_open {
+        esc_menu_layout(width, height)
+    } else {
+        None
+    };
 
-    let mut out = stdout();
-    execute!(out, cursor::MoveTo(0, 0), Clear(ClearType::All))
-        .context("failed clearing terminal frame")?;
+    let mut frame = Vec::<u8>::new();
 
     if width < 80 || height < 20 {
-        writeln!(
-            out,
-            "{}",
-            paint(
+        write_line(
+            &mut frame,
+            &paint(
                 "1;31",
-                "Terminal too small for oxmgr ui. Resize to at least 80x20."
-            )
+                "Terminal too small for oxmgr ui. Resize to at least 80x20.",
+            ),
         )?;
-        out.flush()?;
-        return Ok(());
+        let mut out = stdout();
+        execute!(out, cursor::MoveTo(0, 0)).context("failed moving cursor")?;
+        if clear_all {
+            execute!(out, Clear(ClearType::All)).context("failed clearing terminal frame")?;
+        }
+        out.write_all(&frame)
+            .context("failed writing terminal warning frame")?;
+        out.flush().context("failed flushing terminal frame")?;
+        return Ok(FrameInfo {
+            table_view,
+            menu_layout,
+        });
     }
 
     let now = wall_clock_hms();
     let title = format!(
-        " OXMGR UI  │  {}  │ refresh {}ms  │ q quit · j/k move · r restart · s stop · g refresh ",
+        " OXMGR UI  │  {}  │ refresh {}ms  │ Esc menu · q quit · j/k move · mouse select ",
         now,
         refresh.as_millis()
     );
-    writeln!(out, "{}", paint("1;36", &frame_line("╔", "╗", width, '═')))?;
-    writeln!(out, "{}", paint("1;36", &frame_content_line(&title, width)))?;
-    writeln!(out, "{}", paint("1;36", &frame_line("╠", "╣", width, '═')))?;
+    write_line(
+        &mut frame,
+        &paint("1;36", &frame_line("╔", "╗", width, '═')),
+    )?;
+    write_line(
+        &mut frame,
+        &paint("1;36", &frame_content_line(&title, width)),
+    )?;
+    write_line(
+        &mut frame,
+        &paint("1;36", &frame_line("╠", "╣", width, '═')),
+    )?;
 
     let running = processes
         .iter()
@@ -269,7 +516,7 @@ fn draw_frame(
         paint("2;37", &format!("stopped {stopped}")),
         paint("1;31", &format!("unhealthy {unhealthy}"))
     );
-    writeln!(out, "{}", frame_content_line(&summary, width))?;
+    write_line(&mut frame, &frame_content_line(&summary, width))?;
 
     if let Some(message) = state.flash.as_ref() {
         let code = match message.level {
@@ -277,35 +524,55 @@ fn draw_frame(
             FlashLevel::Error => "1;31",
         };
         let text = format!(" {}", message.text);
-        writeln!(out, "{}", frame_content_line(&paint(code, &text), width))?;
+        write_line(&mut frame, &frame_content_line(&paint(code, &text), width))?;
     } else {
-        writeln!(out, "{}", frame_content_line(" ", width))?;
+        write_line(&mut frame, &frame_content_line(" ", width))?;
     }
 
-    writeln!(out, "{}", paint("1;36", &frame_line("╠", "╣", width, '═')))?;
-
-    let table_rows_available = height.saturating_sub(14);
-    draw_table(
-        &mut out,
-        processes,
-        state.selected,
-        width,
-        table_rows_available,
+    write_line(
+        &mut frame,
+        &paint("1;36", &frame_line("╠", "╣", width, '═')),
     )?;
 
-    writeln!(out, "{}", paint("1;36", &frame_line("╠", "╣", width, '═')))?;
-    draw_details(&mut out, processes, state.selected, width)?;
-    writeln!(out, "{}", paint("1;36", &frame_line("╚", "╝", width, '═')))?;
+    draw_table(&mut frame, processes, &table_view, state.selected, width)?;
 
-    out.flush().context("failed flushing terminal frame")
+    write_line(
+        &mut frame,
+        &paint("1;36", &frame_line("╠", "╣", width, '═')),
+    )?;
+    draw_details(&mut frame, processes, state.selected, width)?;
+    write_line(
+        &mut frame,
+        &paint("1;36", &frame_line("╚", "╝", width, '═')),
+    )?;
+
+    let mut out = stdout();
+    execute!(out, cursor::MoveTo(0, 0)).context("failed moving cursor")?;
+    if clear_all {
+        execute!(out, Clear(ClearType::All)).context("failed clearing terminal frame")?;
+    }
+    out.write_all(&frame)
+        .context("failed writing terminal dashboard frame")?;
+    execute!(out, Clear(ClearType::FromCursorDown)).context("failed clearing trailing area")?;
+
+    if let Some(layout) = menu_layout {
+        draw_esc_menu(&mut out, layout, state.esc_menu_selected)?;
+    }
+
+    out.flush().context("failed flushing terminal frame")?;
+
+    Ok(FrameInfo {
+        table_view,
+        menu_layout,
+    })
 }
 
 fn draw_table(
     out: &mut impl Write,
     processes: &[ManagedProcess],
+    table_view: &TableView,
     selected: usize,
     width: usize,
-    rows_available: usize,
 ) -> Result<()> {
     let cols: [(&str, usize); 9] = [
         ("S", 1),
@@ -321,10 +588,9 @@ fn draw_table(
 
     let min_table_width = cols.iter().map(|(_, col)| *col).sum::<usize>() + (cols.len() - 1) * 3;
     if min_table_width + 4 > width {
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(" table too wide for current terminal ", width)
+            &frame_content_line(" table too wide for current terminal ", width),
         )?;
         return Ok(());
     }
@@ -333,30 +599,23 @@ fn draw_table(
     for (name, col_width) in cols {
         header_parts.push(pad(name, col_width));
     }
-    writeln!(
+    write_line(
         out,
-        "{}",
-        frame_content_line(&paint("1;36", &header_parts.join(" │ ")), width)
+        &frame_content_line(&paint("1;36", &header_parts.join(" │ ")), width),
     )?;
-    writeln!(
+    write_line(
         out,
-        "{}",
-        frame_content_line(&paint("2;34", &"─".repeat(min_table_width)), width)
+        &frame_content_line(&paint("2;34", &"─".repeat(min_table_width)), width),
     )?;
 
-    let visible_rows = rows_available.max(3);
-    let start = if selected >= visible_rows {
-        selected + 1 - visible_rows
-    } else {
-        0
-    };
+    let visible_rows = table_view.visible_rows.max(3);
+    let start = table_view.start_index;
     let end = min(processes.len(), start + visible_rows);
 
     if processes.is_empty() {
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(" no managed processes (use `oxmgr start ...`) ", width)
+            &frame_content_line(" no managed processes (use `oxmgr start ...`) ", width),
         )?;
     } else {
         for (idx, process) in processes.iter().enumerate().take(end).skip(start) {
@@ -388,12 +647,12 @@ fn draw_table(
             } else {
                 base
             };
-            writeln!(out, "{}", frame_content_line(&line, width))?;
+            write_line(out, &frame_content_line(&line, width))?;
         }
     }
 
     for _ in end.saturating_sub(start)..visible_rows {
-        writeln!(out, "{}", frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line(" ", width))?;
     }
 
     Ok(())
@@ -418,68 +677,71 @@ fn draw_details(
         };
 
         let detail_title = format!(" Selected: {} (id {}) ", process.name, process.id);
-        writeln!(
+        let mode = if process.cluster_mode {
+            process
+                .cluster_instances
+                .map(|instances| format!("cluster:{instances}"))
+                .unwrap_or_else(|| "cluster:auto".to_string())
+        } else {
+            "single".to_string()
+        };
+        write_line(
             out,
-            "{}",
-            frame_content_line(&paint("1;37", &detail_title), width)
+            &frame_content_line(&paint("1;37", &detail_title), width),
         )?;
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(
+            &frame_content_line(
                 &format!(
-                    " PID {}  •  Uptime {}  •  Restarts {}/{} ",
+                    " PID {}  •  Uptime {}  •  Restarts {}/{}  •  Mode {} ",
                     process
                         .pid
                         .map_or_else(|| "-".to_string(), |pid| pid.to_string()),
                     format_process_uptime(&process.status, process.last_started_at),
                     process.restart_count,
-                    process.max_restarts
+                    process.max_restarts,
+                    mode
                 ),
-                width
-            )
+                width,
+            ),
         )?;
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(
+            &frame_content_line(
                 &format!(
                     " CPU {} {:>5.1}% ",
                     paint("1;32", &progress_bar(process.cpu_percent, 24)),
                     process.cpu_percent
                 ),
-                width
-            )
+                width,
+            ),
         )?;
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(
+            &frame_content_line(
                 &format!(
                     " RAM {} {:>5} MB ",
                     paint("1;35", &progress_bar(ram_ratio, 24)),
                     process.memory_bytes / (1024 * 1024)
                 ),
-                width
-            )
+                width,
+            ),
         )?;
         let command = if process.args.is_empty() {
             process.command.clone()
         } else {
             format!("{} {}", process.command, process.args.join(" "))
         };
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(
+            &frame_content_line(
                 &format!(" Cmd: {}", truncate(&command, width.saturating_sub(8))),
-                width
-            )
+                width,
+            ),
         )?;
-        writeln!(
+        write_line(
             out,
-            "{}",
-            frame_content_line(
+            &frame_content_line(
                 &format!(
                     " Cwd: {}",
                     process
@@ -488,23 +750,77 @@ fn draw_details(
                         .map(|cwd| cwd.display().to_string())
                         .unwrap_or_else(|| "-".to_string())
                 ),
-                width
-            )
+                width,
+            ),
         )?;
     } else {
-        writeln!(
-            out,
-            "{}",
-            frame_content_line(" No process selected ", width)
-        )?;
-        writeln!(out, "{}", frame_content_line(" ", width))?;
-        writeln!(out, "{}", frame_content_line(" ", width))?;
-        writeln!(out, "{}", frame_content_line(" ", width))?;
-        writeln!(out, "{}", frame_content_line(" ", width))?;
-        writeln!(out, "{}", frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line(" No process selected ", width))?;
+        write_line(out, &frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line(" ", width))?;
     }
 
     Ok(())
+}
+
+fn draw_esc_menu(
+    out: &mut impl Write,
+    layout: EscMenuLayout,
+    selected: EscMenuChoice,
+) -> Result<()> {
+    let x = layout.box_x;
+    let y = layout.box_y;
+    let inner = layout.box_width.saturating_sub(2) as usize;
+
+    let top = format!("╔{}╗", "═".repeat(inner));
+    let mid = format!("║{}║", " ".repeat(inner));
+    let title = centered(" ESC MENU ", inner);
+    let hint = centered("Arrows/Tab + Enter, or click", inner);
+    let bottom = format!("╚{}╝", "═".repeat(inner));
+
+    execute!(out, cursor::MoveTo(x, y))?;
+    write!(out, "{}", paint("1;34", &top))?;
+    execute!(out, cursor::MoveTo(x, y + 1))?;
+    write!(out, "{}", paint("1;34", &format!("║{}║", title)))?;
+    execute!(out, cursor::MoveTo(x, y + 2))?;
+    write!(out, "{}", paint("1;34", &mid))?;
+    execute!(out, cursor::MoveTo(x, y + 3))?;
+    write!(out, "{}", paint("2;37", &format!("║{}║", hint)))?;
+
+    execute!(out, cursor::MoveTo(x, layout.buttons_y))?;
+    write!(out, "{}", paint("1;34", &mid))?;
+    let resume = if selected == EscMenuChoice::Resume {
+        paint("1;30;42", " Resume ")
+    } else {
+        paint("1;32", "[Resume]")
+    };
+    let quit = if selected == EscMenuChoice::Quit {
+        paint("1;37;41", " Quit ")
+    } else {
+        paint("1;31", "[Quit]")
+    };
+    execute!(out, cursor::MoveTo(layout.resume_x, layout.buttons_y))?;
+    write!(out, "{resume}")?;
+    execute!(out, cursor::MoveTo(layout.quit_x, layout.buttons_y))?;
+    write!(out, "{quit}")?;
+    execute!(
+        out,
+        cursor::MoveTo(x, y + layout.box_height.saturating_sub(1))
+    )?;
+    write!(out, "{}", paint("1;34", &bottom))?;
+    Ok(())
+}
+
+fn centered(text: &str, width: usize) -> String {
+    let len = text.chars().count();
+    if len >= width {
+        return text.chars().take(width).collect();
+    }
+    let left = (width - len) / 2;
+    let right = width - len - left;
+    format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
 }
 
 fn progress_bar(percent: f32, width: usize) -> String {
@@ -521,14 +837,26 @@ fn frame_line(left: &str, right: &str, width: usize, fill: char) -> String {
     )
 }
 
+fn write_line(out: &mut impl Write, line: &str) -> Result<()> {
+    out.write_all(line.as_bytes())?;
+    out.write_all(b"\r\n")?;
+    Ok(())
+}
+
 fn frame_content_line(content: &str, width: usize) -> String {
     let inner = width.saturating_sub(2);
     let visible = visible_len(content);
+    let clipped = if visible > inner {
+        truncate_visible_ansi(content, inner)
+    } else {
+        content.to_string()
+    };
+    let clipped_visible = visible_len(&clipped);
     let mut line = String::new();
     line.push('║');
-    line.push_str(content);
-    if visible < inner {
-        line.push_str(&" ".repeat(inner - visible));
+    line.push_str(&clipped);
+    if clipped_visible < inner {
+        line.push_str(&" ".repeat(inner - clipped_visible));
     }
     line.push('║');
     line
@@ -552,6 +880,50 @@ fn visible_len(value: &str) -> usize {
         len += 1;
     }
     len
+}
+
+fn truncate_visible_ansi(value: &str, max_visible: usize) -> String {
+    if max_visible == 0 {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut visible = 0usize;
+    let mut saw_ansi = false;
+    let mut iter = value.chars().peekable();
+
+    while let Some(ch) = iter.next() {
+        if ch == '\x1b' {
+            saw_ansi = true;
+            out.push(ch);
+            if iter.peek() == Some(&'[') {
+                out.push(iter.next().unwrap_or('['));
+                while let Some(next) = iter.next() {
+                    out.push(next);
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if visible >= max_visible {
+            break;
+        }
+
+        out.push(ch);
+        visible += 1;
+        if visible >= max_visible {
+            break;
+        }
+    }
+
+    if saw_ansi {
+        out.push_str("\x1b[0m");
+    }
+
+    out
 }
 
 fn truncate(value: &str, max_len: usize) -> String {

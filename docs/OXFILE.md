@@ -13,7 +13,7 @@ Compared to `ecosystem.config.json` style files, `oxfile.toml` gives Oxmgr-speci
 - Safer for CI/CD because repeated apply operations converge to the same state.
 
 2. Stronger native feature model
-- First-class support for health checks, resource limits, startup dependencies, namespaces, and profile overlays.
+- First-class support for health checks, resource limits, startup dependencies, namespaces, cluster mode, and profile overlays.
 - No PM2 compatibility compromises needed for core fields.
 
 3. Cleaner profile layering
@@ -61,6 +61,7 @@ Validation checks:
 - TOML parse and version support
 - profile override resolution
 - command/health command syntax sanity
+- cluster-mode command validity (`node <script> ...` when enabled)
 - duplicate app names
 - unknown `depends_on` references
 - duplicate expanded names from `instances`
@@ -100,6 +101,7 @@ Details:
 - `version` (required recommended): currently `1`
 - `defaults` (optional)
 - `apps` (required, array of app entries)
+- `deploy` (optional, map of deploy environments)
 
 ### `[defaults]` fields
 
@@ -111,6 +113,8 @@ Details:
 - `stop_timeout_secs`: integer
 - `restart_delay_secs`: integer
 - `start_delay_secs`: integer
+- `cluster_mode`: bool
+- `cluster_instances`: integer (`>=1`)
 - `namespace`: string
 - `start_order`: integer
 - `depends_on`: array of app names
@@ -203,6 +207,24 @@ Oxmgr expands one app into multiple managed processes:
 - `api-0`, `api-1`, `api-2`
 - env variable `INSTANCE_ID` set to `0/1/2`
 
+## Node.js Cluster Mode
+
+```toml
+cluster_mode = true
+cluster_instances = 4
+```
+
+Behavior:
+
+- cluster mode applies Node.js cluster fan-out in a single managed process entry
+- `cluster_instances` is optional; when omitted, Oxmgr uses all CPUs
+- if `cluster_mode` is `false`, `cluster_instances` is ignored
+
+Current command requirement:
+
+- use Node command shape `node <script> [args...]`
+- Node runtime flags before script path are not supported in cluster mode
+
 ## Conversion and Migration
 
 Convert existing ecosystem JSON:
@@ -215,6 +237,31 @@ Then use:
 
 ```bash
 oxmgr apply ./oxfile.toml --env prod
+```
+
+## Deploy Environments (Optional)
+
+You can define deployment environments directly in `oxfile.toml`:
+
+```toml
+[deploy.production]
+user = "ubuntu"
+host = ["192.168.0.13", "192.168.0.14"]
+repo = "git@github.com:Username/repository.git"
+ref = "origin/main"
+path = "/var/www/my-repository"
+pre_setup = "echo setup-start"
+post_setup = "echo setup-done"
+pre_deploy_local = "echo local-prepare"
+pre_deploy = "npm ci"
+post_deploy = "oxmgr apply ./oxfile.toml --env production"
+```
+
+Then deploy with:
+
+```bash
+oxmgr deploy ./oxfile.toml production setup
+oxmgr deploy ./oxfile.toml production
 ```
 
 ## Real Examples

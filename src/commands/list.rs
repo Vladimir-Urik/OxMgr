@@ -24,16 +24,24 @@ fn print_process_table(mut processes: Vec<ManagedProcess>) {
     }
 
     let headers = [
-        "ID", "NAME", "STATUS", "PID", "UPTIME", "RESTARTS", "CPU%", "RAM(MB)", "HEALTH",
+        "ID", "NAME", "STATUS", "MODE", "PID", "UPTIME", "RESTARTS", "CPU%", "RAM(MB)", "HEALTH",
     ];
 
-    let rows: Vec<[String; 9]> = processes
+    let rows: Vec<[String; 10]> = processes
         .into_iter()
         .map(|process| {
             [
                 process.id.to_string(),
                 process.name,
                 process.status.to_string(),
+                if process.cluster_mode {
+                    process
+                        .cluster_instances
+                        .map(|instances| format!("cluster:{instances}"))
+                        .unwrap_or_else(|| "cluster:auto".to_string())
+                } else {
+                    "single".to_string()
+                },
                 process
                     .pid
                     .map_or_else(|| "-".to_string(), |value| value.to_string()),
@@ -62,7 +70,7 @@ fn print_process_table(mut processes: Vec<ManagedProcess>) {
     print_border(&widths);
 }
 
-fn print_border(widths: &[usize; 9]) {
+fn print_border(widths: &[usize; 10]) {
     let mut line = String::from("+");
     for width in widths {
         line.push_str(&format!("-{}-+", "-".repeat(*width)));
@@ -70,7 +78,7 @@ fn print_border(widths: &[usize; 9]) {
     println!("{}", ui::table_border(&line));
 }
 
-fn print_header_row(cells: &[&str; 9], widths: &[usize; 9]) {
+fn print_header_row(cells: &[&str; 10], widths: &[usize; 10]) {
     let mut line = String::from("|");
     for (idx, cell) in cells.iter().enumerate() {
         let padded = format!("{:<width$}", cell, width = widths[idx]);
@@ -79,13 +87,13 @@ fn print_header_row(cells: &[&str; 9], widths: &[usize; 9]) {
     println!("{line}");
 }
 
-fn print_data_row(cells: &[String; 9], widths: &[usize; 9]) {
+fn print_data_row(cells: &[String; 10], widths: &[usize; 10]) {
     let mut line = String::from("|");
     for (idx, cell) in cells.iter().enumerate() {
         let padded = format!("{:<width$}", cell, width = widths[idx]);
         let styled = match idx {
             2 => ui::style_status_cell(&padded, cell),
-            8 => ui::style_health_cell(&padded, cell),
+            9 => ui::style_health_cell(&padded, cell),
             _ => padded,
         };
         line.push_str(&format!(" {styled} |"));

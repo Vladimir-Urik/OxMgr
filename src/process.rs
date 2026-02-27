@@ -119,6 +119,12 @@ pub struct StartProcessSpec {
     pub restart_delay_secs: u64,
     pub start_delay_secs: u64,
     #[serde(default)]
+    pub watch: bool,
+    #[serde(default)]
+    pub cluster_mode: bool,
+    #[serde(default)]
+    pub cluster_instances: Option<u32>,
+    #[serde(default)]
     pub namespace: Option<String>,
     #[serde(default)]
     pub resource_limits: Option<ResourceLimits>,
@@ -151,6 +157,12 @@ pub struct ManagedProcess {
     pub restart_backoff_attempt: u32,
     #[serde(default)]
     pub start_delay_secs: u64,
+    #[serde(default)]
+    pub watch: bool,
+    #[serde(default)]
+    pub cluster_mode: bool,
+    #[serde(default)]
+    pub cluster_instances: Option<u32>,
     #[serde(default)]
     pub resource_limits: Option<ResourceLimits>,
     #[serde(default)]
@@ -284,6 +296,9 @@ mod tests {
             restart_backoff_reset_secs: 0,
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
             resource_limits: None,
             cgroup_path: None,
             pid: Some(1234),

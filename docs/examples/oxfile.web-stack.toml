@@ -30,6 +30,8 @@ cwd = "./services/api"
 depends_on = ["db", "redis"]
 start_order = 10
 restart_delay_secs = 2
+cluster_mode = true
+cluster_instances = 4
 namespace = "backend"
 max_cpu_percent = 85.0
 
