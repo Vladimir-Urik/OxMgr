@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -151,17 +151,49 @@ fn rotated_path(path: &Path, index: u32) -> PathBuf {
 }
 
 pub fn read_last_lines(path: &Path, max_lines: usize) -> Result<Vec<String>> {
-    if !path.exists() {
+    if max_lines == 0 || !path.exists() {
         return Ok(Vec::new());
     }
 
-    let file = File::open(path).with_context(|| format!("failed opening {}", path.display()))?;
-    let reader = BufReader::new(file);
+    let mut file =
+        File::open(path).with_context(|| format!("failed opening {}", path.display()))?;
+    let total_size = file
+        .metadata()
+        .with_context(|| format!("failed to stat {}", path.display()))?
+        .len();
+    if total_size == 0 {
+        return Ok(Vec::new());
+    }
+
+    const CHUNK_SIZE: u64 = 16 * 1024;
+    let mut offset = total_size;
+    let mut newline_count = 0usize;
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+
+    while offset > 0 && newline_count <= max_lines {
+        let read_len = CHUNK_SIZE.min(offset) as usize;
+        offset -= read_len as u64;
+
+        file.seek(SeekFrom::Start(offset))
+            .with_context(|| format!("failed seeking {}", path.display()))?;
+
+        let mut chunk = vec![0_u8; read_len];
+        file.read_exact(&mut chunk)
+            .with_context(|| format!("failed reading {}", path.display()))?;
+        newline_count += chunk.iter().filter(|&&byte| byte == b'\n').count();
+        chunks.push(chunk);
+    }
+
+    let total_bytes: usize = chunks.iter().map(Vec::len).sum();
+    let mut bytes = Vec::with_capacity(total_bytes);
+    for chunk in chunks.iter().rev() {
+        bytes.extend_from_slice(chunk);
+    }
+    let text = String::from_utf8_lossy(&bytes);
 
     let mut ring = VecDeque::with_capacity(max_lines.saturating_add(1));
-    for line in reader.lines() {
-        let line = line.with_context(|| format!("failed reading {}", path.display()))?;
-        ring.push_back(line);
+    for line in text.lines() {
+        ring.push_back(line.to_string());
         if ring.len() > max_lines {
             ring.pop_front();
         }

@@ -45,7 +45,7 @@ sudo apt update
 sudo apt install oxmgr
 ```
 
-Signed repository (recommended, if APT signing is enabled in release workflow):
+Signed repository (recommended):
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings

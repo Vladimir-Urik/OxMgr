@@ -5,8 +5,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
+const BUILD_VERSION: &str = env!("OXMGR_BUILD_VERSION");
+
 #[derive(Debug, Parser)]
-#[command(name = "oxmgr", version, about = "Oxmgr process manager")]
+#[command(name = "oxmgr", version = BUILD_VERSION, about = "Oxmgr process manager")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

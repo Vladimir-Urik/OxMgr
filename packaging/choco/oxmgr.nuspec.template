@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+<package>
   <metadata>
     <id>oxmgr</id>
     <version>__VERSION__</version>
@@ -13,6 +13,7 @@
     <packageSourceUrl>https://github.com/Vladimir-Urik/OxMgr</packageSourceUrl>
   </metadata>
   <files>
-    <file src="tools\\**" target="tools" />
+    <file src="tools\chocolateyinstall.ps1" target="tools\chocolateyinstall.ps1" />
+    <file src="tools\chocolateyuninstall.ps1" target="tools\chocolateyuninstall.ps1" />
   </files>
 </package>

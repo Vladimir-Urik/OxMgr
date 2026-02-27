@@ -54,6 +54,8 @@ jobs:
       - name: Build binary (Unix)
         if: runner.os != 'Windows'
         shell: bash
+        env:
+          OXMGR_BUILD_VERSION: ${{ env.VERSION }}
         run: |
           set -euo pipefail
           cargo build --release --target "${{ matrix.target }}"
@@ -69,6 +71,8 @@ jobs:
       - name: Build binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          OXMGR_BUILD_VERSION: ${{ env.VERSION }}
         run: |
           cargo build --release --target "${{ matrix.target }}"
 
@@ -313,17 +317,16 @@ jobs:
 
           $nuspec = Get-Content "packaging/choco/oxmgr.nuspec.template" -Raw
           $nuspec = $nuspec.Replace('__VERSION__', $version)
-          Set-Content "choco-build/oxmgr.nuspec" $nuspec -NoNewline
+          Set-Content "choco-build/oxmgr.nuspec" $nuspec -NoNewline -Encoding utf8
 
           $install = Get-Content "packaging/choco/tools/chocolateyinstall.ps1.template" -Raw
           $install = $install.Replace('__URL__', $url).Replace('__SHA256__', $sha)
-          Set-Content "choco-build/tools/chocolateyinstall.ps1" $install -NoNewline
+          Set-Content "choco-build/tools/chocolateyinstall.ps1" $install -NoNewline -Encoding utf8
 
           Copy-Item "packaging/choco/tools/chocolateyuninstall.ps1" "choco-build/tools/chocolateyuninstall.ps1" -Force
 
-          Push-Location "choco-build"
-          choco pack "oxmgr.nuspec" --outputdirectory "."
-          Pop-Location
+          Get-ChildItem -Recurse "choco-build" | ForEach-Object { $_.FullName }
+          choco pack "choco-build/oxmgr.nuspec" --base-path "choco-build" --outputdirectory "choco-build"
 
           $nupkg = Get-ChildItem choco-build -Filter "oxmgr.$version.nupkg" | Select-Object -First 1
           if (-not $nupkg) {

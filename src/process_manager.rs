@@ -1100,8 +1100,9 @@ async fn terminate_pid(pid: u32, signal_name: Option<&str>, timeout: Duration) -
         }
     }
 
+    let graceful_wait = graceful_wait_before_force_kill(signal, timeout);
     let start = Instant::now();
-    while start.elapsed() < timeout {
+    while start.elapsed() < graceful_wait {
         if !process_exists(pid) {
             return Ok(());
         }
@@ -1114,6 +1115,18 @@ async fn terminate_pid(pid: u32, signal_name: Option<&str>, timeout: Duration) -
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn graceful_wait_before_force_kill(
+    signal: nix::sys::signal::Signal,
+    timeout: Duration,
+) -> Duration {
+    if signal == nix::sys::signal::Signal::SIGTERM {
+        timeout.min(Duration::from_secs(15))
+    } else {
+        timeout
+    }
 }
 
 #[cfg(unix)]
@@ -1210,7 +1223,10 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use super::{compute_restart_delay_secs, maybe_reset_backoff_attempt, now_epoch_secs};
+    use super::{
+        compute_restart_delay_secs, graceful_wait_before_force_kill, maybe_reset_backoff_attempt,
+        now_epoch_secs,
+    };
     use crate::process::{
         DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
     };
@@ -1276,6 +1292,22 @@ mod tests {
             delay
         );
         assert!(delay <= 5, "delay should stay under cap, got {}", delay);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sigterm_escalates_after_fifteen_seconds_max() {
+        let timeout = std::time::Duration::from_secs(30);
+        let grace = graceful_wait_before_force_kill(nix::sys::signal::Signal::SIGTERM, timeout);
+        assert_eq!(grace, std::time::Duration::from_secs(15));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_sigterm_respects_full_timeout() {
+        let timeout = std::time::Duration::from_secs(10);
+        let grace = graceful_wait_before_force_kill(nix::sys::signal::Signal::SIGINT, timeout);
+        assert_eq!(grace, timeout);
     }
 
     fn fixture_process() -> ManagedProcess {

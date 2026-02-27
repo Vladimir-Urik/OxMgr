@@ -5,12 +5,12 @@ use anyhow::{Context, Result};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use tokio::time::{sleep, Duration, MissedTickBehavior};
+use tokio::time::{sleep, timeout, Duration, MissedTickBehavior};
 use tracing::{error, info, warn};
 
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
-use crate::ipc::{read_json_line, send_request, write_json_line, IpcRequest, IpcResponse};
+use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
 use crate::process_manager::ProcessManager;
 
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
@@ -71,7 +71,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
 }
 
 pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
-    if ping(config).await {
+    if daemon_socket_available(&config.daemon_addr).await {
         return Ok(());
     }
 
@@ -86,7 +86,7 @@ pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
         .context("failed to spawn daemon")?;
 
     for _ in 0..50 {
-        if ping(config).await {
+        if daemon_socket_available(&config.daemon_addr).await {
             return Ok(());
         }
         sleep(Duration::from_millis(100)).await;
@@ -95,15 +95,18 @@ pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
     anyhow::bail!("daemon did not become ready in time")
 }
 
-async fn ping(config: &AppConfig) -> bool {
-    match send_request(&config.daemon_addr, &IpcRequest::Ping).await {
-        Ok(response) => response.ok,
-        Err(_) => false,
+async fn daemon_socket_available(daemon_addr: &str) -> bool {
+    match timeout(Duration::from_millis(250), TcpStream::connect(daemon_addr)).await {
+        Ok(Ok(stream)) => {
+            drop(stream);
+            true
+        }
+        _ => false,
     }
 }
 
 async fn bind_listener(daemon_addr: &str) -> Result<TcpListener> {
-    if TcpStream::connect(daemon_addr).await.is_ok() {
+    if daemon_socket_available(daemon_addr).await {
         return Err(OxmgrError::DaemonAlreadyRunning.into());
     }
 
