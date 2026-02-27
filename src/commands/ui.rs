@@ -29,7 +29,6 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
     let mut state = DashboardState::default();
     let mut processes = Vec::<ManagedProcess>::new();
     let mut next_refresh_at = Instant::now();
-    let mut next_heartbeat_at = Instant::now();
     let mut needs_full_clear = true;
     let mut needs_redraw = true;
     let mut should_exit = false;
@@ -58,11 +57,6 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
             needs_redraw = true;
         }
 
-        if now >= next_heartbeat_at {
-            next_heartbeat_at = now + Duration::from_millis(350);
-            needs_redraw = true;
-        }
-
         if needs_redraw {
             frame_info = draw_frame(&processes, &state, refresh_interval, needs_full_clear)?;
             needs_full_clear = false;
@@ -72,6 +66,48 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
         if event::poll(Duration::from_millis(90)).context("failed polling terminal input")? {
             match event::read().context("failed reading terminal input")? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if state.create_form.is_some() {
+                        match key.code {
+                            KeyCode::Esc => {
+                                state.close_create_form();
+                                needs_full_clear = true;
+                                needs_redraw = true;
+                            }
+                            KeyCode::Tab | KeyCode::BackTab => {
+                                if let Some(form) = state.create_form.as_mut() {
+                                    form.toggle_field();
+                                    form.error = None;
+                                }
+                                needs_redraw = true;
+                            }
+                            KeyCode::Backspace => {
+                                if let Some(form) = state.create_form.as_mut() {
+                                    let _ = form.active_mut().pop();
+                                    form.error = None;
+                                }
+                                needs_redraw = true;
+                            }
+                            KeyCode::Enter => {
+                                submit_create_form(config, &mut state).await;
+                                next_refresh_at = Instant::now();
+                                needs_redraw = true;
+                            }
+                            KeyCode::Char(ch) => {
+                                if !ch.is_control() {
+                                    if let Some(form) = state.create_form.as_mut() {
+                                        if form.active_mut().chars().count() < 256 {
+                                            form.active_mut().push(ch);
+                                        }
+                                        form.error = None;
+                                    }
+                                }
+                                needs_redraw = true;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
                     if state.help_open {
                         match key.code {
                             KeyCode::Esc | KeyCode::Char('?') => {
@@ -135,6 +171,10 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                             needs_full_clear = true;
                             needs_redraw = true;
                         }
+                        KeyCode::Char('n') => {
+                            state.open_create_form();
+                            needs_redraw = true;
+                        }
                         KeyCode::Up | KeyCode::Char('k') => {
                             if state.selected > 0 {
                                 state.selected -= 1;
@@ -184,6 +224,13 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                     }
                 }
                 Event::Mouse(mouse) => {
+                    if state.create_form.is_some() {
+                        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+                            needs_redraw = true;
+                        }
+                        continue;
+                    }
+
                     if state.help_open {
                         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                             state.toggle_help();
@@ -240,6 +287,7 @@ struct DashboardState {
     esc_menu_open: bool,
     esc_menu_selected: EscMenuChoice,
     help_open: bool,
+    create_form: Option<CreateProcessForm>,
 }
 
 #[derive(Debug)]
@@ -260,6 +308,21 @@ enum EscMenuChoice {
     #[default]
     Resume,
     Quit,
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+enum CreateField {
+    #[default]
+    Command,
+    Name,
+}
+
+#[derive(Debug, Default)]
+struct CreateProcessForm {
+    command: String,
+    name: String,
+    active: CreateField,
+    error: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -351,6 +414,30 @@ impl DashboardState {
 
     fn toggle_help(&mut self) {
         self.help_open = !self.help_open;
+    }
+
+    fn open_create_form(&mut self) {
+        self.create_form = Some(CreateProcessForm::default());
+    }
+
+    fn close_create_form(&mut self) {
+        self.create_form = None;
+    }
+}
+
+impl CreateProcessForm {
+    fn toggle_field(&mut self) {
+        self.active = match self.active {
+            CreateField::Command => CreateField::Name,
+            CreateField::Name => CreateField::Command,
+        };
+    }
+
+    fn active_mut(&mut self) -> &mut String {
+        match self.active {
+            CreateField::Command => &mut self.command,
+            CreateField::Name => &mut self.name,
+        }
     }
 }
 
@@ -524,8 +611,77 @@ async fn tail_selected(
     }
 }
 
+async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
+    let Some(form) = state.create_form.as_ref() else {
+        return;
+    };
+
+    let command = form.command.trim().to_string();
+    let name_text = form.name.trim().to_string();
+    if command.is_empty() {
+        if let Some(form) = state.create_form.as_mut() {
+            form.error = Some("command is required".to_string());
+        }
+        return;
+    }
+
+    let spec = crate::process::StartProcessSpec {
+        command,
+        name: if name_text.is_empty() {
+            None
+        } else {
+            Some(name_text)
+        },
+        restart_policy: crate::process::RestartPolicy::OnFailure,
+        max_restarts: 10,
+        cwd: None,
+        env: std::collections::HashMap::new(),
+        health_check: None,
+        stop_signal: None,
+        stop_timeout_secs: 5,
+        restart_delay_secs: 0,
+        start_delay_secs: 0,
+        watch: false,
+        cluster_mode: false,
+        cluster_instances: None,
+        namespace: None,
+        resource_limits: None,
+        git_repo: None,
+        git_ref: None,
+        pull_secret_hash: None,
+    };
+
+    match send_request(
+        &config.daemon_addr,
+        &IpcRequest::Start {
+            spec: Box::new(spec),
+        },
+    )
+    .await
+    {
+        Ok(response) => match expect_ok(response) {
+            Ok(ok) => {
+                state.set_info(ok.message);
+                state.close_create_form();
+            }
+            Err(err) => {
+                if let Some(form) = state.create_form.as_mut() {
+                    form.error = Some(err.to_string());
+                }
+            }
+        },
+        Err(err) => {
+            if let Some(form) = state.create_form.as_mut() {
+                form.error = Some(err.to_string());
+            }
+        }
+    }
+}
+
 fn compute_table_view(height: usize, selected: usize) -> TableView {
-    let visible_rows = height.saturating_sub(16).max(3);
+    // Static frame rows outside table:
+    // 6 rows above table + 2 table header rows + 1 bottom border = 9.
+    let visible_rows = height.saturating_sub(9).max(1);
     let start_index = if selected >= visible_rows {
         selected + 1 - visible_rows
     } else {
@@ -587,7 +743,7 @@ fn handle_table_mouse_selection(
 ) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            let table_first_row = 8_u16;
+            let table_first_row = 9_u16;
             let table_last_row = table_first_row + view.visible_rows.saturating_sub(1) as u16;
             if mouse.row < table_first_row || mouse.row > table_last_row {
                 return;
@@ -727,7 +883,7 @@ fn draw_frame(
         write_line(
             &mut frame,
             &frame_content_line(
-                " Keys: j/k move  s stop  r restart  l reload  p pull  t tail  g/space refresh  ? help  Esc menu ",
+                " Keys: j/k move  n new  s stop  r restart  l reload  p pull  t tail  g/space refresh  ? help  Esc menu ",
                 width,
             ),
         )?;
@@ -735,16 +891,14 @@ fn draw_frame(
 
     write_line(
         &mut frame,
-        &paint("1;36", &frame_line("╠", "╣", width, '═')),
+        &paint(
+            "1;36",
+            &frame_line_with_label("╠", "╣", width, '═', "SERVICES"),
+        ),
     )?;
 
     draw_table(&mut frame, processes, &table_view, state.selected, width)?;
 
-    write_line(
-        &mut frame,
-        &paint("1;36", &frame_line("╠", "╣", width, '═')),
-    )?;
-    draw_details(&mut frame, processes, state.selected, width)?;
     write_line(
         &mut frame,
         &paint("1;36", &frame_line("╚", "╝", width, '═')),
@@ -757,13 +911,20 @@ fn draw_frame(
     }
     out.write_all(&frame)
         .context("failed writing terminal dashboard frame")?;
-    execute!(out, Clear(ClearType::FromCursorDown)).context("failed clearing trailing area")?;
 
     if let Some(layout) = menu_layout {
         draw_esc_menu(&mut out, layout, state.esc_menu_selected)?;
     }
+    if let Some(process) = processes.get(state.selected) {
+        if !state.esc_menu_open && !state.help_open && state.create_form.is_none() {
+            draw_process_sidebar(&mut out, width, height, process, processes.len())?;
+        }
+    }
     if state.help_open {
         draw_help_overlay(&mut out, width, height)?;
+    }
+    if let Some(form) = state.create_form.as_ref() {
+        draw_create_overlay(&mut out, width, height, form)?;
     }
 
     out.flush().context("failed flushing terminal frame")?;
@@ -781,7 +942,7 @@ fn draw_table(
     selected: usize,
     width: usize,
 ) -> Result<()> {
-    let cols: [(&str, usize); 9] = [
+    let mut cols: [(&str, usize); 9] = [
         ("S", 1),
         ("ID", 4),
         ("NAME", 18),
@@ -789,18 +950,23 @@ fn draw_table(
         ("PID", 8),
         ("UPTIME", 9),
         ("CPU%", 6),
-        ("RAM", 7),
+        ("RAM", 9),
         ("HEALTH", 9),
     ];
 
-    let min_table_width = cols.iter().map(|(_, col)| *col).sum::<usize>() + (cols.len() - 1) * 3;
-    if min_table_width + 4 > width {
+    let separators_width = (cols.len() - 1) * 3;
+    let min_table_width = cols.iter().map(|(_, col)| *col).sum::<usize>() + separators_width;
+    let inner_width = width.saturating_sub(2);
+    if min_table_width > inner_width {
         write_line(
             out,
             &frame_content_line(" table too wide for current terminal ", width),
         )?;
         return Ok(());
     }
+    let extra = inner_width - min_table_width;
+    // Stretch table to full frame width by allocating slack to NAME column.
+    cols[2].1 = cols[2].1.saturating_add(extra);
 
     let mut header_parts = Vec::with_capacity(cols.len());
     for (name, col_width) in cols {
@@ -812,10 +978,10 @@ fn draw_table(
     )?;
     write_line(
         out,
-        &frame_content_line(&paint("2;34", &"─".repeat(min_table_width)), width),
+        &frame_content_line(&paint("2;34", &"─".repeat(inner_width)), width),
     )?;
 
-    let visible_rows = table_view.visible_rows.max(3);
+    let visible_rows = table_view.visible_rows;
     let start = table_view.start_index;
     let end = min(processes.len(), start + visible_rows);
 
@@ -829,10 +995,11 @@ fn draw_table(
             let mark = if idx == selected { "▸" } else { " " };
             let status_raw = process.status.to_string();
             let health_raw = process.health_status.to_string();
+            let ram_text = format_memory_cell(process.memory_bytes);
             let row_cells = vec![
                 pad(mark, 1),
                 pad(&process.id.to_string(), 4),
-                pad(&truncate(&process.name, 18), 18),
+                pad(&truncate(&process.name, cols[2].1), cols[2].1),
                 style_status(&pad(&status_raw, 10), &status_raw),
                 pad(
                     &process
@@ -845,7 +1012,7 @@ fn draw_table(
                     9,
                 ),
                 pad(&format!("{:.1}", process.cpu_percent), 6),
-                pad(&(process.memory_bytes / (1024 * 1024)).to_string(), 7),
+                pad(&ram_text, 9),
                 style_health(&pad(&health_raw, 9), &health_raw),
             ];
             let base = row_cells.join(" │ ");
@@ -859,146 +1026,6 @@ fn draw_table(
     }
 
     for _ in end.saturating_sub(start)..visible_rows {
-        write_line(out, &frame_content_line(" ", width))?;
-    }
-
-    Ok(())
-}
-
-fn draw_details(
-    out: &mut impl Write,
-    processes: &[ManagedProcess],
-    selected: usize,
-    width: usize,
-) -> Result<()> {
-    if let Some(process) = processes.get(selected) {
-        let max_ram_bytes = processes
-            .iter()
-            .map(|item| item.memory_bytes)
-            .max()
-            .unwrap_or(process.memory_bytes.max(1));
-        let ram_ratio = if max_ram_bytes == 0 {
-            0.0
-        } else {
-            (process.memory_bytes as f64 / max_ram_bytes as f64) as f32 * 100.0
-        };
-
-        let detail_title = format!(" Selected: {} (id {}) ", process.name, process.id);
-        let mode = if process.cluster_mode {
-            process
-                .cluster_instances
-                .map(|instances| format!("cluster:{instances}"))
-                .unwrap_or_else(|| "cluster:auto".to_string())
-        } else {
-            "single".to_string()
-        };
-        write_line(
-            out,
-            &frame_content_line(&paint("1;37", &detail_title), width),
-        )?;
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(
-                    " PID {}  •  Uptime {}  •  Restarts {}/{}  •  Mode {} ",
-                    process
-                        .pid
-                        .map_or_else(|| "-".to_string(), |pid| pid.to_string()),
-                    format_process_uptime(&process.status, process.last_started_at),
-                    process.restart_count,
-                    process.max_restarts,
-                    mode
-                ),
-                width,
-            ),
-        )?;
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(
-                    " Watch {}  •  Namespace {}  •  Pull Hook {} ",
-                    if process.watch { "on" } else { "off" },
-                    process.namespace.as_deref().unwrap_or("-"),
-                    if process.pull_secret_hash.is_some() {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    }
-                ),
-                width,
-            ),
-        )?;
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(
-                    " CPU {} {:>5.1}% ",
-                    paint("1;32", &progress_bar(process.cpu_percent, 24)),
-                    process.cpu_percent
-                ),
-                width,
-            ),
-        )?;
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(
-                    " RAM {} {:>5} MB ",
-                    paint("1;35", &progress_bar(ram_ratio, 24)),
-                    process.memory_bytes / (1024 * 1024)
-                ),
-                width,
-            ),
-        )?;
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(
-                    " Git: {}{}",
-                    process.git_repo.as_deref().unwrap_or("-"),
-                    process
-                        .git_ref
-                        .as_ref()
-                        .map(|value| format!(" @ {value}"))
-                        .unwrap_or_default()
-                ),
-                width,
-            ),
-        )?;
-        let command = if process.args.is_empty() {
-            process.command.clone()
-        } else {
-            format!("{} {}", process.command, process.args.join(" "))
-        };
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(" Cmd: {}", truncate(&command, width.saturating_sub(8))),
-                width,
-            ),
-        )?;
-        write_line(
-            out,
-            &frame_content_line(
-                &format!(
-                    " Cwd: {}",
-                    process
-                        .cwd
-                        .as_ref()
-                        .map(|cwd| cwd.display().to_string())
-                        .unwrap_or_else(|| "-".to_string())
-                ),
-                width,
-            ),
-        )?;
-    } else {
-        write_line(out, &frame_content_line(" No process selected ", width))?;
-        write_line(out, &frame_content_line(" ", width))?;
-        write_line(out, &frame_content_line(" ", width))?;
-        write_line(out, &frame_content_line(" ", width))?;
-        write_line(out, &frame_content_line(" ", width))?;
-        write_line(out, &frame_content_line(" ", width))?;
-        write_line(out, &frame_content_line(" ", width))?;
         write_line(out, &frame_content_line(" ", width))?;
     }
 
@@ -1101,6 +1128,236 @@ fn draw_help_overlay(out: &mut impl Write, width: usize, height: usize) -> Resul
     Ok(())
 }
 
+fn draw_create_overlay(
+    out: &mut impl Write,
+    width: usize,
+    height: usize,
+    form: &CreateProcessForm,
+) -> Result<()> {
+    if width < 50 || height < 14 {
+        return Ok(());
+    }
+
+    let box_width = 86_u16.min(width as u16 - 4);
+    let box_height = 10_u16.min(height as u16 - 4);
+    let box_x = ((width as u16).saturating_sub(box_width)) / 2;
+    let box_y = ((height as u16).saturating_sub(box_height)) / 2;
+    let inner = box_width.saturating_sub(2) as usize;
+
+    let top = format!("╔{}╗", "═".repeat(inner));
+    let bottom = format!("╚{}╝", "═".repeat(inner));
+    execute!(out, cursor::MoveTo(box_x, box_y))?;
+    write!(out, "{}", paint("1;34", &top))?;
+
+    let title = centered(" CREATE PROCESS ", inner);
+    execute!(out, cursor::MoveTo(box_x, box_y + 1))?;
+    write!(out, "{}", paint("1;34", "║"))?;
+    write!(out, "{}", paint("1;37", &title))?;
+    write!(out, "{}", paint("1;34", "║"))?;
+
+    let hint = "Enter=create  Tab=switch field  Esc=cancel";
+    execute!(out, cursor::MoveTo(box_x, box_y + 2))?;
+    write!(out, "{}", paint("1;34", "║"))?;
+    let hint = truncate_visible_ansi(hint, inner);
+    write!(out, "{hint}")?;
+    let hint_fill = inner.saturating_sub(visible_len(&hint));
+    if hint_fill > 0 {
+        write!(out, "{}", " ".repeat(hint_fill))?;
+    }
+    write!(out, "{}", paint("1;34", "║"))?;
+
+    let command_label = if form.active == CreateField::Command {
+        paint("1;30;46", " command ")
+    } else {
+        paint("1;36", " command ")
+    };
+    let name_label = if form.active == CreateField::Name {
+        paint("1;30;46", " name ")
+    } else {
+        paint("1;36", " name ")
+    };
+
+    let command_line = format!("{command_label}: {}", form.command);
+    execute!(out, cursor::MoveTo(box_x, box_y + 4))?;
+    write!(out, "{}", paint("1;34", "║"))?;
+    let command_line = truncate_visible_ansi(&command_line, inner);
+    write!(out, "{command_line}")?;
+    let cmd_fill = inner.saturating_sub(visible_len(&command_line));
+    if cmd_fill > 0 {
+        write!(out, "{}", " ".repeat(cmd_fill))?;
+    }
+    write!(out, "{}", paint("1;34", "║"))?;
+
+    let name_line = format!("{name_label}: {}", form.name);
+    execute!(out, cursor::MoveTo(box_x, box_y + 5))?;
+    write!(out, "{}", paint("1;34", "║"))?;
+    let name_line = truncate_visible_ansi(&name_line, inner);
+    write!(out, "{name_line}")?;
+    let name_fill = inner.saturating_sub(visible_len(&name_line));
+    if name_fill > 0 {
+        write!(out, "{}", " ".repeat(name_fill))?;
+    }
+    write!(out, "{}", paint("1;34", "║"))?;
+
+    let error_text = form
+        .error
+        .as_ref()
+        .map(|value| paint("1;31", &format!(" error: {}", value)))
+        .unwrap_or_else(|| paint("1;32", " ready"));
+    execute!(out, cursor::MoveTo(box_x, box_y + 7))?;
+    write!(out, "{}", paint("1;34", "║"))?;
+    let error_text = truncate_visible_ansi(&error_text, inner);
+    write!(out, "{error_text}")?;
+    let error_fill = inner.saturating_sub(visible_len(&error_text));
+    if error_fill > 0 {
+        write!(out, "{}", " ".repeat(error_fill))?;
+    }
+    write!(out, "{}", paint("1;34", "║"))?;
+
+    for row in [box_y + 3, box_y + 6, box_y + 8] {
+        execute!(out, cursor::MoveTo(box_x, row))?;
+        write!(out, "{}", paint("1;34", "║"))?;
+        write!(out, "{}", " ".repeat(inner))?;
+        write!(out, "{}", paint("1;34", "║"))?;
+    }
+
+    execute!(
+        out,
+        cursor::MoveTo(box_x, box_y + box_height.saturating_sub(1))
+    )?;
+    write!(out, "{}", paint("1;34", &bottom))?;
+    Ok(())
+}
+
+fn draw_process_sidebar(
+    out: &mut impl Write,
+    width: usize,
+    height: usize,
+    process: &ManagedProcess,
+    process_count: usize,
+) -> Result<()> {
+    if width < 100 || height < 14 {
+        return Ok(());
+    }
+
+    let box_width = 44_u16.min(width as u16 - 4);
+    let box_x = (width as u16).saturating_sub(box_width + 1);
+    let box_y = 7_u16;
+    let max_height = (height as u16).saturating_sub(box_y + 1);
+    let box_height = max_height.min(24).max(12);
+    let inner = box_width.saturating_sub(2) as usize;
+
+    let top = format!("╔{}╗", "═".repeat(inner));
+    let bottom = format!("╚{}╝", "═".repeat(inner));
+    execute!(out, cursor::MoveTo(box_x, box_y))?;
+    write!(out, "{}", paint("1;34", &top))?;
+
+    let mode = if process.cluster_mode {
+        process
+            .cluster_instances
+            .map(|instances| format!("cluster:{instances}"))
+            .unwrap_or_else(|| "cluster:auto".to_string())
+    } else {
+        "single".to_string()
+    };
+    let ram_pct = ((process.memory_bytes as f64) / (1024.0 * 1024.0 * 1024.0) * 100.0)
+        .clamp(0.0, 100.0) as f32;
+    let command = if process.args.is_empty() {
+        process.command.clone()
+    } else {
+        format!("{} {}", process.command, process.args.join(" "))
+    };
+
+    let lines = vec![
+        paint("1;37", &centered(" PROCESS SIDEBAR ", inner)),
+        format!(" selected {} / {} ", process.id, process_count),
+        format!(" name: {}", process.name),
+        format!(
+            " status: {}",
+            style_status(&process.status.to_string(), &process.status.to_string())
+        ),
+        format!(
+            " health: {}",
+            style_health(
+                &process.health_status.to_string(),
+                &process.health_status.to_string()
+            )
+        ),
+        format!(
+            " pid: {}",
+            process
+                .pid
+                .map_or_else(|| "-".to_string(), |value| value.to_string())
+        ),
+        format!(
+            " uptime: {}",
+            format_process_uptime(&process.status, process.last_started_at)
+        ),
+        format!(
+            " restarts: {}/{}",
+            process.restart_count, process.max_restarts
+        ),
+        format!(" mode: {}", mode),
+        format!(" cpu: {:>5.1}%", process.cpu_percent),
+        format!(
+            " cpubar: {}",
+            paint("1;32", &progress_bar(process.cpu_percent, 16))
+        ),
+        format!(" ram: {}", format_memory_cell(process.memory_bytes)),
+        format!(" rambar: {}", paint("1;35", &progress_bar(ram_pct, 16))),
+        format!(
+            " pull hook: {}",
+            if process.pull_secret_hash.is_some() {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ),
+        format!(" watch: {}", if process.watch { "on" } else { "off" }),
+        format!(" ns: {}", process.namespace.as_deref().unwrap_or("-")),
+        format!(" cmd: {}", truncate(&command, inner.saturating_sub(6))),
+        format!(
+            " cwd: {}",
+            process
+                .cwd
+                .as_ref()
+                .map(|cwd| cwd.display().to_string())
+                .unwrap_or_else(|| "-".to_string())
+        ),
+        format!(
+            " git: {}{}",
+            process.git_repo.as_deref().unwrap_or("-"),
+            process
+                .git_ref
+                .as_ref()
+                .map(|value| format!(" @ {value}"))
+                .unwrap_or_default()
+        ),
+    ];
+
+    let max_lines = box_height.saturating_sub(2) as usize;
+    for idx in 0..max_lines {
+        let y = box_y + 1 + idx as u16;
+        execute!(out, cursor::MoveTo(box_x, y))?;
+        write!(out, "{}", paint("1;34", "║"))?;
+        let value = lines.get(idx).cloned().unwrap_or_default();
+        let value = truncate_visible_ansi(&value, inner);
+        write!(out, "{value}")?;
+        let fill = inner.saturating_sub(visible_len(&value));
+        if fill > 0 {
+            write!(out, "{}", " ".repeat(fill))?;
+        }
+        write!(out, "{}", paint("1;34", "║"))?;
+    }
+
+    execute!(
+        out,
+        cursor::MoveTo(box_x, box_y + box_height.saturating_sub(1))
+    )?;
+    write!(out, "{}", paint("1;34", &bottom))?;
+    Ok(())
+}
+
 fn centered(text: &str, width: usize) -> String {
     let len = text.chars().count();
     if len >= width {
@@ -1118,10 +1375,46 @@ fn progress_bar(percent: f32, width: usize) -> String {
     format!("{}{}", "█".repeat(filled), "░".repeat(width - filled))
 }
 
+fn format_memory_cell(memory_bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+    let bytes = memory_bytes as f64;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes / GB)
+    } else if bytes >= MB {
+        format!("{} MB", (bytes / MB).round() as u64)
+    } else if bytes >= KB {
+        format!("{} KB", (bytes / KB).round() as u64)
+    } else {
+        format!("{memory_bytes} B")
+    }
+}
+
 fn frame_line(left: &str, right: &str, width: usize, fill: char) -> String {
     format!(
         "{left}{}{right}",
         fill.to_string().repeat(width.saturating_sub(2))
+    )
+}
+
+fn frame_line_with_label(left: &str, right: &str, width: usize, fill: char, label: &str) -> String {
+    let inner = width.saturating_sub(2);
+    let label = format!(" {label} ");
+    let label_len = label.chars().count();
+    if label_len >= inner {
+        return frame_line(left, right, width, fill);
+    }
+
+    let remaining = inner - label_len;
+    let left_len = remaining / 2;
+    let right_len = remaining - left_len;
+    format!(
+        "{left}{}{}{}{right}",
+        fill.to_string().repeat(left_len),
+        label,
+        fill.to_string().repeat(right_len)
     )
 }
 
@@ -1280,9 +1573,9 @@ mod tests {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
     use super::{
-        compute_table_view, esc_menu_layout, handle_menu_mouse, progress_bar, truncate,
-        truncate_visible_ansi, visible_len, DashboardState, EscMenuChoice, EscMenuLayout,
-        FlashLevel, FlashMessage,
+        compute_table_view, esc_menu_layout, format_memory_cell, frame_line_with_label,
+        handle_menu_mouse, progress_bar, truncate, truncate_visible_ansi, visible_len, CreateField,
+        CreateProcessForm, DashboardState, EscMenuChoice, EscMenuLayout, FlashLevel, FlashMessage,
     };
 
     #[test]
@@ -1306,8 +1599,8 @@ mod tests {
     #[test]
     fn compute_table_view_scrolls_selected_row_into_view() {
         let view = compute_table_view(24, 12);
-        assert!(view.start_index > 0);
-        assert_eq!(view.visible_rows, 8);
+        assert_eq!(view.start_index, 0);
+        assert_eq!(view.visible_rows, 15);
     }
 
     #[test]
@@ -1370,5 +1663,35 @@ mod tests {
 
         assert!(state.prune_flash());
         assert!(state.flash.is_none());
+    }
+
+    #[test]
+    fn format_memory_cell_includes_units() {
+        assert_eq!(format_memory_cell(39 * 1024 * 1024), "39 MB");
+        assert_eq!(format_memory_cell(512), "512 B");
+        assert!(
+            format_memory_cell(3 * 1024 * 1024 * 1024).ends_with("GB"),
+            "expected GB unit for large values"
+        );
+    }
+
+    #[test]
+    fn frame_line_with_label_preserves_total_width() {
+        let line = frame_line_with_label("╠", "╣", 40, '═', "SERVICES");
+        assert_eq!(line.chars().count(), 40);
+        assert!(line.contains(" SERVICES "));
+    }
+
+    #[test]
+    fn create_form_toggles_and_edits_active_field() {
+        let mut form = CreateProcessForm::default();
+        assert_eq!(form.active, CreateField::Command);
+        form.active_mut().push_str("node app.js");
+        form.toggle_field();
+        assert_eq!(form.active, CreateField::Name);
+        form.active_mut().push_str("api");
+
+        assert_eq!(form.command, "node app.js");
+        assert_eq!(form.name, "api");
     }
 }

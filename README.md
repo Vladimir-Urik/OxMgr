@@ -11,6 +11,7 @@ Supported platforms: **Linux, macOS, Windows**.
 ## Documentation
 
 - [Docs Index](./docs/README.md)
+- [User Guide](./docs/USAGE.md)
 - [Installation Guide](./docs/install.md)
 - [CLI Reference](./docs/CLI.md)
 - [Terminal UI Guide](./docs/UI.md)
@@ -159,6 +160,7 @@ oxmgr logs api -f
 
 - Navigate with `j/k` or arrow keys.
 - Open menu with `Esc`, quit with `q`.
+- `n` opens create-process modal directly in UI.
 - Run actions directly on selected service:
 - `s` stop
 - `r` restart
@@ -168,6 +170,7 @@ oxmgr logs api -f
 - `g` / `Space` force refresh
 - `?` toggle help overlay
 - Mouse row selection and wheel scrolling are supported.
+- Selected process gets a right-side detail sidebar (status, health, cpu/ram bars, git/process info).
 
 More details: [docs/UI.md](./docs/UI.md).
 
@@ -272,7 +275,7 @@ Cluster mode notes:
 
 Gracefully stop process.
 
-### `oxmgr restart <name|id>`
+### `oxmgr restart <name|id>` / `oxmgr rs <name|id>`
 
 Stop and start process using stored definition.
 
@@ -284,11 +287,11 @@ Start a replacement instance, then terminate the old one (best effort no-downtim
 
 Pull latest changes from configured git repository and reload/restart service only when commit changed.
 
-### `oxmgr delete <name|id>`
+### `oxmgr delete <name|id>` / `oxmgr rm <name|id>`
 
 Remove process definition (stops it first if running).
 
-### `oxmgr list` / `oxmgr ls`
+### `oxmgr list` / `oxmgr ls` / `oxmgr ps`
 
 Show all managed processes with runtime metrics.
 
@@ -306,7 +309,7 @@ Options:
 
 - `--interval-ms <n>` refresh interval in milliseconds (default `800`)
 
-### `oxmgr logs <name|id>`
+### `oxmgr logs <name|id>` / `oxmgr log <name|id>`
 
 Show process logs.
 

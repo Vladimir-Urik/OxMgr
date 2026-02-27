@@ -6,9 +6,53 @@ use clap::{Parser, Subcommand, ValueEnum};
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
 const BUILD_VERSION: &str = env!("OXMGR_BUILD_VERSION");
+const HELP_TEMPLATE: &str = "\
+{before-help}{name} {version}
+{about-with-newline}
+USAGE:
+  {usage}
+
+COMMANDS:
+{subcommands}
+
+OPTIONS:
+{options}
+{after-help}
+";
+const HELP_AFTER: &str = "\
+Quick Command Map
+  Runtime:
+    list/ls/ps, status, ui, logs/log
+  Lifecycle:
+    start, stop, restart/rs, reload, pull, delete/rm
+  Config:
+    import, export, apply, validate, convert
+  Platform:
+    service, startup, daemon, doctor
+  Deploy:
+    deploy
+
+Compatibility Aliases
+  list    -> ls, ps
+  delete  -> rm
+  restart -> rs
+  logs    -> log
+
+Examples
+  oxmgr ps
+  oxmgr rs api
+  oxmgr log api -f
+  oxmgr rm api
+";
 
 #[derive(Debug, Parser)]
-#[command(name = "oxmgr", version = BUILD_VERSION, about = "Oxmgr process manager")]
+#[command(
+    name = "oxmgr",
+    version = BUILD_VERSION,
+    about = "Oxmgr process manager",
+    help_template = HELP_TEMPLATE,
+    after_help = HELP_AFTER
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -64,6 +108,7 @@ pub enum Commands {
     Stop {
         target: String,
     },
+    #[command(visible_alias = "rs")]
     Restart {
         target: String,
     },
@@ -73,15 +118,17 @@ pub enum Commands {
     Pull {
         target: Option<String>,
     },
+    #[command(visible_alias = "rm")]
     Delete {
         target: String,
     },
-    #[command(alias = "ls")]
+    #[command(visible_aliases = ["ls", "ps"])]
     List,
     Ui {
         #[arg(long, default_value_t = 800)]
         interval_ms: u64,
     },
+    #[command(visible_alias = "log")]
     Logs {
         target: String,
         #[arg(short = 'f', long)]
@@ -378,9 +425,48 @@ mod tests {
     }
 
     #[test]
-    fn clap_parses_list_alias_ls() {
-        let cli = Cli::try_parse_from(["oxmgr", "ls"]).expect("expected CLI parsing success");
-        assert!(matches!(cli.command, Commands::List));
+    fn clap_parses_list_aliases_ls_and_ps() {
+        let ls = Cli::try_parse_from(["oxmgr", "ls"]).expect("expected ls alias parsing success");
+        assert!(matches!(ls.command, Commands::List));
+
+        let ps = Cli::try_parse_from(["oxmgr", "ps"]).expect("expected ps alias parsing success");
+        assert!(matches!(ps.command, Commands::List));
+    }
+
+    #[test]
+    fn clap_parses_restart_alias_rs() {
+        let cli = Cli::try_parse_from(["oxmgr", "rs", "api"]).expect("expected rs alias parsing");
+        match cli.command {
+            Commands::Restart { target } => assert_eq!(target, "api"),
+            _ => panic!("expected restart subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_delete_alias_rm() {
+        let cli = Cli::try_parse_from(["oxmgr", "rm", "api"]).expect("expected rm alias parsing");
+        match cli.command {
+            Commands::Delete { target } => assert_eq!(target, "api"),
+            _ => panic!("expected delete subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_logs_alias_log_with_follow_flag() {
+        let cli =
+            Cli::try_parse_from(["oxmgr", "log", "api", "-f"]).expect("expected log alias parsing");
+        match cli.command {
+            Commands::Logs {
+                target,
+                follow,
+                lines,
+            } => {
+                assert_eq!(target, "api");
+                assert!(follow);
+                assert_eq!(lines, 100);
+            }
+            _ => panic!("expected logs subcommand"),
+        }
     }
 
     #[test]

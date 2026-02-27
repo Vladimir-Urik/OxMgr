@@ -4,6 +4,7 @@ Project docs live here.
 
 ## Guides
 
+- [User Guide](./USAGE.md)
 - [Installation Guide](./install.md)
 - [CLI Reference](./CLI.md)
 - [Terminal UI Guide](./UI.md)

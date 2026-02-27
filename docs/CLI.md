@@ -2,6 +2,31 @@
 
 This page documents Oxmgr CLI commands and options.
 
+## Most Used Commands
+
+Runtime and monitoring:
+
+- `oxmgr list` (aliases: `oxmgr ls`, `oxmgr ps`)
+- `oxmgr status <name|id>`
+- `oxmgr logs <name|id>` (alias: `oxmgr log`)
+- `oxmgr ui`
+
+Lifecycle operations:
+
+- `oxmgr start "<command>" --name <name>`
+- `oxmgr stop <name|id>`
+- `oxmgr restart <name|id>` (alias: `oxmgr rs`)
+- `oxmgr reload <name|id>`
+- `oxmgr pull [name|id]`
+- `oxmgr delete <name|id>` (alias: `oxmgr rm`)
+
+Configuration workflow:
+
+- `oxmgr validate <oxfile.toml>`
+- `oxmgr apply <oxfile.toml>`
+- `oxmgr import <source>`
+- `oxmgr export <name|id>`
+
 ## Start
 
 `oxmgr start "<command>"`
@@ -39,10 +64,10 @@ Cluster mode notes:
 ## Lifecycle
 
 - `oxmgr stop <name|id>`
-- `oxmgr restart <name|id>`
+- `oxmgr restart <name|id>` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
 - `oxmgr pull [name|id]`
-- `oxmgr delete <name|id>`
+- `oxmgr delete <name|id>` (alias: `oxmgr rm`)
 
 `pull` updates from configured git repository and reloads/restarts the service only when commit changed.
 
@@ -50,9 +75,9 @@ Details and webhook flow: [Pull and Webhook Guide](./PULL_WEBHOOK.md).
 
 ## Inspect
 
-- `oxmgr list` (alias: `oxmgr ls`)
+- `oxmgr list` (aliases: `oxmgr ls`, `oxmgr ps`)
 - `oxmgr status <name|id>`
-- `oxmgr logs <name|id> [-f] [--lines <n>]`
+- `oxmgr logs <name|id> [-f] [--lines <n>]` (alias: `oxmgr log`)
 - `oxmgr ui [--interval-ms <n>]`
 
 `list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health.
@@ -63,6 +88,7 @@ Details and webhook flow: [Pull and Webhook Guide](./PULL_WEBHOOK.md).
 
 - `Esc` opens/closes menu
 - arrows or `j/k` move selection
+- `n` create process
 - `s` stop selected
 - `r` restart selected
 - `l` reload selected
