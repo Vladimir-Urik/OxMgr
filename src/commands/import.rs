@@ -284,6 +284,9 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
                 cluster_instances: spec.cluster_instances,
                 namespace: spec.namespace.clone(),
                 resource_limits: spec.resource_limits.clone(),
+                git_repo: spec.git_repo.clone(),
+                git_ref: spec.git_ref.clone(),
+                pull_secret_hash: spec.pull_secret_hash.clone(),
             });
         }
     }
@@ -369,7 +372,14 @@ pub(crate) fn order_specs_for_start(specs: Vec<EcosystemProcessSpec>) -> Vec<Eco
 
 #[cfg(test)]
 mod tests {
-    use super::{is_remote_source, parse_secure_remote_url, verify_sha256};
+    use std::collections::HashMap;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::bundle::encode_bundle;
+    use crate::process::RestartPolicy;
+
+    use super::{is_remote_source, load_local_specs, parse_secure_remote_url, verify_sha256};
 
     #[test]
     fn parse_secure_remote_url_accepts_https_without_credentials() {
@@ -391,6 +401,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_secure_remote_url_rejects_fragment_and_invalid_urls() {
+        let with_fragment = parse_secure_remote_url("https://example.com/file.oxpkg#frag")
+            .expect_err("expected URL fragment rejection");
+        assert!(with_fragment.to_string().contains("fragment"));
+
+        let invalid =
+            parse_secure_remote_url("https://").expect_err("expected invalid URL rejection");
+        assert!(invalid.to_string().contains("invalid remote import URL"));
+    }
+
+    #[test]
     fn verify_sha256_validates_expected_digest() {
         verify_sha256(
             b"abc",
@@ -407,9 +428,117 @@ mod tests {
     }
 
     #[test]
+    fn verify_sha256_rejects_malformed_pin() {
+        let err = verify_sha256(b"abc", "xyz").expect_err("expected digest format rejection");
+        assert!(err.to_string().contains("64-character"));
+    }
+
+    #[test]
     fn is_remote_source_only_matches_http_schemes() {
         assert!(is_remote_source("https://example.com/a.oxpkg"));
         assert!(is_remote_source("http://example.com/a.oxpkg"));
         assert!(!is_remote_source("./a.oxpkg"));
+    }
+
+    #[test]
+    fn load_local_specs_rejects_invalid_bundle_extension() {
+        let path = temp_file_path("invalid-import", "oxpkg");
+        fs::write(&path, "this is not a bundle").expect("failed to write invalid bundle");
+
+        let err = load_local_specs(path.to_str().unwrap_or_default(), None)
+            .expect_err("expected invalid bundle rejection");
+        assert!(err
+            .to_string()
+            .contains("does not contain a valid oxmgr bundle"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_local_specs_reads_exported_bundle() {
+        let path = temp_file_path("valid-import", "oxpkg");
+        let spec = crate::process::StartProcessSpec {
+            command: "node api.js".to_string(),
+            name: Some("api".to_string()),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            cwd: None,
+            env: HashMap::new(),
+            health_check: None,
+            stop_signal: None,
+            stop_timeout_secs: 5,
+            restart_delay_secs: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            namespace: None,
+            resource_limits: None,
+            git_repo: Some("git@github.com:org/api.git".to_string()),
+            git_ref: Some("main".to_string()),
+            pull_secret_hash: None,
+        };
+        let encoded = encode_bundle(&[crate::process::ManagedProcess {
+            id: 1,
+            name: "api".to_string(),
+            command: "node".to_string(),
+            args: vec!["api.js".to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            restart_count: 0,
+            namespace: None,
+            git_repo: spec.git_repo.clone(),
+            git_ref: spec.git_ref.clone(),
+            pull_secret_hash: None,
+            stop_signal: None,
+            stop_timeout_secs: 5,
+            restart_delay_secs: 0,
+            restart_backoff_cap_secs: 300,
+            restart_backoff_reset_secs: 60,
+            restart_backoff_attempt: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            resource_limits: None,
+            cgroup_path: None,
+            pid: None,
+            status: crate::process::ProcessStatus::Stopped,
+            desired_state: crate::process::DesiredState::Stopped,
+            last_exit_code: None,
+            stdout_log: std::env::temp_dir().join("oxmgr-import-test.out.log"),
+            stderr_log: std::env::temp_dir().join("oxmgr-import-test.err.log"),
+            health_check: None,
+            health_status: crate::process::HealthStatus::Unknown,
+            health_failures: 0,
+            last_health_check: None,
+            next_health_check: None,
+            last_health_error: None,
+            cpu_percent: 0.0,
+            memory_bytes: 0,
+            last_metrics_at: None,
+            last_started_at: None,
+            last_stopped_at: None,
+        }])
+        .expect("failed to encode test bundle");
+        fs::write(&path, encoded).expect("failed to write test bundle");
+
+        let specs = load_local_specs(path.to_str().unwrap_or_default(), None)
+            .expect("expected bundle import to parse");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name.as_deref(), Some("api"));
+        assert_eq!(specs[0].git_ref.as_deref(), Some("main"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    fn temp_file_path(prefix: &str, extension: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        std::env::temp_dir().join(format!("oxmgr-{prefix}-{nonce}.{extension}"))
     }
 }

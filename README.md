@@ -13,9 +13,12 @@ Supported platforms: **Linux, macOS, Windows**.
 - [Docs Index](./docs/README.md)
 - [Installation Guide](./docs/install.md)
 - [CLI Reference](./docs/CLI.md)
+- [Terminal UI Guide](./docs/UI.md)
+- [Pull and Webhook Guide](./docs/PULL_WEBHOOK.md)
 - [Deployment Guide](./docs/DEPLOY.md)
 - [Service Bundles](./docs/BUNDLES.md)
 - [Oxfile Specification](./docs/OXFILE.md)
+- [Oxfile vs PM2 Ecosystem](./docs/OXFILE_VS_PM2.md)
 - [Oxfile Examples](./docs/examples)
 
 ## Why Oxmgr Instead Of PM2?
@@ -39,7 +42,7 @@ Supported platforms: **Linux, macOS, Windows**.
 - CLI auto-starts daemon when needed
 - Persistent state in JSON (`state.json`)
 - Per-process stdout/stderr logs + tail mode
-- Interactive terminal UI (`oxmgr ui`) with keyboard and mouse controls
+- Interactive terminal UI (`oxmgr ui`) with keyboard + mouse controls, ESC menu, and help overlay
 - Automatic log rotation and retention policy
 - Process statuses: `running`, `stopped`, `crashed`, `restarting`, `errored`
 - Graceful shutdown (SIGTERM, then SIGKILL on timeout)
@@ -52,6 +55,9 @@ Supported platforms: **Linux, macOS, Windows**.
 - Exponential restart backoff with jitter and cooldown reset
 - Ecosystem config import (`ecosystem.config.json` style) for PM2 drop-in compatibility
 - Compact service export/import bundles (`.oxpkg`) with local + HTTPS import support
+- Built-in git pull + no-downtime reload (`oxmgr pull`)
+- Webhook API (`POST /pull/<name|id>`) with per-service secret
+- Local/remote service transfer via compact `.oxpkg` export/import bundles
 - Idempotent config reconcile via `oxmgr apply`
 - Reload without downtime (best-effort hot replacement)
 - PM2-style remote deployment workflow (`oxmgr deploy ...`)
@@ -139,10 +145,75 @@ oxmgr ui
 # Reload with minimal disruption (best effort)
 oxmgr reload api
 
+# Pull git updates and hot-reload when changed
+oxmgr pull api
+
 # Logs
 oxmgr logs api
 oxmgr logs api -f
 ```
+
+## Terminal UI Controls
+
+`oxmgr ui` is built for fast fleet operations from a terminal:
+
+- Navigate with `j/k` or arrow keys.
+- Open menu with `Esc`, quit with `q`.
+- Run actions directly on selected service:
+- `s` stop
+- `r` restart
+- `l` reload
+- `p` git pull (with conditional reload/restart on change)
+- `t` preview latest log line
+- `g` / `Space` force refresh
+- `?` toggle help overlay
+- Mouse row selection and wheel scrolling are supported.
+
+More details: [docs/UI.md](./docs/UI.md).
+
+## Git Pull and Webhook Workflow
+
+Configure each service in `oxfile.toml`:
+
+```toml
+git_repo = "git@github.com:org/repo.git"
+git_ref = "main"
+pull_secret = "replace-with-random-secret"
+```
+
+Then trigger updates:
+
+```bash
+oxmgr pull api
+
+curl -X POST \
+  -H "X-Oxmgr-Secret: replace-with-random-secret" \
+  http://127.0.0.1:51234/pull/api
+```
+
+Behavior:
+
+- unchanged commit: no restart/reload
+- changed commit while running: reload
+- changed commit while desired-running but currently stopped: restart
+- changed commit while desired-stopped: checkout only
+
+Full guide: [docs/PULL_WEBHOOK.md](./docs/PULL_WEBHOOK.md).
+
+## Bundles and Import Security
+
+`oxmgr export` produces compact `.oxpkg` bundles to move service definitions between hosts.
+
+Security defaults for `oxmgr import`:
+
+- remote URL import only allows `https://`
+- URL credentials/fragments are rejected
+- remote payload size is capped
+- strict schema validation is enforced
+- internal checksum is validated
+- optional explicit pinning via `--sha256`
+
+Bundle reference: [docs/BUNDLES.md](./docs/BUNDLES.md).
 
 ## CLI Reference
 
@@ -208,6 +279,10 @@ Stop and start process using stored definition.
 ### `oxmgr reload <name|id>`
 
 Start a replacement instance, then terminate the old one (best effort no-downtime reload).
+
+### `oxmgr pull [name|id]`
+
+Pull latest changes from configured git repository and reload/restart service only when commit changed.
 
 ### `oxmgr delete <name|id>`
 
@@ -275,6 +350,15 @@ Options:
 - `--only <names>`: comma-separated app names filter
 - `--sha256 <hex>`: optional remote checksum pin (recommended for URL imports)
 - remote URL import requires `curl` available in `PATH`
+
+### Pull Webhook API
+
+Oxmgr daemon exposes an HTTP webhook endpoint:
+
+- `POST /pull/<name|id>`
+- send secret via `X-Oxmgr-Secret` header (or `Authorization: Bearer <secret>`)
+- configure daemon API bind address with `OXMGR_API_ADDR` (defaults to localhost high port)
+- per-service secret is configured in `oxfile.toml` via `pull_secret`
 
 ### `oxmgr apply <path>`
 
@@ -404,6 +488,7 @@ oxmgr service uninstall --system auto
 
 - `OXMGR_HOME`: override Oxmgr data directory (state/logs)
 - `OXMGR_DAEMON_ADDR`: override daemon bind/connect address (default `127.0.0.1:<derived-port>`)
+- `OXMGR_API_ADDR`: override webhook HTTP API bind address (default `127.0.0.1:<derived-port>`)
 - `OXMGR_LOG_MAX_SIZE_MB`: log rotation size threshold in MB (default `20`)
 - `OXMGR_LOG_MAX_FILES`: number of rotated files kept per log (default `5`)
 - `OXMGR_LOG_MAX_DAYS`: maximum rotated log age in days (default `14`)
@@ -495,6 +580,9 @@ Example:
 ## Oxfile Format (`oxfile.toml`)
 
 `oxfile.toml` is Oxmgr-native config with extra features (profiles and dependency ordering).
+
+If you are deciding between PM2 ecosystem JSON and native TOML, see:
+[docs/OXFILE_VS_PM2.md](./docs/OXFILE_VS_PM2.md).
 
 Example:
 
@@ -603,6 +691,11 @@ Current automated tests cover:
 - ecosystem/oxfile resource limit parsing and serialization
 - idempotent `apply` planning behavior (noop/recreate/restart/prune)
 - storage roundtrip and corrupted state recovery
+- secure import URL validation and checksum pinning logic
+- `.oxpkg` bundle integrity + schema validation guards
+- pull workflow summary behavior (unchanged vs updated checkout)
+- webhook auth and API request handling (`POST /pull/<name|id>`)
+- terminal UI helper logic (layout, truncation, menu hitboxes)
 
 Run:
 

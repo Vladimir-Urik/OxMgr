@@ -29,6 +29,9 @@ struct DesiredProcessSpec {
     cluster_instances: Option<u32>,
     namespace: Option<String>,
     resource_limits: Option<ResourceLimits>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret_hash: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +215,9 @@ fn expand_specs_for_apply(
                 cluster_instances: spec.cluster_instances,
                 namespace: spec.namespace.clone(),
                 resource_limits: spec.resource_limits.clone(),
+                git_repo: spec.git_repo.clone(),
+                git_ref: spec.git_ref.clone(),
+                pull_secret_hash: spec.pull_secret_hash.clone(),
             });
         }
     }
@@ -287,6 +293,9 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.cluster_instances == desired.cluster_instances
         && existing.namespace == desired.namespace
         && existing.resource_limits == desired.resource_limits
+        && existing.git_repo == desired.git_repo
+        && existing.git_ref == desired.git_ref
+        && existing.pull_secret_hash == desired.pull_secret_hash
 }
 
 fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
@@ -318,6 +327,9 @@ fn start_request_from_spec(spec: DesiredProcessSpec) -> IpcRequest {
             cluster_instances: spec.cluster_instances,
             namespace: spec.namespace,
             resource_limits: spec.resource_limits,
+            git_repo: spec.git_repo,
+            git_ref: spec.git_ref,
+            pull_secret_hash: spec.pull_secret_hash,
         }),
     }
 }
@@ -400,6 +412,9 @@ mod tests {
             cluster_instances: None,
             namespace: Some("default".to_string()),
             resource_limits: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
         }
     }
 
@@ -424,6 +439,9 @@ mod tests {
             max_restarts: desired.max_restarts,
             restart_count: 0,
             namespace: desired.namespace.clone(),
+            git_repo: desired.git_repo.clone(),
+            git_ref: desired.git_ref.clone(),
+            pull_secret_hash: desired.pull_secret_hash.clone(),
             stop_signal: desired.stop_signal.clone(),
             stop_timeout_secs: desired.stop_timeout_secs,
             restart_delay_secs: desired.restart_delay_secs,

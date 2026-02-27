@@ -15,6 +15,7 @@ pub enum IpcRequest {
     Stop { target: String },
     Restart { target: String },
     Reload { target: String },
+    Pull { target: Option<String> },
     Delete { target: String },
     List,
     Status { target: String },

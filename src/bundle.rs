@@ -67,6 +67,12 @@ struct BundleService {
     namespace: Option<String>,
     #[serde(default)]
     resource_limits: Option<ResourceLimits>,
+    #[serde(default)]
+    git_repo: Option<String>,
+    #[serde(default)]
+    git_ref: Option<String>,
+    #[serde(default)]
+    pull_secret_hash: Option<String>,
 }
 
 pub fn default_bundle_file_name(process_name: &str) -> String {
@@ -278,6 +284,9 @@ impl BundleService {
             cluster_instances: process.cluster_instances.map(|value| value.max(1)),
             namespace: process.namespace.clone(),
             resource_limits: process.resource_limits.clone(),
+            git_repo: process.git_repo.clone(),
+            git_ref: process.git_ref.clone(),
+            pull_secret_hash: process.pull_secret_hash.clone(),
         }
     }
 
@@ -303,6 +312,9 @@ impl BundleService {
             },
             namespace: self.namespace,
             resource_limits: self.resource_limits,
+            git_repo: self.git_repo,
+            git_ref: self.git_ref,
+            pull_secret_hash: self.pull_secret_hash,
         }
     }
 }
@@ -426,6 +438,11 @@ fn validate_service(service: &BundleService) -> Result<()> {
             anyhow::bail!("service '{}' has invalid cluster_instances 0", service.name);
         }
     }
+    if let Some(secret_hash) = service.pull_secret_hash.as_deref() {
+        if secret_hash.len() != 64 || !secret_hash.bytes().all(|ch| ch.is_ascii_hexdigit()) {
+            anyhow::bail!("service '{}' has invalid pull_secret_hash", service.name);
+        }
+    }
 
     Ok(())
 }
@@ -474,6 +491,12 @@ mod tests {
         assert_eq!(spec.stop_timeout_secs, 15);
         assert_eq!(spec.max_restarts, 10);
         assert!(spec.watch);
+        assert_eq!(spec.git_repo.as_deref(), Some("git@github.com:org/api.git"));
+        assert_eq!(spec.git_ref.as_deref(), Some("main"));
+        assert_eq!(
+            spec.pull_secret_hash.as_deref(),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
     }
 
     #[test]
@@ -511,6 +534,9 @@ mod tests {
             cluster_instances: None,
             namespace: None,
             resource_limits: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
         };
 
         let err = super::validate_service(&payload).expect_err("expected validation error");
@@ -518,6 +544,35 @@ mod tests {
             err.to_string().contains("invalid env key"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn validate_service_rejects_invalid_pull_secret_hash_length() {
+        let payload = BundleService {
+            name: "api".to_string(),
+            program: "node".to_string(),
+            args: vec!["server.js".to_string()],
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            cwd: None,
+            env: HashMap::new(),
+            health_check: None,
+            stop_signal: None,
+            stop_timeout_secs: 5,
+            restart_delay_secs: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            namespace: None,
+            resource_limits: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: Some("abc123".to_string()),
+        };
+
+        let err = super::validate_service(&payload).expect_err("expected hash validation error");
+        assert!(err.to_string().contains("invalid pull_secret_hash"));
     }
 
     fn fixture_process() -> ManagedProcess {
@@ -536,6 +591,11 @@ mod tests {
             max_restarts: 10,
             restart_count: 0,
             namespace: Some("backend".to_string()),
+            git_repo: Some("git@github.com:org/api.git".to_string()),
+            git_ref: Some("main".to_string()),
+            pull_secret_hash: Some(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            ),
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 15,
             restart_delay_secs: 1,

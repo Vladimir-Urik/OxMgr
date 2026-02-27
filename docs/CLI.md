@@ -41,7 +41,12 @@ Cluster mode notes:
 - `oxmgr stop <name|id>`
 - `oxmgr restart <name|id>`
 - `oxmgr reload <name|id>`
+- `oxmgr pull [name|id]`
 - `oxmgr delete <name|id>`
+
+`pull` updates from configured git repository and reloads/restarts the service only when commit changed.
+
+Details and webhook flow: [Pull and Webhook Guide](./PULL_WEBHOOK.md).
 
 ## Inspect
 
@@ -58,9 +63,18 @@ Cluster mode notes:
 
 - `Esc` opens/closes menu
 - arrows or `j/k` move selection
+- `s` stop selected
+- `r` restart selected
+- `l` reload selected
+- `p` pull selected
+- `t` preview latest log line
+- `g` / `Space` refresh now
+- `?` help overlay
 - click row to select
 - mouse wheel scrolls selection
 - `q` quits
+
+Full UI behavior and panel layout: [Terminal UI Guide](./UI.md).
 
 ## Config Commands
 
@@ -115,3 +129,9 @@ Full deployment configuration details: [Deployment Guide](./DEPLOY.md).
 - `oxmgr service <install|uninstall|status> [--system <...>]`
 - `oxmgr daemon run`
 - `oxmgr daemon stop`
+
+Webhook endpoint (daemon HTTP API):
+
+- `POST /pull/<name|id>`
+- Header: `X-Oxmgr-Secret: <secret>` (or `Authorization: Bearer <secret>`)
+- Daemon bind address: `OXMGR_API_ADDR` (default high localhost port)

@@ -10,6 +10,7 @@ use crate::logging::LogRotationPolicy;
 pub struct AppConfig {
     pub base_dir: PathBuf,
     pub daemon_addr: String,
+    pub api_addr: String,
     pub state_path: PathBuf,
     pub log_dir: PathBuf,
     pub log_rotation: LogRotationPolicy,
@@ -29,6 +30,10 @@ impl AppConfig {
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| format!("127.0.0.1:{}", daemon_port()));
+        let api_addr = env::var("OXMGR_API_ADDR")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("127.0.0.1:{}", api_port()));
         let state_path = base_dir.join("state.json");
         let log_dir = base_dir.join("logs");
         let log_rotation = LogRotationPolicy {
@@ -42,6 +47,7 @@ impl AppConfig {
         let config = Self {
             base_dir,
             daemon_addr,
+            api_addr,
             state_path,
             log_dir,
             log_rotation,
@@ -70,6 +76,15 @@ fn daemon_port() -> u16 {
     // Keep daemon ports in a high, non-privileged range.
     let range = 20000_u16;
     40000 + (hash % range as u32) as u16
+}
+
+fn api_port() -> u16 {
+    let daemon = daemon_port();
+    if daemon >= 59000 {
+        daemon.saturating_sub(5000)
+    } else {
+        daemon.saturating_add(1000)
+    }
 }
 
 fn current_identity() -> String {
@@ -104,7 +119,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{daemon_port, env_u64, AppConfig};
+    use super::{api_port, daemon_port, env_u64, AppConfig};
 
     #[test]
     fn daemon_port_is_stable_and_in_expected_range() {
@@ -114,6 +129,17 @@ mod tests {
         assert!(
             (40000..60000).contains(&first),
             "daemon port should stay in non-privileged range, got {first}"
+        );
+    }
+
+    #[test]
+    fn api_port_is_stable_and_in_expected_range() {
+        let first = api_port();
+        let second = api_port();
+        assert_eq!(first, second, "api port should be deterministic");
+        assert!(
+            (35000..60000).contains(&first),
+            "api port should stay in high range, got {first}"
         );
     }
 
@@ -136,12 +162,14 @@ mod tests {
 
         let old_home = std::env::var("OXMGR_HOME").ok();
         let old_addr = std::env::var("OXMGR_DAEMON_ADDR").ok();
+        let old_api_addr = std::env::var("OXMGR_API_ADDR").ok();
         let old_size = std::env::var("OXMGR_LOG_MAX_SIZE_MB").ok();
         let old_files = std::env::var("OXMGR_LOG_MAX_FILES").ok();
         let old_days = std::env::var("OXMGR_LOG_MAX_DAYS").ok();
 
         std::env::set_var("OXMGR_HOME", &base);
         std::env::set_var("OXMGR_DAEMON_ADDR", " ");
+        std::env::set_var("OXMGR_API_ADDR", " ");
         std::env::set_var("OXMGR_LOG_MAX_SIZE_MB", "0");
         std::env::set_var("OXMGR_LOG_MAX_FILES", "0");
         std::env::set_var("OXMGR_LOG_MAX_DAYS", "0");
@@ -158,12 +186,18 @@ mod tests {
             "expected default daemon address, got {}",
             config.daemon_addr
         );
+        assert!(
+            config.api_addr.starts_with("127.0.0.1:"),
+            "expected default API address, got {}",
+            config.api_addr
+        );
         assert!(config.base_dir.exists(), "base directory should be created");
         assert!(config.log_dir.exists(), "log directory should be created");
 
         let _ = fs::remove_dir_all(&base);
         restore_env("OXMGR_HOME", old_home);
         restore_env("OXMGR_DAEMON_ADDR", old_addr);
+        restore_env("OXMGR_API_ADDR", old_api_addr);
         restore_env("OXMGR_LOG_MAX_SIZE_MB", old_size);
         restore_env("OXMGR_LOG_MAX_FILES", old_files);
         restore_env("OXMGR_LOG_MAX_DAYS", old_days);
@@ -176,6 +210,7 @@ mod tests {
         let cfg = AppConfig {
             base_dir: base.clone(),
             daemon_addr: "127.0.0.1:50000".to_string(),
+            api_addr: "127.0.0.1:51000".to_string(),
             state_path: base.join("state.json"),
             log_dir: log_dir.clone(),
             log_rotation: crate::logging::LogRotationPolicy {

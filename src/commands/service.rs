@@ -311,6 +311,7 @@ mod tests {
         let cfg = AppConfig {
             base_dir: Path::new("/tmp/oxmgr").to_path_buf(),
             daemon_addr: "127.0.0.1:50000".to_string(),
+            api_addr: "127.0.0.1:51000".to_string(),
             state_path: Path::new("/tmp/oxmgr/state.json").to_path_buf(),
             log_dir: Path::new("/tmp/oxmgr/logs").to_path_buf(),
             log_rotation: LogRotationPolicy {
@@ -331,6 +332,7 @@ mod tests {
         let cfg = AppConfig {
             base_dir: Path::new(r"C:\tmp\oxmgr").to_path_buf(),
             daemon_addr: "127.0.0.1:50000".to_string(),
+            api_addr: "127.0.0.1:51000".to_string(),
             state_path: Path::new(r"C:\tmp\oxmgr\state.json").to_path_buf(),
             log_dir: Path::new(r"C:\tmp\oxmgr\logs").to_path_buf(),
             log_rotation: LogRotationPolicy {

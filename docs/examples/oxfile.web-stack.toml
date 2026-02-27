@@ -34,6 +34,9 @@ cluster_mode = true
 cluster_instances = 4
 namespace = "backend"
 max_cpu_percent = 85.0
+git_repo = "git@github.com:your-org/your-api.git"
+git_ref = "main"
+pull_secret = "replace-with-long-random-secret"
 
 [apps.env]
 NODE_ENV = "production"

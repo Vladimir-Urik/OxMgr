@@ -5,6 +5,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
 use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
@@ -151,6 +152,9 @@ impl ProcessManager {
             cluster_instances,
             namespace,
             resource_limits,
+            git_repo,
+            git_ref,
+            pull_secret_hash,
         } = spec;
 
         let (command, args) = parse_command_line(&command_line)?;
@@ -181,6 +185,9 @@ impl ProcessManager {
             max_restarts,
             restart_count: 0,
             namespace,
+            git_repo,
+            git_ref,
+            pull_secret_hash,
             stop_signal,
             stop_timeout_secs: stop_timeout_secs.max(1),
             restart_delay_secs,
@@ -363,6 +370,91 @@ impl ProcessManager {
         Ok(replacement)
     }
 
+    pub async fn pull_processes(&mut self, target: Option<&str>) -> Result<String> {
+        let mut targets = if let Some(target) = target {
+            vec![self.resolve_target(target)?]
+        } else {
+            let mut names: Vec<String> = self
+                .processes
+                .values()
+                .filter(|process| process.git_repo.is_some())
+                .map(|process| process.name.clone())
+                .collect();
+            names.sort();
+            names
+        };
+
+        if targets.is_empty() {
+            anyhow::bail!("no services configured with git_repo");
+        }
+
+        targets.sort();
+        targets.dedup();
+
+        let mut changed_count = 0_usize;
+        let mut unchanged_count = 0_usize;
+        let mut restarted_count = 0_usize;
+        let mut failures = Vec::new();
+        let mut details = Vec::new();
+
+        for name in targets {
+            match self.pull_single_process(&name).await {
+                Ok(outcome) => {
+                    if outcome.changed {
+                        changed_count = changed_count.saturating_add(1);
+                    } else {
+                        unchanged_count = unchanged_count.saturating_add(1);
+                    }
+                    if outcome.restarted_or_reloaded {
+                        restarted_count = restarted_count.saturating_add(1);
+                    }
+                    details.push(outcome.message);
+                }
+                Err(err) => {
+                    failures.push(format!("{name}: {err}"));
+                }
+            }
+        }
+
+        if !failures.is_empty() {
+            let mut lines = vec!["pull completed with failures:".to_string()];
+            for failure in failures {
+                lines.push(format!("- {failure}"));
+            }
+            anyhow::bail!(lines.join("\n"));
+        }
+
+        let mut summary = format!(
+            "Pull complete: {} updated, {} unchanged, {} reloaded/restarted",
+            changed_count, unchanged_count, restarted_count
+        );
+        if !details.is_empty() {
+            summary.push('\n');
+            summary.push_str(&details.join("\n"));
+        }
+
+        Ok(summary)
+    }
+
+    pub fn verify_pull_webhook_secret(&self, target: &str, provided_secret: &str) -> Result<()> {
+        let name = self.resolve_target(target)?;
+        let process = self
+            .processes
+            .get(&name)
+            .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
+
+        let expected_hash = process
+            .pull_secret_hash
+            .as_deref()
+            .context("pull webhook secret is not configured for this service")?;
+        let provided_hash = sha256_hex(provided_secret.trim());
+
+        if !constant_time_eq(expected_hash.as_bytes(), provided_hash.as_bytes()) {
+            anyhow::bail!("invalid pull webhook secret");
+        }
+        Ok(())
+    }
+
     pub async fn delete_process(&mut self, target: &str) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
 
@@ -385,6 +477,70 @@ impl ProcessManager {
         self.watch_fingerprints.remove(&name);
         self.save()?;
         Ok(removed)
+    }
+
+    async fn pull_single_process(&mut self, name: &str) -> Result<PullOutcome> {
+        let snapshot = self
+            .processes
+            .get(name)
+            .cloned()
+            .ok_or_else(|| OxmgrError::ProcessNotFound(name.to_string()))?;
+
+        let repo = snapshot
+            .git_repo
+            .clone()
+            .context("git_repo is not configured for this service")?;
+        let cwd = snapshot
+            .cwd
+            .clone()
+            .context("pull requires cwd to be set for the service")?;
+        let git_ref = snapshot.git_ref.clone();
+
+        ensure_repo_checkout(&cwd, &repo, git_ref.as_deref()).await?;
+        ensure_origin_remote(&cwd, &repo).await?;
+
+        let before = git_rev_parse_head(&cwd).await?;
+        if let Some(git_ref) = git_ref.as_deref() {
+            run_git(
+                &cwd,
+                &["pull", "--ff-only", "origin", git_ref],
+                "pull repository from remote ref",
+            )
+            .await?;
+        } else {
+            run_git(&cwd, &["pull", "--ff-only"], "pull repository").await?;
+        }
+        let after = git_rev_parse_head(&cwd).await?;
+        let changed = before != after;
+
+        let mut action = "up-to-date".to_string();
+        let mut restarted_or_reloaded = false;
+
+        if changed {
+            if snapshot.status == ProcessStatus::Running && snapshot.pid.is_some() {
+                self.reload_process(name).await?;
+                action = "reloaded".to_string();
+                restarted_or_reloaded = true;
+            } else if snapshot.desired_state == DesiredState::Running {
+                self.restart_process(name).await?;
+                action = "restarted".to_string();
+                restarted_or_reloaded = true;
+            } else {
+                action = "updated (service stopped)".to_string();
+            }
+        }
+
+        Ok(PullOutcome {
+            changed,
+            restarted_or_reloaded,
+            message: format!(
+                "{}: {} ({} -> {})",
+                name,
+                action,
+                short_commit(&before),
+                short_commit(&after)
+            ),
+        })
     }
 
     pub fn list_processes(&self) -> Vec<ManagedProcess> {
@@ -1572,19 +1728,156 @@ fn cleanup_process_cgroup(process: &mut ManagedProcess) {
     }
 }
 
+#[derive(Debug)]
+struct PullOutcome {
+    changed: bool,
+    restarted_or_reloaded: bool,
+    message: String,
+}
+
+async fn ensure_repo_checkout(cwd: &Path, repo: &str, git_ref: Option<&str>) -> Result<()> {
+    if !cwd.exists() {
+        let parent = cwd.parent().context("cwd has no parent directory")?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+        let cwd_text = cwd.to_string_lossy().to_string();
+        if let Some(git_ref) = git_ref {
+            run_git(
+                parent,
+                &["clone", "--branch", git_ref, repo, &cwd_text],
+                "clone repository",
+            )
+            .await?;
+        } else {
+            run_git(parent, &["clone", repo, &cwd_text], "clone repository").await?;
+        }
+        return Ok(());
+    }
+
+    let dot_git = cwd.join(".git");
+    if dot_git.exists() {
+        return Ok(());
+    }
+
+    let mut entries =
+        fs::read_dir(cwd).with_context(|| format!("failed to read directory {}", cwd.display()))?;
+    if entries.next().is_some() {
+        anyhow::bail!(
+            "cwd {} exists but is not a git checkout and is not empty",
+            cwd.display()
+        );
+    }
+
+    if let Some(git_ref) = git_ref {
+        run_git(
+            cwd,
+            &["clone", "--branch", git_ref, repo, "."],
+            "clone repository into cwd",
+        )
+        .await
+    } else {
+        run_git(cwd, &["clone", repo, "."], "clone repository into cwd").await
+    }?;
+    Ok(())
+}
+
+async fn ensure_origin_remote(cwd: &Path, repo: &str) -> Result<()> {
+    match run_git(cwd, &["remote", "get-url", "origin"], "read git origin").await {
+        Ok(current) => {
+            if current.trim() != repo {
+                run_git(
+                    cwd,
+                    &["remote", "set-url", "origin", repo],
+                    "set git origin",
+                )
+                .await?;
+            }
+        }
+        Err(_) => {
+            run_git(cwd, &["remote", "add", "origin", repo], "add git origin").await?;
+        }
+    }
+    Ok(())
+}
+
+async fn git_rev_parse_head(cwd: &Path) -> Result<String> {
+    run_git(cwd, &["rev-parse", "HEAD"], "read current commit")
+        .await
+        .map(|value| value.trim().to_string())
+}
+
+async fn run_git(cwd: &Path, args: &[&str], action: &str) -> Result<String> {
+    let mut command = Command::new("git");
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let output = tokio::time::timeout(Duration::from_secs(120), command.output())
+        .await
+        .with_context(|| format!("timed out while attempting to {action}"))?
+        .with_context(|| format!("failed to start git command to {action}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let details = if stderr.trim().is_empty() {
+            stdout.trim().to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        anyhow::bail!(
+            "git command failed while trying to {} in {}: {}",
+            action,
+            cwd.display(),
+            details
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn short_commit(commit: &str) -> String {
+    commit.chars().take(8).collect::<String>()
+}
+
+fn sha256_hex(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{:x}", digest)
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut diff = 0_u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+
+    diff == 0
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::process::Command as StdCommand;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[cfg(unix)]
     use super::graceful_wait_before_force_kill;
     use super::{
-        compute_restart_delay_secs, maybe_reset_backoff_attempt, now_epoch_secs,
-        resolve_spawn_program, watch_fingerprint_for_dir,
+        compute_restart_delay_secs, constant_time_eq, maybe_reset_backoff_attempt, now_epoch_secs,
+        resolve_spawn_program, sha256_hex, short_commit, watch_fingerprint_for_dir, ProcessManager,
     };
+    use crate::config::AppConfig;
     use crate::process::{
         DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
     };
@@ -1752,6 +2045,130 @@ mod tests {
         let _ = fs::remove_dir_all(&runtime);
     }
 
+    #[test]
+    fn short_commit_truncates_to_eight_chars() {
+        assert_eq!(short_commit("0123456789abcdef"), "01234567");
+        assert_eq!(short_commit("abcd"), "abcd");
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_vector() {
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn constant_time_eq_handles_equal_and_mismatched_values() {
+        assert!(constant_time_eq(b"abcdef", b"abcdef"));
+        assert!(!constant_time_eq(b"abcdef", b"abcdeg"));
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+
+    #[test]
+    fn verify_pull_webhook_secret_accepts_name_and_id_targets() {
+        let mut manager = empty_manager("verify-secret-ok");
+        let mut process = fixture_process();
+        process.id = 42;
+        process.name = "api".to_string();
+        process.pull_secret_hash = Some(sha256_hex("super-secret-token"));
+        manager.processes.insert(process.name.clone(), process);
+
+        assert!(manager
+            .verify_pull_webhook_secret("api", "super-secret-token")
+            .is_ok());
+        assert!(manager
+            .verify_pull_webhook_secret("42", "super-secret-token")
+            .is_ok());
+        assert!(manager
+            .verify_pull_webhook_secret("api", "wrong-secret")
+            .is_err());
+    }
+
+    #[test]
+    fn verify_pull_webhook_secret_requires_configured_hash() {
+        let mut manager = empty_manager("verify-secret-missing");
+        let mut process = fixture_process();
+        process.name = "api".to_string();
+        process.id = 1;
+        process.pull_secret_hash = None;
+        manager.processes.insert(process.name.clone(), process);
+
+        let err = manager
+            .verify_pull_webhook_secret("api", "anything")
+            .expect_err("expected missing pull secret hash to fail");
+        assert!(err.to_string().contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn pull_processes_errors_without_any_git_services() {
+        let mut manager = empty_manager("pull-no-git");
+        let err = manager
+            .pull_processes(None)
+            .await
+            .expect_err("expected pull to fail without git-configured services");
+        assert!(err
+            .to_string()
+            .contains("no services configured with git_repo"));
+    }
+
+    #[tokio::test]
+    async fn pull_processes_reports_unchanged_checkout() {
+        let git = setup_git_fixture("pull-unchanged");
+        let mut manager = empty_manager("pull-unchanged-manager");
+        let mut process = fixture_process();
+        process.name = "api".to_string();
+        process.id = 7;
+        process.cwd = Some(git.clone_dir.clone());
+        process.git_repo = Some(git.remote_dir.display().to_string());
+        process.git_ref = Some("main".to_string());
+        process.pid = None;
+        process.status = ProcessStatus::Stopped;
+        process.desired_state = DesiredState::Stopped;
+        manager.processes.insert(process.name.clone(), process);
+
+        let output = manager
+            .pull_processes(Some("api"))
+            .await
+            .expect("expected pull to succeed");
+        assert!(output.contains("0 updated, 1 unchanged"));
+        assert!(output.contains("up-to-date"));
+
+        cleanup_git_fixture(git);
+    }
+
+    #[tokio::test]
+    async fn pull_processes_updates_checkout_when_remote_changes() {
+        let git = setup_git_fixture("pull-changed");
+        write_commit_and_push(&git.source_dir, "app.js", "console.log('v2');\n", "update");
+
+        let mut manager = empty_manager("pull-changed-manager");
+        let mut process = fixture_process();
+        process.name = "api".to_string();
+        process.id = 8;
+        process.cwd = Some(git.clone_dir.clone());
+        process.git_repo = Some(git.remote_dir.display().to_string());
+        process.git_ref = Some("main".to_string());
+        process.pid = None;
+        process.status = ProcessStatus::Stopped;
+        process.desired_state = DesiredState::Stopped;
+        manager.processes.insert(process.name.clone(), process);
+
+        let output = manager
+            .pull_processes(Some("api"))
+            .await
+            .expect("expected pull to succeed");
+        assert!(output.contains("1 updated, 0 unchanged"));
+        assert!(output.contains("updated (service stopped)"));
+
+        let source_head = git_head(&git.source_dir);
+        let clone_head = git_head(&git.clone_dir);
+        assert_eq!(source_head, clone_head, "clone should match source head");
+
+        cleanup_git_fixture(git);
+    }
+
     fn fixture_process() -> ManagedProcess {
         ManagedProcess {
             id: 1,
@@ -1764,6 +2181,9 @@ mod tests {
             max_restarts: 10,
             restart_count: 0,
             namespace: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 5,
             restart_delay_secs: 1,
@@ -1794,6 +2214,126 @@ mod tests {
             last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
         }
+    }
+
+    fn empty_manager(prefix: &str) -> ProcessManager {
+        let config = test_config(prefix);
+        let (exit_tx, _exit_rx) = unbounded_channel();
+        ProcessManager::new(config, exit_tx).expect("failed to create test process manager")
+    }
+
+    fn test_config(prefix: &str) -> AppConfig {
+        let base = temp_watch_dir(prefix);
+        let log_dir = base.join("logs");
+        fs::create_dir_all(&log_dir).expect("failed to create test log directory");
+        AppConfig {
+            base_dir: base.clone(),
+            daemon_addr: "127.0.0.1:50100".to_string(),
+            api_addr: "127.0.0.1:51100".to_string(),
+            state_path: base.join("state.json"),
+            log_dir,
+            log_rotation: crate::logging::LogRotationPolicy {
+                max_size_bytes: 1024 * 1024,
+                max_files: 2,
+                max_age_days: 1,
+            },
+        }
+    }
+
+    struct GitFixture {
+        root: PathBuf,
+        remote_dir: PathBuf,
+        source_dir: PathBuf,
+        clone_dir: PathBuf,
+    }
+
+    fn setup_git_fixture(prefix: &str) -> GitFixture {
+        let root = temp_watch_dir(prefix);
+        let remote_dir = root.join("remote.git");
+        let source_dir = root.join("source");
+        let clone_dir = root.join("clone");
+
+        fs::create_dir_all(&root).expect("failed to create git fixture root");
+        fs::create_dir_all(&source_dir).expect("failed to create git source dir");
+        run_git_sync(
+            &root,
+            &["init", "--bare", remote_dir.to_str().unwrap_or_default()],
+        );
+        run_git_sync(&source_dir, &["init"]);
+        run_git_sync(&source_dir, &["config", "user.email", "tests@oxmgr.local"]);
+        run_git_sync(&source_dir, &["config", "user.name", "Oxmgr Tests"]);
+        fs::write(source_dir.join("app.js"), "console.log('v1');\n")
+            .expect("failed to write initial source file");
+        run_git_sync(&source_dir, &["add", "."]);
+        run_git_sync(&source_dir, &["commit", "-m", "initial"]);
+        run_git_sync(&source_dir, &["branch", "-M", "main"]);
+        run_git_sync(
+            &source_dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.to_str().unwrap_or_default(),
+            ],
+        );
+        run_git_sync(&source_dir, &["push", "-u", "origin", "main"]);
+        run_git_sync(
+            &root,
+            &[
+                "clone",
+                remote_dir.to_str().unwrap_or_default(),
+                clone_dir.to_str().unwrap_or_default(),
+            ],
+        );
+        run_git_sync(&clone_dir, &["checkout", "main"]);
+
+        GitFixture {
+            root,
+            remote_dir,
+            source_dir,
+            clone_dir,
+        }
+    }
+
+    fn write_commit_and_push(source_dir: &Path, file_name: &str, content: &str, message: &str) {
+        fs::write(source_dir.join(file_name), content).expect("failed writing updated source file");
+        run_git_sync(source_dir, &["add", "."]);
+        run_git_sync(source_dir, &["commit", "-m", message]);
+        run_git_sync(source_dir, &["push", "origin", "main"]);
+    }
+
+    fn git_head(repo_dir: &Path) -> String {
+        let output = StdCommand::new("git")
+            .arg("rev-parse")
+            .arg("HEAD")
+            .current_dir(repo_dir)
+            .output()
+            .expect("failed running git rev-parse");
+        assert!(
+            output.status.success(),
+            "git rev-parse failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn run_git_sync(cwd: &Path, args: &[&str]) {
+        let output = StdCommand::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("failed to launch git in test");
+        assert!(
+            output.status.success(),
+            "git {:?} failed in {}: {}",
+            args,
+            cwd.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn cleanup_git_fixture(fixture: GitFixture) {
+        let _ = fs::remove_dir_all(fixture.root);
     }
 
     fn temp_watch_dir(prefix: &str) -> PathBuf {

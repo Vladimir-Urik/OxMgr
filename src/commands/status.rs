@@ -47,6 +47,20 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
     if let Some(namespace) = process.namespace.as_deref() {
         print_field("Namespace", namespace);
     }
+    if let Some(git_repo) = process.git_repo.as_deref() {
+        print_field("Git Repo", git_repo);
+    }
+    if let Some(git_ref) = process.git_ref.as_deref() {
+        print_field("Git Ref", git_ref);
+    }
+    print_field(
+        "Pull Hook",
+        if process.pull_secret_hash.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        },
+    );
     print_field("Health", ui::health_value(&process.health_status));
     if let Some(last_error) = process.last_health_error.as_deref() {
         print_field("Health Last", last_error);

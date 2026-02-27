@@ -128,6 +128,12 @@ pub struct StartProcessSpec {
     pub namespace: Option<String>,
     #[serde(default)]
     pub resource_limits: Option<ResourceLimits>,
+    #[serde(default)]
+    pub git_repo: Option<String>,
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub pull_secret_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +149,12 @@ pub struct ManagedProcess {
     pub restart_count: u32,
     #[serde(default)]
     pub namespace: Option<String>,
+    #[serde(default)]
+    pub git_repo: Option<String>,
+    #[serde(default)]
+    pub git_ref: Option<String>,
+    #[serde(default)]
+    pub pull_secret_hash: Option<String>,
     #[serde(default)]
     pub stop_signal: Option<String>,
     #[serde(default = "default_stop_timeout_secs")]
@@ -289,6 +301,9 @@ mod tests {
             max_restarts: 10,
             restart_count: 0,
             namespace: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 5,
             restart_delay_secs: 0,

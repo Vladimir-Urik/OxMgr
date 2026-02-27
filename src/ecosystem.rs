@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
@@ -25,6 +26,9 @@ pub struct EcosystemProcessSpec {
     pub cluster_instances: Option<u32>,
     pub namespace: Option<String>,
     pub resource_limits: Option<ResourceLimits>,
+    pub git_repo: Option<String>,
+    pub git_ref: Option<String>,
+    pub pull_secret_hash: Option<String>,
     pub start_order: i32,
     pub depends_on: Vec<String>,
     pub instances: u32,
@@ -57,6 +61,9 @@ struct EcosystemApp {
     priority: Option<i32>,
     depends_on: Option<Vec<String>>,
     namespace: Option<String>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret: Option<String>,
     instances: Option<u32>,
     instance_var: Option<String>,
     kill_signal: Option<String>,
@@ -107,6 +114,9 @@ struct ResolvedSettings {
     cluster_instances: Option<u32>,
     namespace: Option<String>,
     resource_limits: Option<ResourceLimits>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret_hash: Option<String>,
     start_order: i32,
     depends_on: Vec<String>,
     instances: u32,
@@ -175,6 +185,9 @@ impl EcosystemApp {
                 self.cgroup_enforce,
                 self.deny_gpu,
             )?,
+            git_repo: self.git_repo,
+            git_ref: self.git_ref,
+            pull_secret_hash: normalize_pull_secret_hash(self.pull_secret)?,
             start_order: self.priority.or(self.start_order).unwrap_or(default_order),
             depends_on: self.depends_on.unwrap_or_default(),
             instances,
@@ -205,6 +218,9 @@ impl EcosystemApp {
             cluster_instances: settings.cluster_instances,
             namespace: settings.namespace,
             resource_limits: settings.resource_limits,
+            git_repo: settings.git_repo,
+            git_ref: settings.git_ref,
+            pull_secret_hash: settings.pull_secret_hash,
             start_order: settings.start_order,
             depends_on: settings.depends_on,
             instances: settings.instances,
@@ -339,6 +355,22 @@ fn apply_profile_overrides(
             "namespace" => {
                 if let Some(parsed) = value.as_str() {
                     settings.namespace = Some(parsed.to_string());
+                }
+            }
+            "git_repo" => {
+                if let Some(parsed) = value.as_str() {
+                    settings.git_repo = Some(parsed.to_string());
+                }
+            }
+            "git_ref" => {
+                if let Some(parsed) = value.as_str() {
+                    settings.git_ref = Some(parsed.to_string());
+                }
+            }
+            "pull_secret" => {
+                if let Some(parsed) = value.as_str() {
+                    settings.pull_secret_hash =
+                        normalize_pull_secret_hash(Some(parsed.to_string()))?;
                 }
             }
             "exec_mode" => {
@@ -637,6 +669,22 @@ fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimit
     } else {
         Some(limits)
     }
+}
+
+fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Option<String>> {
+    let Some(secret) = secret else {
+        return Ok(None);
+    };
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("pull_secret cannot be empty");
+    }
+    if trimmed.len() > 512 {
+        anyhow::bail!("pull_secret exceeds maximum length 512");
+    }
+
+    let digest = Sha256::digest(trimmed.as_bytes());
+    Ok(Some(format!("{:x}", digest)))
 }
 
 #[cfg(test)]

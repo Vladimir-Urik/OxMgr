@@ -9,6 +9,7 @@ mod export;
 mod import;
 mod list;
 mod logs;
+mod pull;
 mod reload;
 mod restart;
 mod service;
@@ -99,6 +100,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         Commands::Stop { target } => stop::run(config, target).await,
         Commands::Restart { target } => restart::run(config, target).await,
         Commands::Reload { target } => reload::run(config, target).await,
+        Commands::Pull { target } => pull::run(config, target).await,
         Commands::Delete { target } => delete::run(config, target).await,
         Commands::List => list::run(config).await,
         Commands::Ui { interval_ms } => ui::run(config, interval_ms).await,

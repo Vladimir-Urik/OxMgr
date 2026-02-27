@@ -4,6 +4,8 @@
 
 It is designed for deterministic, idempotent process management via `oxmgr apply`.
 
+Focused comparison with migration guidance: [Oxfile vs PM2 Ecosystem](./OXFILE_VS_PM2.md).
+
 ## Why Oxfile Is Better Than Ecosystem JSON
 
 Compared to `ecosystem.config.json` style files, `oxfile.toml` gives Oxmgr-specific advantages:
@@ -128,6 +130,9 @@ Details:
 - `max_cpu_percent`: float
 - `cgroup_enforce`: bool (Linux only; applies hard limits via cgroup v2)
 - `deny_gpu`: bool (best-effort GPU visibility disable via environment variables)
+- `git_repo`: git remote URL for `oxmgr pull`
+- `git_ref`: optional branch/tag/ref for `oxmgr pull`
+- `pull_secret`: secret used by webhook endpoint `POST /pull/<name|id>`
 
 ### `[[apps]]` fields
 
@@ -180,6 +185,23 @@ Behavior:
 - when exceeded, Oxmgr triggers restart logic
 - if restart budget is exhausted, process is marked `errored`
 - if `cgroup_enforce = true`, Linux cgroup v2 hard limits are applied at spawn time
+
+## Git Pull + Webhook
+
+You can enable auto-update pull behavior per service:
+
+```toml
+git_repo = "git@github.com:org/api.git"
+git_ref = "main"
+pull_secret = "super-secret-token"
+```
+
+Behavior:
+
+- `oxmgr pull <name>` runs git pull for that service and reloads/restarts only if commit changed.
+- `oxmgr pull` without target processes all services with `git_repo`.
+- Webhook endpoint: `POST /pull/<name|id>` with header `X-Oxmgr-Secret: <pull_secret>`.
+- Daemon webhook bind address can be set with `OXMGR_API_ADDR`.
 
 ## Dependencies and Start Ordering
 

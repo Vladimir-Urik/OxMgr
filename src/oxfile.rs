@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::ecosystem::EcosystemProcessSpec;
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
@@ -59,6 +60,9 @@ struct OxDefaults {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +92,9 @@ struct OxApp {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret: Option<String>,
     profiles: Option<HashMap<String, OxProfile>>,
     disabled: Option<bool>,
 }
@@ -117,6 +124,9 @@ struct OxProfile {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret: Option<String>,
     disabled: Option<bool>,
 }
 
@@ -133,6 +143,9 @@ struct Resolved {
     cluster_mode: bool,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
+    git_repo: Option<String>,
+    git_ref: Option<String>,
+    pull_secret_hash: Option<String>,
     start_order: i32,
     depends_on: Vec<String>,
     instances: u32,
@@ -170,6 +183,10 @@ struct OxAppOut {
     cluster_instances: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    git_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    git_ref: Option<String>,
     start_order: i32,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     depends_on: Vec<String>,
@@ -208,7 +225,7 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
     let defaults = parsed.defaults.unwrap_or_default();
     let mut result = Vec::with_capacity(parsed.apps.len());
     for (idx, app) in parsed.apps.into_iter().enumerate() {
-        let resolved = resolve_app(&app, &defaults, profile, idx as i32);
+        let resolved = resolve_app(&app, &defaults, profile, idx as i32)?;
         if resolved.disabled {
             continue;
         }
@@ -229,6 +246,9 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             cluster_instances: resolved.cluster_instances,
             namespace: resolved.namespace,
             resource_limits: resolved.resource_limits,
+            git_repo: resolved.git_repo,
+            git_ref: resolved.git_ref,
+            pull_secret_hash: resolved.pull_secret_hash,
             start_order: resolved.start_order,
             depends_on: resolved.depends_on,
             instances: resolved.instances,
@@ -244,7 +264,7 @@ fn resolve_app(
     defaults: &OxDefaults,
     profile: Option<&str>,
     default_order: i32,
-) -> Resolved {
+) -> Result<Resolved> {
     let mut resolved = Resolved {
         cwd: app.cwd.clone().or_else(|| defaults.cwd.clone()),
         env: defaults.env.clone().unwrap_or_default(),
@@ -277,6 +297,13 @@ fn resolve_app(
             app.cluster_instances.or(defaults.cluster_instances),
         ),
         namespace: app.namespace.clone().or_else(|| defaults.namespace.clone()),
+        git_repo: app.git_repo.clone().or_else(|| defaults.git_repo.clone()),
+        git_ref: app.git_ref.clone().or_else(|| defaults.git_ref.clone()),
+        pull_secret_hash: normalize_pull_secret_hash(
+            app.pull_secret
+                .clone()
+                .or_else(|| defaults.pull_secret.clone()),
+        )?,
         start_order: app
             .start_order
             .or(defaults.start_order)
@@ -320,7 +347,7 @@ fn resolve_app(
     if let Some(profile_name) = profile {
         if let Some(profile_map) = &app.profiles {
             if let Some(profile_settings) = profile_map.get(profile_name) {
-                apply_profile(profile_settings, &mut resolved);
+                apply_profile(profile_settings, &mut resolved)?;
             }
         }
     }
@@ -329,10 +356,10 @@ fn resolve_app(
         resolved.cluster_instances = None;
     }
 
-    resolved
+    Ok(resolved)
 }
 
-fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) {
+fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     if let Some(disabled) = profile.disabled {
         resolved.disabled = disabled;
     }
@@ -370,6 +397,15 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) {
     }
     if let Some(namespace) = &profile.namespace {
         resolved.namespace = Some(namespace.clone());
+    }
+    if let Some(git_repo) = &profile.git_repo {
+        resolved.git_repo = Some(git_repo.clone());
+    }
+    if let Some(git_ref) = &profile.git_ref {
+        resolved.git_ref = Some(git_ref.clone());
+    }
+    if let Some(pull_secret) = &profile.pull_secret {
+        resolved.pull_secret_hash = normalize_pull_secret_hash(Some(pull_secret.clone()))?;
     }
     if let Some(start_order) = profile.start_order {
         resolved.start_order = start_order;
@@ -436,6 +472,7 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) {
         limits.deny_gpu = deny_gpu;
         resolved.resource_limits = normalize_resource_limits(limits);
     }
+    Ok(())
 }
 
 fn health_from_parts(
@@ -474,6 +511,22 @@ fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimit
     }
 }
 
+fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Option<String>> {
+    let Some(secret) = secret else {
+        return Ok(None);
+    };
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("pull_secret cannot be empty");
+    }
+    if trimmed.len() > 512 {
+        anyhow::bail!("pull_secret exceeds maximum length 512");
+    }
+
+    let digest = Sha256::digest(trimmed.as_bytes());
+    Ok(Some(format!("{:x}", digest)))
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -495,6 +548,8 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             cluster_mode: spec.cluster_mode,
             cluster_instances: spec.cluster_instances,
             namespace: spec.namespace.clone(),
+            git_repo: spec.git_repo.clone(),
+            git_ref: spec.git_ref.clone(),
             start_order: spec.start_order,
             depends_on: spec.depends_on.clone(),
             instances: spec.instances,
@@ -641,6 +696,9 @@ NODE_ENV = "production"
             cluster_mode: true,
             cluster_instances: Some(2),
             namespace: Some("core".to_string()),
+            git_repo: Some("git@github.com:org/worker.git".to_string()),
+            git_ref: Some("main".to_string()),
+            pull_secret_hash: None,
             start_order: 1,
             depends_on: vec!["db".to_string()],
             instances: 1,

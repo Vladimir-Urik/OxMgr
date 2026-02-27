@@ -70,6 +70,9 @@ pub enum Commands {
     Reload {
         target: String,
     },
+    Pull {
+        target: Option<String>,
+    },
     Delete {
         target: String,
     },
@@ -378,6 +381,23 @@ mod tests {
     fn clap_parses_list_alias_ls() {
         let cli = Cli::try_parse_from(["oxmgr", "ls"]).expect("expected CLI parsing success");
         assert!(matches!(cli.command, Commands::List));
+    }
+
+    #[test]
+    fn clap_parses_pull_with_and_without_target() {
+        let all =
+            Cli::try_parse_from(["oxmgr", "pull"]).expect("expected pull parsing without target");
+        match all.command {
+            Commands::Pull { target } => assert!(target.is_none()),
+            _ => panic!("expected pull subcommand"),
+        }
+
+        let one = Cli::try_parse_from(["oxmgr", "pull", "api"])
+            .expect("expected pull parsing with target");
+        match one.command {
+            Commands::Pull { target } => assert_eq!(target.as_deref(), Some("api")),
+            _ => panic!("expected pull subcommand"),
+        }
     }
 
     #[test]

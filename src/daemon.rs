@@ -1,7 +1,10 @@
 use std::env;
 use std::process::Stdio;
+use std::str;
 
 use anyhow::{Context, Result};
+use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -16,6 +19,7 @@ use crate::process_manager::ProcessManager;
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
     let listener = bind_listener(&config.daemon_addr).await?;
+    let api_listener = bind_api_listener(&config.api_addr).await?;
 
     let (exit_tx, mut exit_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
@@ -26,6 +30,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     maintenance.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     info!("oxmgr daemon started at {}", config.daemon_addr);
+    info!("oxmgr webhook API started at {}", config.api_addr);
 
     loop {
         tokio::select! {
@@ -38,6 +43,18 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                     }
                     Err(err) => {
                         error!("IPC accept failed: {err}");
+                    }
+                }
+            }
+            incoming = api_listener.accept() => {
+                match incoming {
+                    Ok((mut stream, _)) => {
+                        if let Err(err) = handle_api_client(&mut stream, &mut manager).await {
+                            error!("failed to handle webhook API client: {err}");
+                        }
+                    }
+                    Err(err) => {
+                        error!("webhook API accept failed: {err}");
                     }
                 }
             }
@@ -115,6 +132,12 @@ async fn bind_listener(daemon_addr: &str) -> Result<TcpListener> {
         .with_context(|| format!("failed to bind daemon endpoint at {daemon_addr}"))
 }
 
+async fn bind_api_listener(api_addr: &str) -> Result<TcpListener> {
+    TcpListener::bind(api_addr)
+        .await
+        .with_context(|| format!("failed to bind webhook API endpoint at {api_addr}"))
+}
+
 async fn handle_client(
     stream: &mut TcpStream,
     manager: &mut ProcessManager,
@@ -168,6 +191,10 @@ async fn execute_request(
             }
             Err(err) => IpcResponse::error(err.to_string()),
         },
+        IpcRequest::Pull { target } => match manager.pull_processes(target.as_deref()).await {
+            Ok(message) => IpcResponse::ok(message),
+            Err(err) => IpcResponse::error(err.to_string()),
+        },
         IpcRequest::Delete { target } => match manager.delete_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("deleted {}", process.target_label()));
@@ -197,5 +224,464 @@ async fn execute_request(
             }
             Err(err) => IpcResponse::error(err.to_string()),
         },
+    }
+}
+
+async fn handle_api_client(stream: &mut TcpStream, manager: &mut ProcessManager) -> Result<()> {
+    let request = read_http_request(stream).await?;
+    let response = execute_api_request(request, manager).await;
+    write_http_response(stream, response.status_code, &response.body).await
+}
+
+async fn execute_api_request(request: HttpRequest, manager: &mut ProcessManager) -> HttpResponse {
+    if request.method != "POST" {
+        return HttpResponse::error(405, "method not allowed");
+    }
+
+    let Some(target) = request.path.strip_prefix("/pull/") else {
+        return HttpResponse::error(404, "not found");
+    };
+    if target.is_empty() {
+        return HttpResponse::error(404, "not found");
+    }
+
+    if manager.get_process(target).is_err() {
+        return HttpResponse::error(404, "service not found");
+    }
+
+    let Some(secret) = extract_api_secret(&request) else {
+        return HttpResponse::error(401, "missing webhook secret");
+    };
+
+    if manager.verify_pull_webhook_secret(target, &secret).is_err() {
+        return HttpResponse::error(401, "invalid webhook secret");
+    }
+
+    match manager.pull_processes(Some(target)).await {
+        Ok(message) => HttpResponse::ok(message),
+        Err(err) => HttpResponse::error(500, err.to_string()),
+    }
+}
+
+async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
+    const MAX_HEADER_BYTES: usize = 16 * 1024;
+    let mut buffer = Vec::with_capacity(1024);
+    let mut chunk = [0_u8; 1024];
+
+    loop {
+        let read = timeout(Duration::from_secs(5), stream.read(&mut chunk))
+            .await
+            .context("timed out while reading webhook request")?
+            .context("failed to read webhook request")?;
+
+        if read == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+
+        if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        if buffer.len() > MAX_HEADER_BYTES {
+            anyhow::bail!("webhook request headers exceed maximum size");
+        }
+    }
+
+    let raw = str::from_utf8(&buffer).context("webhook request is not valid UTF-8")?;
+    let header_end = raw
+        .find("\r\n\r\n")
+        .context("malformed webhook request headers")?;
+    let head = &raw[..header_end];
+
+    let mut lines = head.split("\r\n");
+    let request_line = lines
+        .next()
+        .context("missing webhook request line")?
+        .trim()
+        .to_string();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .context("missing webhook request method")?
+        .to_string();
+    let path = request_parts
+        .next()
+        .context("missing webhook request path")?
+        .to_string();
+
+    let mut headers = std::collections::HashMap::new();
+    for line in lines {
+        if let Some((name, value)) = line.split_once(':') {
+            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+        }
+    }
+
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+    })
+}
+
+async fn write_http_response(
+    stream: &mut TcpStream,
+    status_code: u16,
+    body: &serde_json::Value,
+) -> Result<()> {
+    let reason = match status_code {
+        200 => "OK",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        500 => "Internal Server Error",
+        _ => "OK",
+    };
+    let body_text = serde_json::to_string(body).context("failed to encode webhook response")?;
+    let response = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        status_code,
+        reason,
+        body_text.len(),
+        body_text
+    );
+
+    stream
+        .write_all(response.as_bytes())
+        .await
+        .context("failed to write webhook response")?;
+    stream
+        .flush()
+        .await
+        .context("failed to flush webhook response")
+}
+
+fn extract_api_secret(request: &HttpRequest) -> Option<String> {
+    if let Some(value) = request.headers.get("x-oxmgr-secret") {
+        return Some(value.trim().to_string());
+    }
+    request
+        .headers
+        .get("authorization")
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|value| value.trim().to_string())
+}
+
+struct HttpRequest {
+    method: String,
+    path: String,
+    headers: std::collections::HashMap<String, String>,
+}
+
+struct HttpResponse {
+    status_code: u16,
+    body: serde_json::Value,
+}
+
+impl HttpResponse {
+    fn ok(message: impl Into<String>) -> Self {
+        Self {
+            status_code: 200,
+            body: json!({
+                "ok": true,
+                "message": message.into()
+            }),
+        }
+    }
+
+    fn error(status_code: u16, message: impl Into<String>) -> Self {
+        Self {
+            status_code,
+            body: json!({
+                "ok": false,
+                "message": message.into()
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command as StdCommand;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use sha2::{Digest, Sha256};
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use super::{execute_api_request, extract_api_secret, HttpRequest};
+    use crate::config::AppConfig;
+    use crate::process::{RestartPolicy, StartProcessSpec};
+    use crate::process_manager::ProcessManager;
+
+    #[tokio::test]
+    async fn execute_api_request_rejects_non_post_method() {
+        let mut manager = empty_manager("daemon-api-method");
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/pull/api".to_string(),
+            headers: HashMap::new(),
+        };
+
+        let response = execute_api_request(request, &mut manager).await;
+        assert_eq!(response.status_code, 405);
+        assert_eq!(response.body["ok"], false);
+    }
+
+    #[tokio::test]
+    async fn execute_api_request_rejects_missing_secret() {
+        let mut manager = empty_manager("daemon-api-missing-secret");
+        start_minimal_service(&mut manager, "api", None, None, None).await;
+
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/pull/api".to_string(),
+            headers: HashMap::new(),
+        };
+
+        let response = execute_api_request(request, &mut manager).await;
+        assert_eq!(response.status_code, 401);
+        assert_eq!(response.body["message"], "missing webhook secret");
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn execute_api_request_rejects_invalid_secret() {
+        let mut manager = empty_manager("daemon-api-invalid-secret");
+        start_minimal_service(
+            &mut manager,
+            "api",
+            None,
+            None,
+            Some(hash_secret("expected")),
+        )
+        .await;
+
+        let mut headers = HashMap::new();
+        headers.insert("x-oxmgr-secret".to_string(), "wrong".to_string());
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/pull/api".to_string(),
+            headers,
+        };
+
+        let response = execute_api_request(request, &mut manager).await;
+        assert_eq!(response.status_code, 401);
+        assert_eq!(response.body["message"], "invalid webhook secret");
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn execute_api_request_runs_pull_when_secret_is_valid() {
+        let git = setup_git_fixture("daemon-api-pull");
+        let mut manager = empty_manager("daemon-api-pull-manager");
+        start_minimal_service(
+            &mut manager,
+            "api",
+            Some(git.clone_dir.clone()),
+            Some(git.remote_dir.display().to_string()),
+            Some(hash_secret("hook-secret")),
+        )
+        .await;
+
+        let mut headers = HashMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            "Bearer hook-secret".to_string(),
+        );
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/pull/api".to_string(),
+            headers,
+        };
+
+        let response = execute_api_request(request, &mut manager).await;
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.body["ok"], true);
+        assert!(
+            response.body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Pull complete"),
+            "unexpected response body: {}",
+            response.body
+        );
+
+        let _ = manager.shutdown_all().await;
+        let _ = fs::remove_dir_all(git.root);
+    }
+
+    #[test]
+    fn extract_api_secret_prefers_explicit_header_then_bearer() {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "authorization".to_string(),
+            "Bearer bearer-secret".to_string(),
+        );
+        headers.insert("x-oxmgr-secret".to_string(), "header-secret".to_string());
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/pull/api".to_string(),
+            headers,
+        };
+
+        assert_eq!(
+            extract_api_secret(&request).as_deref(),
+            Some("header-secret")
+        );
+    }
+
+    #[test]
+    fn extract_api_secret_accepts_bearer_when_custom_header_missing() {
+        let request = HttpRequest {
+            method: "POST".to_string(),
+            path: "/pull/api".to_string(),
+            headers: HashMap::from([("authorization".to_string(), "Bearer token123".to_string())]),
+        };
+        assert_eq!(extract_api_secret(&request).as_deref(), Some("token123"));
+    }
+
+    async fn start_minimal_service(
+        manager: &mut ProcessManager,
+        name: &str,
+        cwd: Option<PathBuf>,
+        git_repo: Option<String>,
+        pull_secret_hash: Option<String>,
+    ) {
+        let exe = std::env::current_exe().expect("failed to read current executable path");
+        let command = format!("\"{}\" --help", exe.display());
+
+        let spec = StartProcessSpec {
+            command,
+            name: Some(name.to_string()),
+            restart_policy: RestartPolicy::Never,
+            max_restarts: 1,
+            cwd,
+            env: HashMap::new(),
+            health_check: None,
+            stop_signal: None,
+            stop_timeout_secs: 1,
+            restart_delay_secs: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            namespace: None,
+            resource_limits: None,
+            git_repo,
+            git_ref: Some("main".to_string()),
+            pull_secret_hash,
+        };
+
+        manager
+            .start_process(spec)
+            .await
+            .expect("failed to start service for daemon API test");
+    }
+
+    fn empty_manager(prefix: &str) -> ProcessManager {
+        let config = test_config(prefix);
+        let (exit_tx, _exit_rx) = unbounded_channel();
+        ProcessManager::new(config, exit_tx).expect("failed to initialize test process manager")
+    }
+
+    fn hash_secret(value: &str) -> String {
+        format!("{:x}", Sha256::digest(value.as_bytes()))
+    }
+
+    struct GitFixture {
+        root: PathBuf,
+        remote_dir: PathBuf,
+        clone_dir: PathBuf,
+    }
+
+    fn setup_git_fixture(prefix: &str) -> GitFixture {
+        let root = temp_dir(prefix);
+        let remote_dir = root.join("remote.git");
+        let source_dir = root.join("source");
+        let clone_dir = root.join("clone");
+
+        fs::create_dir_all(&root).expect("failed to create git fixture root");
+        fs::create_dir_all(&source_dir).expect("failed to create git source directory");
+        run_git_sync(
+            &root,
+            &["init", "--bare", remote_dir.to_str().unwrap_or_default()],
+        );
+        run_git_sync(&source_dir, &["init"]);
+        run_git_sync(&source_dir, &["config", "user.email", "tests@oxmgr.local"]);
+        run_git_sync(&source_dir, &["config", "user.name", "Oxmgr Tests"]);
+        fs::write(source_dir.join("app.js"), "console.log('v1');\n")
+            .expect("failed writing fixture file");
+        run_git_sync(&source_dir, &["add", "."]);
+        run_git_sync(&source_dir, &["commit", "-m", "initial"]);
+        run_git_sync(&source_dir, &["branch", "-M", "main"]);
+        run_git_sync(
+            &source_dir,
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.to_str().unwrap_or_default(),
+            ],
+        );
+        run_git_sync(&source_dir, &["push", "-u", "origin", "main"]);
+        run_git_sync(
+            &root,
+            &[
+                "clone",
+                remote_dir.to_str().unwrap_or_default(),
+                clone_dir.to_str().unwrap_or_default(),
+            ],
+        );
+        run_git_sync(&clone_dir, &["checkout", "main"]);
+
+        GitFixture {
+            root,
+            remote_dir,
+            clone_dir,
+        }
+    }
+
+    fn run_git_sync(cwd: &Path, args: &[&str]) {
+        let output = StdCommand::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("failed to run git in daemon test");
+        assert!(
+            output.status.success(),
+            "git {:?} failed in {}: {}",
+            args,
+            cwd.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn test_config(prefix: &str) -> AppConfig {
+        let base = temp_dir(prefix);
+        let log_dir = base.join("logs");
+        fs::create_dir_all(&log_dir).expect("failed to create log directory");
+        AppConfig {
+            base_dir: base.clone(),
+            daemon_addr: "127.0.0.1:50200".to_string(),
+            api_addr: "127.0.0.1:51200".to_string(),
+            state_path: base.join("state.json"),
+            log_dir,
+            log_rotation: crate::logging::LogRotationPolicy {
+                max_size_bytes: 1024 * 1024,
+                max_files: 2,
+                max_age_days: 1,
+            },
+        }
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        std::env::temp_dir().join(format!("oxmgr-daemon-{prefix}-{nonce}"))
     }
 }

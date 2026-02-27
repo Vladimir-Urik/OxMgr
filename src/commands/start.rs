@@ -78,6 +78,9 @@ pub(crate) async fn run(config: &AppConfig, args: StartArgs) -> Result<()> {
                 cluster_instances: args.cluster_instances.map(|value| value.max(1)),
                 namespace: args.namespace,
                 resource_limits,
+                git_repo: None,
+                git_ref: None,
+                pull_secret_hash: None,
             }),
         },
     )
