@@ -37,6 +37,12 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
             start_index: 0,
             visible_rows: 3,
         },
+        table_area: TableArea {
+            left_col: 1,
+            right_col: 78,
+            first_row: 9,
+            last_row: 11,
+        },
         menu_layout: None,
     };
 
@@ -256,13 +262,16 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                         continue;
                     }
 
-                    handle_table_mouse_selection(
+                    let selection_changed = handle_table_mouse_selection(
                         mouse,
                         &frame_info.table_view,
+                        frame_info.table_area,
                         &mut state,
                         processes.len(),
                     );
-                    needs_redraw = true;
+                    if selection_changed {
+                        needs_redraw = true;
+                    }
                 }
                 Event::Resize(_, _) => {
                     needs_full_clear = true;
@@ -343,8 +352,25 @@ struct TableView {
 }
 
 #[derive(Debug, Copy, Clone)]
+struct TableArea {
+    left_col: u16,
+    right_col: u16,
+    first_row: u16,
+    last_row: u16,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct ProcessSidebarLayout {
+    box_x: u16,
+    box_y: u16,
+    box_width: u16,
+    box_height: u16,
+}
+
+#[derive(Debug, Copy, Clone)]
 struct FrameInfo {
     table_view: TableView,
+    table_area: TableArea,
     menu_layout: Option<EscMenuLayout>,
 }
 
@@ -634,6 +660,7 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         },
         restart_policy: crate::process::RestartPolicy::OnFailure,
         max_restarts: 10,
+        crash_restart_limit: 3,
         cwd: None,
         env: std::collections::HashMap::new(),
         health_check: None,
@@ -738,33 +765,51 @@ fn handle_menu_mouse(mouse: MouseEvent, layout: EscMenuLayout) -> Option<EscMenu
 fn handle_table_mouse_selection(
     mouse: MouseEvent,
     view: &TableView,
+    area: TableArea,
     state: &mut DashboardState,
     process_count: usize,
-) {
+) -> bool {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            let table_first_row = 9_u16;
-            let table_last_row = table_first_row + view.visible_rows.saturating_sub(1) as u16;
-            if mouse.row < table_first_row || mouse.row > table_last_row {
-                return;
+            if mouse.row < area.first_row
+                || mouse.row > area.last_row
+                || mouse.column < area.left_col
+                || mouse.column > area.right_col
+            {
+                return false;
             }
-            let relative = (mouse.row - table_first_row) as usize;
+            let relative = (mouse.row - area.first_row) as usize;
             let idx = view.start_index.saturating_add(relative);
             if idx < process_count {
+                if state.selected == idx {
+                    return false;
+                }
                 state.selected = idx;
+                return true;
             }
+            false
         }
         MouseEventKind::ScrollUp => {
+            if mouse.column < area.left_col || mouse.column > area.right_col {
+                return false;
+            }
             if state.selected > 0 {
                 state.selected -= 1;
+                return true;
             }
+            false
         }
         MouseEventKind::ScrollDown => {
+            if mouse.column < area.left_col || mouse.column > area.right_col {
+                return false;
+            }
             if state.selected + 1 < process_count {
                 state.selected += 1;
+                return true;
             }
+            false
         }
-        _ => {}
+        _ => false,
     }
 }
 
@@ -779,6 +824,21 @@ fn draw_frame(
     let width = (width as usize).saturating_sub(1).max(1);
     let height = height as usize;
     let table_view = compute_table_view(height, state.selected);
+    let sidebar_layout = if !state.esc_menu_open && !state.help_open && state.create_form.is_none()
+    {
+        processes
+            .get(state.selected)
+            .and_then(|_| process_sidebar_layout(width, height))
+    } else {
+        None
+    };
+    let table_inner_width = table_inner_width(width, sidebar_layout);
+    let table_area = TableArea {
+        left_col: 1,
+        right_col: table_inner_width as u16,
+        first_row: 9,
+        last_row: 9_u16 + table_view.visible_rows.saturating_sub(1) as u16,
+    };
     let menu_layout = if state.esc_menu_open {
         esc_menu_layout(width, height)
     } else {
@@ -805,6 +865,7 @@ fn draw_frame(
         out.flush().context("failed flushing terminal frame")?;
         return Ok(FrameInfo {
             table_view,
+            table_area,
             menu_layout,
         });
     }
@@ -893,11 +954,22 @@ fn draw_frame(
         &mut frame,
         &paint(
             "1;36",
-            &frame_line_with_label("╠", "╣", width, '═', "SERVICES"),
+            &frame_content_line_left(
+                &frame_line_with_label("╠", "╣", table_inner_width, '═', "SERVICES"),
+                table_inner_width,
+                width,
+            ),
         ),
     )?;
 
-    draw_table(&mut frame, processes, &table_view, state.selected, width)?;
+    draw_table(
+        &mut frame,
+        processes,
+        &table_view,
+        state.selected,
+        width,
+        table_inner_width,
+    )?;
 
     write_line(
         &mut frame,
@@ -915,10 +987,8 @@ fn draw_frame(
     if let Some(layout) = menu_layout {
         draw_esc_menu(&mut out, layout, state.esc_menu_selected)?;
     }
-    if let Some(process) = processes.get(state.selected) {
-        if !state.esc_menu_open && !state.help_open && state.create_form.is_none() {
-            draw_process_sidebar(&mut out, width, height, process, processes.len())?;
-        }
+    if let (Some(process), Some(layout)) = (processes.get(state.selected), sidebar_layout) {
+        draw_process_sidebar(&mut out, layout, process, processes.len())?;
     }
     if state.help_open {
         draw_help_overlay(&mut out, width, height)?;
@@ -931,6 +1001,7 @@ fn draw_frame(
 
     Ok(FrameInfo {
         table_view,
+        table_area,
         menu_layout,
     })
 }
@@ -941,6 +1012,7 @@ fn draw_table(
     table_view: &TableView,
     selected: usize,
     width: usize,
+    table_inner_width: usize,
 ) -> Result<()> {
     let mut cols: [(&str, usize); 9] = [
         ("S", 1),
@@ -956,16 +1028,19 @@ fn draw_table(
 
     let separators_width = (cols.len() - 1) * 3;
     let min_table_width = cols.iter().map(|(_, col)| *col).sum::<usize>() + separators_width;
-    let inner_width = width.saturating_sub(2);
-    if min_table_width > inner_width {
+    if min_table_width > table_inner_width {
         write_line(
             out,
-            &frame_content_line(" table too wide for current terminal ", width),
+            &frame_content_line_left(
+                " table too wide for current terminal ",
+                table_inner_width,
+                width,
+            ),
         )?;
         return Ok(());
     }
-    let extra = inner_width - min_table_width;
-    // Stretch table to full frame width by allocating slack to NAME column.
+    let extra = table_inner_width - min_table_width;
+    // Stretch table to fill the left pane by allocating slack to NAME column.
     cols[2].1 = cols[2].1.saturating_add(extra);
 
     let mut header_parts = Vec::with_capacity(cols.len());
@@ -974,11 +1049,19 @@ fn draw_table(
     }
     write_line(
         out,
-        &frame_content_line(&paint("1;36", &header_parts.join(" │ ")), width),
+        &frame_content_line_left(
+            &paint("1;36", &header_parts.join(" │ ")),
+            table_inner_width,
+            width,
+        ),
     )?;
     write_line(
         out,
-        &frame_content_line(&paint("2;34", &"─".repeat(inner_width)), width),
+        &frame_content_line_left(
+            &paint("2;34", &"─".repeat(table_inner_width)),
+            table_inner_width,
+            width,
+        ),
     )?;
 
     let visible_rows = table_view.visible_rows;
@@ -988,7 +1071,11 @@ fn draw_table(
     if processes.is_empty() {
         write_line(
             out,
-            &frame_content_line(" no managed processes (use `oxmgr start ...`) ", width),
+            &frame_content_line_left(
+                " no managed processes (use `oxmgr start ...`) ",
+                table_inner_width,
+                width,
+            ),
         )?;
     } else {
         for (idx, process) in processes.iter().enumerate().take(end).skip(start) {
@@ -1021,12 +1108,15 @@ fn draw_table(
             } else {
                 base
             };
-            write_line(out, &frame_content_line(&line, width))?;
+            write_line(
+                out,
+                &frame_content_line_left(&line, table_inner_width, width),
+            )?;
         }
     }
 
     for _ in end.saturating_sub(start)..visible_rows {
-        write_line(out, &frame_content_line(" ", width))?;
+        write_line(out, &frame_content_line_left(" ", table_inner_width, width))?;
     }
 
     Ok(())
@@ -1229,22 +1319,54 @@ fn draw_create_overlay(
     Ok(())
 }
 
+fn process_sidebar_layout(width: usize, height: usize) -> Option<ProcessSidebarLayout> {
+    if width < 110 || height < 14 {
+        return None;
+    }
+
+    let inner = width.saturating_sub(2);
+    let gap = 1_usize;
+    let min_left = 66_usize;
+    let max_sidebar = 44_usize;
+    let min_sidebar = 36_usize;
+    if inner < min_left + gap + min_sidebar {
+        return None;
+    }
+
+    let box_width = inner
+        .saturating_sub(min_left + gap)
+        .min(max_sidebar)
+        .max(min_sidebar) as u16;
+    let box_x = (width as u16).saturating_sub(box_width + 1);
+    let box_y = 5_u16;
+    let box_height = (height as u16).saturating_sub(box_y).max(9);
+
+    Some(ProcessSidebarLayout {
+        box_x,
+        box_y,
+        box_width,
+        box_height,
+    })
+}
+
+fn table_inner_width(width: usize, sidebar_layout: Option<ProcessSidebarLayout>) -> usize {
+    if let Some(layout) = sidebar_layout {
+        (layout.box_x as usize).saturating_sub(2)
+    } else {
+        width.saturating_sub(2)
+    }
+}
+
 fn draw_process_sidebar(
     out: &mut impl Write,
-    width: usize,
-    height: usize,
+    layout: ProcessSidebarLayout,
     process: &ManagedProcess,
     process_count: usize,
 ) -> Result<()> {
-    if width < 100 || height < 14 {
-        return Ok(());
-    }
-
-    let box_width = 44_u16.min(width as u16 - 4);
-    let box_x = (width as u16).saturating_sub(box_width + 1);
-    let box_y = 7_u16;
-    let max_height = (height as u16).saturating_sub(box_y + 1);
-    let box_height = max_height.min(24).max(12);
+    let box_x = layout.box_x;
+    let box_y = layout.box_y;
+    let box_width = layout.box_width;
+    let box_height = layout.box_height;
     let inner = box_width.saturating_sub(2) as usize;
 
     let top = format!("╔{}╗", "═".repeat(inner));
@@ -1443,6 +1565,25 @@ fn frame_content_line(content: &str, width: usize) -> String {
     line
 }
 
+fn frame_content_line_left(content: &str, left_inner_width: usize, total_width: usize) -> String {
+    let inner_total = total_width.saturating_sub(2);
+    let left_clipped = if visible_len(content) > left_inner_width {
+        truncate_visible_ansi(content, left_inner_width)
+    } else {
+        content.to_string()
+    };
+    let left_visible = visible_len(&left_clipped);
+
+    let mut line = String::new();
+    line.push('║');
+    line.push_str(&left_clipped);
+    if left_visible < inner_total {
+        line.push_str(&" ".repeat(inner_total - left_visible));
+    }
+    line.push('║');
+    line
+}
+
 fn visible_len(value: &str) -> usize {
     let mut len = 0usize;
     let mut iter = value.chars().peekable();
@@ -1573,9 +1714,11 @@ mod tests {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
     use super::{
-        compute_table_view, esc_menu_layout, format_memory_cell, frame_line_with_label,
-        handle_menu_mouse, progress_bar, truncate, truncate_visible_ansi, visible_len, CreateField,
-        CreateProcessForm, DashboardState, EscMenuChoice, EscMenuLayout, FlashLevel, FlashMessage,
+        compute_table_view, esc_menu_layout, format_memory_cell, frame_content_line_left,
+        frame_line_with_label, handle_menu_mouse, handle_table_mouse_selection,
+        process_sidebar_layout, progress_bar, table_inner_width, truncate, truncate_visible_ansi,
+        visible_len, CreateField, CreateProcessForm, DashboardState, EscMenuChoice, EscMenuLayout,
+        FlashLevel, FlashMessage, ProcessSidebarLayout, TableArea, TableView,
     };
 
     #[test]
@@ -1683,6 +1826,33 @@ mod tests {
     }
 
     #[test]
+    fn process_sidebar_layout_uses_full_body_height() {
+        let layout = process_sidebar_layout(140, 30).expect("sidebar layout should exist");
+        assert_eq!(layout.box_y, 5);
+        assert_eq!(layout.box_height, 25);
+    }
+
+    #[test]
+    fn table_inner_width_stops_before_sidebar() {
+        let layout = ProcessSidebarLayout {
+            box_x: 90,
+            box_y: 5,
+            box_width: 44,
+            box_height: 20,
+        };
+        assert_eq!(table_inner_width(140, Some(layout)), 88);
+        assert_eq!(table_inner_width(140, None), 138);
+    }
+
+    #[test]
+    fn frame_content_line_left_preserves_full_terminal_width() {
+        let line = frame_content_line_left("hello", 10, 20);
+        assert_eq!(visible_len(&line), 20);
+        assert!(line.starts_with('║'));
+        assert!(line.ends_with('║'));
+    }
+
+    #[test]
     fn create_form_toggles_and_edits_active_field() {
         let mut form = CreateProcessForm::default();
         assert_eq!(form.active, CreateField::Command);
@@ -1693,5 +1863,59 @@ mod tests {
 
         assert_eq!(form.command, "node app.js");
         assert_eq!(form.name, "api");
+    }
+
+    #[test]
+    fn mouse_move_does_not_change_selection_or_trigger_redraw() {
+        let view = TableView {
+            start_index: 0,
+            visible_rows: 10,
+        };
+        let area = TableArea {
+            left_col: 1,
+            right_col: 60,
+            first_row: 9,
+            last_row: 18,
+        };
+        let mut state = DashboardState::default();
+        state.selected = 2;
+
+        let moved = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 10,
+            row: 12,
+            modifiers: KeyModifiers::empty(),
+        };
+
+        let changed = handle_table_mouse_selection(moved, &view, area, &mut state, 5);
+        assert!(!changed);
+        assert_eq!(state.selected, 2);
+    }
+
+    #[test]
+    fn sidebar_click_does_not_change_table_selection() {
+        let view = TableView {
+            start_index: 0,
+            visible_rows: 10,
+        };
+        let area = TableArea {
+            left_col: 1,
+            right_col: 60,
+            first_row: 9,
+            last_row: 18,
+        };
+        let mut state = DashboardState::default();
+        state.selected = 1;
+
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 90,
+            row: 10,
+            modifiers: KeyModifiers::empty(),
+        };
+
+        let changed = handle_table_mouse_selection(click, &view, area, &mut state, 5);
+        assert!(!changed);
+        assert_eq!(state.selected, 1);
     }
 }

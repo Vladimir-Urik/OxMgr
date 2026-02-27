@@ -38,6 +38,7 @@ Supported platforms: **Linux, macOS, Windows**.
 - Named processes (`--name`) with safe auto-generated names
 - Restart policies: `always`, `on-failure`, `never`
 - Configurable max restart count (`--max-restarts`)
+- Crash-loop cutoff: stop after `3` auto restarts in `5` minutes by default (`--crash-restart-limit`)
 - Optional file watching restart loop (`--watch`)
 - Background daemon with local IPC over localhost TCP
 - CLI auto-starts daemon when needed
@@ -120,7 +121,7 @@ cargo install --path .
 
 ```bash
 # Start process with restart policy
-oxmgr start "node server.js" --name api --restart always --max-restarts 20
+oxmgr start "node server.js" --name api --restart always --max-restarts 20 --crash-restart-limit 3
 
 # Check fleet
 oxmgr list
@@ -229,6 +230,7 @@ Options:
 - `--name <name>`
 - `--restart <always|on-failure|never>` (default: `on-failure`)
 - `--max-restarts <n>` (default: `10`)
+- `--crash-restart-limit <n>` (default: `3`, `0` disables the 5-minute crash-loop cutoff)
 - `--cwd <path>`
 - `--env KEY=VALUE` (repeatable)
 - `--health-cmd <command>`
@@ -255,6 +257,7 @@ oxmgr start "python app.py" \
   --name worker \
   --restart on-failure \
   --max-restarts 5 \
+  --crash-restart-limit 3 \
   --health-cmd "curl -fsS http://127.0.0.1:8080/health" \
   --health-interval 15 \
   --health-timeout 3 \
@@ -270,6 +273,12 @@ Cluster mode notes:
 - Cluster mode currently supports `node <script> [args...]`.
 - Node runtime flags before script path are not supported in cluster mode.
 - `--cluster-instances` requires `--cluster`.
+
+Crash-loop notes:
+
+- `--crash-restart-limit` counts only daemon-triggered auto restarts after unexpected exits.
+- Manual `restart`, `reload`, `start`, and config-driven operations reset the crash-loop counter.
+- `0` disables the cutoff completely.
 
 ### `oxmgr stop <name|id>`
 
@@ -509,6 +518,7 @@ Supported fields per app:
 - `autorestart`
 - `restart_policy`
 - `max_restarts`
+- `crash_restart_limit`
 - `health_cmd`, `health_interval`, `health_timeout`, `health_max_failures`
 - or nested `health: { cmd, interval, timeout, max_failures }`
 - `restart_delay`
@@ -544,6 +554,7 @@ Example:
       "env": { "NODE_ENV": "production" },
       "restart_policy": "always",
       "max_restarts": 20,
+      "crash_restart_limit": 3,
       "health_cmd": "curl -fsS http://127.0.0.1:3000/health",
       "health_interval": 15,
       "health_timeout": 3,
@@ -556,7 +567,8 @@ Example:
       "script": "python",
       "args": ["worker.py"],
       "autorestart": true,
-      "max_restarts": 10
+      "max_restarts": 10,
+      "crash_restart_limit": 5
     },
     {
       "name": "api-cluster",
@@ -595,6 +607,7 @@ version = 1
 [defaults]
 restart_policy = "on_failure"
 max_restarts = 10
+crash_restart_limit = 3
 stop_timeout_secs = 5
 max_memory_mb = 256
 
@@ -636,6 +649,7 @@ Supported oxfile features include:
 - `instances` and `instance_var`
 - `cluster_mode` and `cluster_instances`
 - restart/stop delay and signal settings
+- crash-loop cutoff (`crash_restart_limit`, default `3` auto restarts in `5` minutes)
 - namespace and health checks
 - resource limits (`max_memory_mb`, `max_cpu_percent`)
 
@@ -690,6 +704,7 @@ Required release secrets are documented in [`docs/RELEASE.md`](./docs/RELEASE.md
 Current automated tests cover:
 
 - restart policy behavior (`always`, `on-failure`, `never`)
+- crash-loop cutoff scheduling and manual restart reset behavior
 - `ecosystem.config.json` parsing (`cmd`, `script+args`, health config)
 - ecosystem/oxfile resource limit parsing and serialization
 - idempotent `apply` planning behavior (noop/recreate/restart/prune)

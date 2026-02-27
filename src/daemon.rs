@@ -1,20 +1,39 @@
 use std::env;
 use std::process::Stdio;
 use std::str;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::time::{sleep, timeout, Duration, MissedTickBehavior};
 use tracing::{error, info, warn};
 
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
 use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
+use crate::logging::ProcessLogs;
+use crate::process::ManagedProcess;
 use crate::process_manager::ProcessManager;
+
+#[derive(Clone, Default)]
+struct DaemonSnapshot {
+    processes: Arc<RwLock<Vec<ManagedProcess>>>,
+}
+
+enum ManagerCommand {
+    Ipc {
+        request: IpcRequest,
+        response_tx: oneshot::Sender<IpcResponse>,
+    },
+    Api {
+        request: HttpRequest,
+        response_tx: oneshot::Sender<HttpResponse>,
+    },
+}
 
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
@@ -23,9 +42,14 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
 
     let (exit_tx, mut exit_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<ManagerCommand>();
     let mut manager = ProcessManager::new(config.clone(), exit_tx)?;
     manager.recover_processes().await?;
+    let snapshot = DaemonSnapshot::default();
+    snapshot.publish(&manager).await;
 
+    let mut restart_tick = tokio::time::interval(Duration::from_millis(250));
+    restart_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut maintenance = tokio::time::interval(Duration::from_secs(2));
     maintenance.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -36,10 +60,14 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
         tokio::select! {
             incoming = listener.accept() => {
                 match incoming {
-                    Ok((mut stream, _)) => {
-                        if let Err(err) = handle_client(&mut stream, &mut manager, &shutdown_tx).await {
-                            error!("failed to handle IPC client: {err}");
-                        }
+                    Ok((stream, _)) => {
+                        let command_tx = command_tx.clone();
+                        let snapshot = snapshot.clone();
+                        tokio::spawn(async move {
+                            if let Err(err) = handle_client(stream, snapshot, command_tx).await {
+                                error!("failed to handle IPC client: {err}");
+                            }
+                        });
                     }
                     Err(err) => {
                         error!("IPC accept failed: {err}");
@@ -48,29 +76,54 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
             }
             incoming = api_listener.accept() => {
                 match incoming {
-                    Ok((mut stream, _)) => {
-                        if let Err(err) = handle_api_client(&mut stream, &mut manager).await {
-                            error!("failed to handle webhook API client: {err}");
-                        }
+                    Ok((stream, _)) => {
+                        let command_tx = command_tx.clone();
+                        tokio::spawn(async move {
+                            if let Err(err) = handle_api_client(stream, command_tx).await {
+                                error!("failed to handle webhook API client: {err}");
+                            }
+                        });
                     }
                     Err(err) => {
                         error!("webhook API accept failed: {err}");
                     }
                 }
             }
+            Some(command) = command_rx.recv() => {
+                match command {
+                    ManagerCommand::Ipc { request, response_tx } => {
+                        let response = execute_request(request, &mut manager, &shutdown_tx).await;
+                        let _ = response_tx.send(response);
+                    }
+                    ManagerCommand::Api { request, response_tx } => {
+                        let response = execute_api_request(request, &mut manager).await;
+                        let _ = response_tx.send(response);
+                    }
+                }
+                snapshot.publish(&manager).await;
+            }
             Some(event) = exit_rx.recv() => {
                 if let Err(err) = manager.handle_exit_event(event).await {
                     error!("failed to process exit event: {err}");
                 }
+                snapshot.publish(&manager).await;
+            }
+            _ = restart_tick.tick() => {
+                if let Err(err) = manager.run_scheduled_restarts().await {
+                    error!("scheduled restart task failed: {err}");
+                }
+                snapshot.publish(&manager).await;
             }
             _ = maintenance.tick() => {
                 if let Err(err) = manager.run_periodic_tasks().await {
                     error!("periodic manager task failed: {err}");
                 }
+                snapshot.publish(&manager).await;
             }
             Some(_) = shutdown_rx.recv() => {
                 info!("shutdown requested via IPC; stopping managed processes");
                 manager.shutdown_all().await?;
+                snapshot.publish(&manager).await;
                 break;
             }
             ctrl = tokio::signal::ctrl_c() => {
@@ -79,6 +132,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                 }
                 info!("received shutdown signal; stopping managed processes");
                 manager.shutdown_all().await?;
+                snapshot.publish(&manager).await;
                 break;
             }
         }
@@ -139,13 +193,17 @@ async fn bind_api_listener(api_addr: &str) -> Result<TcpListener> {
 }
 
 async fn handle_client(
-    stream: &mut TcpStream,
-    manager: &mut ProcessManager,
-    shutdown_tx: &mpsc::UnboundedSender<()>,
+    mut stream: TcpStream,
+    snapshot: DaemonSnapshot,
+    command_tx: mpsc::UnboundedSender<ManagerCommand>,
 ) -> Result<()> {
-    let request = read_json_line::<IpcRequest, _>(stream).await?;
-    let response = execute_request(request, manager, shutdown_tx).await;
-    write_json_line(stream, &response).await
+    let request = read_json_line::<IpcRequest, _>(&mut stream).await?;
+    let response = if let Some(response) = execute_snapshot_request(&request, &snapshot).await {
+        response
+    } else {
+        send_ipc_command(&command_tx, request).await?
+    };
+    write_json_line(&mut stream, &response).await
 }
 
 async fn execute_request(
@@ -227,10 +285,72 @@ async fn execute_request(
     }
 }
 
-async fn handle_api_client(stream: &mut TcpStream, manager: &mut ProcessManager) -> Result<()> {
-    let request = read_http_request(stream).await?;
-    let response = execute_api_request(request, manager).await;
-    write_http_response(stream, response.status_code, &response.body).await
+async fn execute_snapshot_request(
+    request: &IpcRequest,
+    snapshot: &DaemonSnapshot,
+) -> Option<IpcResponse> {
+    match request {
+        IpcRequest::Ping => Some(IpcResponse::ok("pong")),
+        IpcRequest::List => {
+            let mut response = IpcResponse::ok("ok");
+            response.processes = snapshot.list_processes().await;
+            Some(response)
+        }
+        IpcRequest::Status { target } => {
+            let process = snapshot.get_process(target).await?;
+            let mut response = IpcResponse::ok("ok");
+            response.process = Some(process);
+            Some(response)
+        }
+        IpcRequest::Logs { target } => {
+            let logs = snapshot.logs_for(target).await?;
+            let mut response = IpcResponse::ok("ok");
+            response.logs = Some(logs);
+            Some(response)
+        }
+        _ => None,
+    }
+}
+
+async fn send_ipc_command(
+    command_tx: &mpsc::UnboundedSender<ManagerCommand>,
+    request: IpcRequest,
+) -> Result<IpcResponse> {
+    let (response_tx, response_rx) = oneshot::channel();
+    command_tx
+        .send(ManagerCommand::Ipc {
+            request,
+            response_tx,
+        })
+        .map_err(|_| anyhow::anyhow!("daemon manager loop is unavailable"))?;
+    response_rx
+        .await
+        .map_err(|_| anyhow::anyhow!("daemon manager loop dropped IPC response"))
+}
+
+async fn send_api_command(
+    command_tx: &mpsc::UnboundedSender<ManagerCommand>,
+    request: HttpRequest,
+) -> Result<HttpResponse> {
+    let (response_tx, response_rx) = oneshot::channel();
+    command_tx
+        .send(ManagerCommand::Api {
+            request,
+            response_tx,
+        })
+        .map_err(|_| anyhow::anyhow!("daemon manager loop is unavailable"))?;
+    response_rx
+        .await
+        .map_err(|_| anyhow::anyhow!("daemon manager loop dropped API response"))
+}
+
+async fn handle_api_client(
+    mut stream: TcpStream,
+    command_tx: mpsc::UnboundedSender<ManagerCommand>,
+) -> Result<()> {
+    let request = read_http_request(&mut stream).await?;
+    let response = send_api_command(&command_tx, request).await?;
+    write_http_response(&mut stream, response.status_code, &response.body).await
 }
 
 async fn execute_api_request(request: HttpRequest, manager: &mut ProcessManager) -> HttpResponse {
@@ -400,6 +520,35 @@ impl HttpResponse {
     }
 }
 
+impl DaemonSnapshot {
+    async fn publish(&self, manager: &ProcessManager) {
+        let mut processes = self.processes.write().await;
+        *processes = manager.list_processes();
+    }
+
+    async fn list_processes(&self) -> Vec<ManagedProcess> {
+        self.processes.read().await.clone()
+    }
+
+    async fn get_process(&self, target: &str) -> Option<ManagedProcess> {
+        let processes = self.processes.read().await;
+        if let Some(process) = processes.iter().find(|process| process.name == target) {
+            return Some(process.clone());
+        }
+
+        let id = target.parse::<u64>().ok()?;
+        processes.iter().find(|process| process.id == id).cloned()
+    }
+
+    async fn logs_for(&self, target: &str) -> Option<ProcessLogs> {
+        let process = self.get_process(target).await?;
+        Some(ProcessLogs {
+            stdout: process.stdout_log,
+            stderr: process.stderr_log,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -411,7 +560,10 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tokio::sync::mpsc::unbounded_channel;
 
-    use super::{execute_api_request, extract_api_secret, HttpRequest};
+    use super::{
+        execute_api_request, execute_snapshot_request, extract_api_secret, DaemonSnapshot,
+        HttpRequest,
+    };
     use crate::config::AppConfig;
     use crate::process::{RestartPolicy, StartProcessSpec};
     use crate::process_manager::ProcessManager;
@@ -543,6 +695,45 @@ mod tests {
         assert_eq!(extract_api_secret(&request).as_deref(), Some("token123"));
     }
 
+    #[tokio::test]
+    async fn snapshot_request_serves_list_status_and_logs_without_manager() {
+        let mut manager = empty_manager("daemon-snapshot-read");
+        start_minimal_service(&mut manager, "api", None, None, None).await;
+
+        let snapshot = DaemonSnapshot::default();
+        snapshot.publish(&manager).await;
+
+        let list = execute_snapshot_request(&crate::ipc::IpcRequest::List, &snapshot)
+            .await
+            .expect("list should be served from snapshot");
+        assert_eq!(list.processes.len(), 1);
+
+        let status = execute_snapshot_request(
+            &crate::ipc::IpcRequest::Status {
+                target: "api".to_string(),
+            },
+            &snapshot,
+        )
+        .await
+        .expect("status should be served from snapshot");
+        assert_eq!(
+            status.process.as_ref().map(|process| process.name.as_str()),
+            Some("api")
+        );
+
+        let logs = execute_snapshot_request(
+            &crate::ipc::IpcRequest::Logs {
+                target: "api".to_string(),
+            },
+            &snapshot,
+        )
+        .await
+        .expect("logs should be served from snapshot");
+        assert!(logs.logs.is_some());
+
+        let _ = manager.shutdown_all().await;
+    }
+
     async fn start_minimal_service(
         manager: &mut ProcessManager,
         name: &str,
@@ -558,6 +749,7 @@ mod tests {
             name: Some(name.to_string()),
             restart_policy: RestartPolicy::Never,
             max_restarts: 1,
+            crash_restart_limit: 3,
             cwd,
             env: HashMap::new(),
             health_check: None,

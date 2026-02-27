@@ -327,6 +327,7 @@ mod tests {
             name: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 0,
+            crash_restart_limit: 3,
             cwd: None,
             env: HashMap::new(),
             health_check: None,
@@ -378,6 +379,7 @@ mod tests {
             name: Some(name.to_string()),
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
+            crash_restart_limit: 3,
             cwd: None,
             env: HashMap::new(),
             health_check: Some(HealthCheck {

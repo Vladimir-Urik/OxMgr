@@ -36,6 +36,7 @@ Common options:
 - `--name <name>`
 - `--restart <always|on-failure|never>` (default: `on-failure`)
 - `--max-restarts <n>` (default: `10`)
+- `--crash-restart-limit <n>` (default: `3`, `0` disables the 5-minute crash-loop cutoff)
 - `--cwd <path>`
 - `--env KEY=VALUE` (repeatable)
 - `--watch` (watch working directory and restart on file changes)
@@ -60,6 +61,8 @@ Cluster mode notes:
 - Cluster mode currently supports command shape `node <script> [args...]`.
 - Node runtime flags before script path are not supported in cluster mode.
 - `--cluster-instances` requires `--cluster`.
+- `--crash-restart-limit` counts only daemon-triggered auto restarts after unexpected exits.
+- Manual `start`, `restart`, and `reload` reset the crash-loop counter.
 
 ## Lifecycle
 
@@ -82,7 +85,7 @@ Details and webhook flow: [Pull and Webhook Guide](./PULL_WEBHOOK.md).
 
 `list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health.
 
-`status` includes detailed metadata including watch, cluster mode, restart policy, limits, command, and log paths.
+`status` includes detailed metadata including watch, cluster mode, restart policy, crash-loop cutoff, limits, command, and log paths.
 
 `ui` supports keyboard and mouse controls:
 

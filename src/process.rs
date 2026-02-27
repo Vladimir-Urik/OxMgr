@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub const DEFAULT_CRASH_RESTART_LIMIT: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RestartPolicy {
@@ -109,6 +111,8 @@ pub struct StartProcessSpec {
     pub name: Option<String>,
     pub restart_policy: RestartPolicy,
     pub max_restarts: u32,
+    #[serde(default = "default_crash_restart_limit")]
+    pub crash_restart_limit: u32,
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
     #[serde(default)]
@@ -147,6 +151,10 @@ pub struct ManagedProcess {
     pub restart_policy: RestartPolicy,
     pub max_restarts: u32,
     pub restart_count: u32,
+    #[serde(default = "default_crash_restart_limit")]
+    pub crash_restart_limit: u32,
+    #[serde(default)]
+    pub auto_restart_history: Vec<u64>,
     #[serde(default)]
     pub namespace: Option<String>,
     #[serde(default)]
@@ -224,6 +232,10 @@ impl ManagedProcess {
     }
 }
 
+pub fn default_crash_restart_limit() -> u32 {
+    DEFAULT_CRASH_RESTART_LIMIT
+}
+
 fn default_stop_timeout_secs() -> u64 {
     5
 }
@@ -234,8 +246,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        default_stop_timeout_secs, DesiredState, HealthStatus, ManagedProcess, ProcessStatus,
-        RestartPolicy,
+        default_crash_restart_limit, default_stop_timeout_secs, DesiredState, HealthStatus,
+        ManagedProcess, ProcessStatus, RestartPolicy, DEFAULT_CRASH_RESTART_LIMIT,
     };
 
     #[test]
@@ -289,6 +301,12 @@ mod tests {
         assert_eq!(default_stop_timeout_secs(), 5);
     }
 
+    #[test]
+    fn crash_restart_limit_default_is_three() {
+        assert_eq!(default_crash_restart_limit(), 3);
+        assert_eq!(DEFAULT_CRASH_RESTART_LIMIT, 3);
+    }
+
     fn fixture_process() -> ManagedProcess {
         ManagedProcess {
             id: 42,
@@ -300,6 +318,8 @@ mod tests {
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             restart_count: 0,
+            crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
+            auto_restart_history: Vec::new(),
             namespace: None,
             git_repo: None,
             git_ref: None,

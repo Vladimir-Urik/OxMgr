@@ -28,10 +28,13 @@ pub struct ProcessManager {
     config: AppConfig,
     processes: HashMap<String, ManagedProcess>,
     watch_fingerprints: HashMap<String, u64>,
+    scheduled_restarts: HashMap<String, u64>,
     next_id: u64,
     exit_tx: UnboundedSender<ProcessExitEvent>,
     system: System,
 }
+
+const CRASH_RESTART_WINDOW_SECS: u64 = 5 * 60;
 
 impl ProcessManager {
     pub fn new(config: AppConfig, exit_tx: UnboundedSender<ProcessExitEvent>) -> Result<Self> {
@@ -64,6 +67,7 @@ impl ProcessManager {
             config,
             processes,
             watch_fingerprints: HashMap::new(),
+            scheduled_restarts: HashMap::new(),
             next_id,
             exit_tx,
             system: System::new_all(),
@@ -113,6 +117,7 @@ impl ProcessManager {
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
         }
         self.watch_fingerprints.clear();
+        self.scheduled_restarts.clear();
         self.save()?;
 
         for name in should_start {
@@ -128,6 +133,7 @@ impl ProcessManager {
     }
 
     pub async fn run_periodic_tasks(&mut self) -> Result<()> {
+        self.run_scheduled_restarts().await?;
         self.refresh_resource_metrics();
         self.run_resource_limit_checks().await?;
         self.run_watch_checks().await?;
@@ -140,6 +146,7 @@ impl ProcessManager {
             name,
             restart_policy,
             max_restarts,
+            crash_restart_limit,
             cwd,
             env,
             health_check,
@@ -184,6 +191,8 @@ impl ProcessManager {
             restart_policy,
             max_restarts,
             restart_count: 0,
+            crash_restart_limit,
+            auto_restart_history: Vec::new(),
             namespace,
             git_repo,
             git_ref,
@@ -266,8 +275,10 @@ impl ProcessManager {
         process.next_health_check = None;
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
+        reset_auto_restart_state(&mut process);
 
         self.watch_fingerprints.remove(&name);
+        self.scheduled_restarts.remove(&name);
         self.processes.insert(name, process.clone());
         self.save()?;
         Ok(process)
@@ -302,6 +313,7 @@ impl ProcessManager {
                 .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
             if reset_restart_count {
                 process.restart_count = 0;
+                reset_auto_restart_state(process);
             }
             process.restart_backoff_attempt = 0;
             process.last_exit_code = None;
@@ -318,6 +330,7 @@ impl ProcessManager {
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
         }
 
+        self.scheduled_restarts.remove(&name);
         self.spawn_existing(&name).await
     }
 
@@ -345,11 +358,13 @@ impl ProcessManager {
         replacement.last_exit_code = None;
         replacement.health_status = HealthStatus::Unknown;
         replacement.health_failures = 0;
+        reset_auto_restart_state(&mut replacement);
         replacement.next_health_check = replacement
             .health_check
             .as_ref()
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
 
+        self.scheduled_restarts.remove(&name);
         self.processes.insert(name.clone(), replacement.clone());
         self.update_watch_fingerprint(&replacement);
         self.save()?;
@@ -475,6 +490,7 @@ impl ProcessManager {
             .remove(&name)
             .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
         self.watch_fingerprints.remove(&name);
+        self.scheduled_restarts.remove(&name);
         self.save()?;
         Ok(removed)
     }
@@ -580,17 +596,20 @@ impl ProcessManager {
 
         process.pid = None;
         self.watch_fingerprints.remove(&process.name);
+        self.scheduled_restarts.remove(&process.name);
         cleanup_process_cgroup(&mut process);
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
         process.last_exit_code = event.exit_code;
-        process.last_stopped_at = Some(now_epoch_secs());
+        let now = now_epoch_secs();
+        process.last_stopped_at = Some(now);
 
         if process.desired_state == DesiredState::Stopped {
             process.status = ProcessStatus::Stopped;
             process.restart_backoff_attempt = 0;
             process.health_status = HealthStatus::Unknown;
             process.next_health_check = None;
+            reset_auto_restart_state(&mut process);
             self.processes.insert(process.name.clone(), process);
             self.save()?;
             return Ok(());
@@ -602,8 +621,25 @@ impl ProcessManager {
             && process.restart_count < process.max_restarts;
 
         if can_restart {
+            if crash_loop_limit_reached(&mut process, now) {
+                process.status = ProcessStatus::Errored;
+                process.desired_state = DesiredState::Stopped;
+                process.restart_backoff_attempt = 0;
+                process.health_status = HealthStatus::Unknown;
+                process.health_failures = 0;
+                process.next_health_check = None;
+                process.last_health_error = Some(format!(
+                    "crash loop detected after {} auto restarts in 5 minutes; manual restart required",
+                    process.crash_restart_limit
+                ));
+                self.processes.insert(process.name.clone(), process);
+                self.save()?;
+                return Ok(());
+            }
+
             maybe_reset_backoff_attempt(&mut process);
             let restart_delay = compute_restart_delay_secs(&process);
+            record_auto_restart(&mut process, now);
             process.status = ProcessStatus::Restarting;
             process.restart_count = process.restart_count.saturating_add(1);
             process.restart_backoff_attempt = process.restart_backoff_attempt.saturating_add(1);
@@ -613,19 +649,10 @@ impl ProcessManager {
                 .health_check
                 .as_ref()
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
+            self.scheduled_restarts
+                .insert(process.name.clone(), now.saturating_add(restart_delay));
             self.processes.insert(process.name.clone(), process.clone());
             self.save()?;
-
-            if restart_delay > 0 {
-                sleep(Duration::from_secs(restart_delay)).await;
-            }
-            if let Err(err) = self.spawn_existing(&process.name).await {
-                error!("failed to restart process {}: {err}", process.name);
-                if let Some(p) = self.processes.get_mut(&process.name) {
-                    p.status = ProcessStatus::Errored;
-                }
-                self.save()?;
-            }
             return Ok(());
         }
 
@@ -639,6 +666,9 @@ impl ProcessManager {
         process.restart_backoff_attempt = 0;
         process.health_status = HealthStatus::Unknown;
         process.next_health_check = None;
+        if !matches!(process.status, ProcessStatus::Restarting) {
+            reset_auto_restart_state(&mut process);
+        }
 
         self.processes.insert(process.name.clone(), process);
         self.save()?;
@@ -662,7 +692,9 @@ impl ProcessManager {
                 process.next_health_check = None;
                 process.cpu_percent = 0.0;
                 process.memory_bytes = 0;
+                reset_auto_restart_state(&mut process);
                 self.watch_fingerprints.remove(&name);
+                self.scheduled_restarts.remove(&name);
                 self.processes.insert(name, process);
             }
         }
@@ -686,6 +718,7 @@ impl ProcessManager {
             .as_ref()
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
 
+        self.scheduled_restarts.remove(name);
         self.processes.insert(name.to_string(), process.clone());
         self.update_watch_fingerprint(&process);
         self.save()?;
@@ -822,6 +855,43 @@ impl ProcessManager {
                 self.watch_fingerprints.remove(&process.name);
             }
         }
+    }
+
+    pub async fn run_scheduled_restarts(&mut self) -> Result<()> {
+        let now = now_epoch_secs();
+        let mut due: Vec<(String, u64)> = self
+            .scheduled_restarts
+            .iter()
+            .filter(|(_, due_at)| **due_at <= now)
+            .map(|(name, due_at)| (name.clone(), *due_at))
+            .collect();
+        due.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+
+        for (name, _) in due {
+            self.scheduled_restarts.remove(&name);
+
+            let Some(snapshot) = self.processes.get(&name).cloned() else {
+                continue;
+            };
+
+            if snapshot.desired_state != DesiredState::Running
+                || snapshot.status != ProcessStatus::Restarting
+            {
+                continue;
+            }
+
+            if let Err(err) = self.spawn_existing(&name).await {
+                error!("failed to restart process {}: {err}", name);
+                if let Some(process) = self.processes.get_mut(&name) {
+                    process.status = ProcessStatus::Errored;
+                    process.desired_state = DesiredState::Stopped;
+                    process.last_health_error = Some(format!("restart failed: {err}"));
+                }
+                self.save()?;
+            }
+        }
+
+        Ok(())
     }
 
     fn save(&self) -> Result<()> {
@@ -1557,6 +1627,30 @@ fn hash_restart_seed(name: &str, attempt: u32, now: u64) -> u64 {
     hash
 }
 
+fn reset_auto_restart_state(process: &mut ManagedProcess) {
+    process.auto_restart_history.clear();
+}
+
+fn prune_auto_restart_history(process: &mut ManagedProcess, now: u64) {
+    process
+        .auto_restart_history
+        .retain(|timestamp| now.saturating_sub(*timestamp) < CRASH_RESTART_WINDOW_SECS);
+}
+
+fn crash_loop_limit_reached(process: &mut ManagedProcess, now: u64) -> bool {
+    prune_auto_restart_history(process, now);
+    process.crash_restart_limit > 0
+        && process.auto_restart_history.len() >= process.crash_restart_limit as usize
+}
+
+fn record_auto_restart(process: &mut ManagedProcess, now: u64) {
+    if process.crash_restart_limit == 0 {
+        return;
+    }
+    prune_auto_restart_history(process, now);
+    process.auto_restart_history.push(now);
+}
+
 #[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
     use nix::errno::Errno;
@@ -1879,7 +1973,7 @@ mod tests {
     };
     use crate::config::AppConfig;
     use crate::process::{
-        DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
+        DesiredState, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus, RestartPolicy,
     };
 
     #[test]
@@ -1943,6 +2037,20 @@ mod tests {
             delay
         );
         assert!(delay <= 5, "delay should stay under cap, got {}", delay);
+    }
+
+    #[test]
+    fn crash_loop_window_drops_old_restart_attempts() {
+        let now = now_epoch_secs();
+        let mut process = fixture_process();
+        process.crash_restart_limit = 3;
+        process.auto_restart_history = vec![
+            now.saturating_sub(super::CRASH_RESTART_WINDOW_SECS + 1),
+            now.saturating_sub(super::CRASH_RESTART_WINDOW_SECS - 1),
+        ];
+
+        assert!(!super::crash_loop_limit_reached(&mut process, now));
+        assert_eq!(process.auto_restart_history.len(), 1);
     }
 
     #[cfg(unix)]
@@ -2169,6 +2277,171 @@ mod tests {
         cleanup_git_fixture(git);
     }
 
+    #[tokio::test]
+    async fn handle_exit_event_schedules_restart_without_blocking() {
+        let mut manager = empty_manager("scheduled-restart-fast");
+        let mut process = fixture_process();
+        process.pid = Some(7001);
+        process.restart_delay_secs = 5;
+        manager.processes.insert(process.name.clone(), process);
+
+        let started = std::time::Instant::now();
+        manager
+            .handle_exit_event(ProcessExitEvent {
+                name: "api".to_string(),
+                pid: 7001,
+                exit_code: Some(1),
+                success: false,
+                wait_error: false,
+            })
+            .await
+            .expect("exit event should be handled");
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "exit handling should not block on restart delay"
+        );
+
+        let process = manager
+            .processes
+            .get("api")
+            .expect("process should still exist after exit");
+        assert_eq!(process.status, ProcessStatus::Restarting);
+        assert_eq!(process.restart_count, 1);
+        assert!(manager.scheduled_restarts.contains_key("api"));
+    }
+
+    #[tokio::test]
+    async fn scheduled_restart_spawns_due_process() {
+        let mut manager = empty_manager("scheduled-restart-run");
+        let mut process = spawnable_fixture_process();
+        process.pid = None;
+        process.status = ProcessStatus::Restarting;
+        manager.processes.insert(process.name.clone(), process);
+        manager
+            .scheduled_restarts
+            .insert("api".to_string(), now_epoch_secs().saturating_sub(1));
+
+        manager
+            .run_scheduled_restarts()
+            .await
+            .expect("due restart should be processed");
+
+        let process = manager
+            .processes
+            .get("api")
+            .expect("process should still exist after restart");
+        assert_eq!(process.status, ProcessStatus::Running);
+        assert!(
+            process.pid.is_some(),
+            "scheduled restart should spawn a child"
+        );
+        assert!(
+            !manager.scheduled_restarts.contains_key("api"),
+            "due restart should be cleared after spawn"
+        );
+    }
+
+    #[tokio::test]
+    async fn crash_loop_limit_stops_fourth_crash_after_three_auto_restarts() {
+        let mut manager = empty_manager("crash-loop-limit");
+        let mut process = fixture_process();
+        process.restart_delay_secs = 0;
+        process.crash_restart_limit = 3;
+        process.pid = Some(8100);
+        manager.processes.insert(process.name.clone(), process);
+
+        let mut pid = 8100_u32;
+        for expected_history_len in 1..=3 {
+            manager
+                .handle_exit_event(ProcessExitEvent {
+                    name: "api".to_string(),
+                    pid,
+                    exit_code: Some(1),
+                    success: false,
+                    wait_error: false,
+                })
+                .await
+                .expect("crash should schedule auto restart");
+
+            let process = manager
+                .processes
+                .get("api")
+                .expect("process should still exist after crash");
+            assert_eq!(process.status, ProcessStatus::Restarting);
+            assert_eq!(process.auto_restart_history.len(), expected_history_len);
+
+            manager.scheduled_restarts.remove("api");
+            pid = pid.saturating_add(1);
+            if let Some(process) = manager.processes.get_mut("api") {
+                process.pid = Some(pid);
+                process.status = ProcessStatus::Running;
+                process.desired_state = DesiredState::Running;
+                process.last_started_at = Some(now_epoch_secs());
+            }
+        }
+
+        manager
+            .handle_exit_event(ProcessExitEvent {
+                name: "api".to_string(),
+                pid,
+                exit_code: Some(1),
+                success: false,
+                wait_error: false,
+            })
+            .await
+            .expect("fourth crash should be handled");
+
+        let process = manager
+            .processes
+            .get("api")
+            .expect("process should still exist after crash loop cutoff");
+        assert_eq!(process.status, ProcessStatus::Errored);
+        assert_eq!(process.desired_state, DesiredState::Stopped);
+        assert!(
+            process
+                .last_health_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("crash loop detected"),
+            "expected crash loop message, got {:?}",
+            process.last_health_error
+        );
+        assert!(
+            !manager.scheduled_restarts.contains_key("api"),
+            "crash loop cutoff should cancel pending restart"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_restart_clears_auto_restart_history() {
+        let mut manager = empty_manager("manual-restart-clears-loop");
+        let mut process = spawnable_fixture_process();
+        process.pid = None;
+        process.status = ProcessStatus::Stopped;
+        process.desired_state = DesiredState::Stopped;
+        process.auto_restart_history = vec![
+            now_epoch_secs().saturating_sub(20),
+            now_epoch_secs().saturating_sub(10),
+        ];
+        manager.processes.insert(process.name.clone(), process);
+
+        let restarted = manager
+            .restart_process("api")
+            .await
+            .expect("manual restart should succeed");
+
+        assert_eq!(restarted.status, ProcessStatus::Running);
+        let process = manager
+            .processes
+            .get("api")
+            .expect("process should still exist after manual restart");
+        assert!(
+            process.auto_restart_history.is_empty(),
+            "manual restart must clear crash-loop history"
+        );
+    }
+
     fn fixture_process() -> ManagedProcess {
         ManagedProcess {
             id: 1,
@@ -2180,6 +2453,8 @@ mod tests {
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             restart_count: 0,
+            crash_restart_limit: 3,
+            auto_restart_history: Vec::new(),
             namespace: None,
             git_repo: None,
             git_ref: None,
@@ -2214,6 +2489,16 @@ mod tests {
             last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
         }
+    }
+
+    fn spawnable_fixture_process() -> ManagedProcess {
+        let mut process = fixture_process();
+        process.command = std::env::current_exe()
+            .expect("failed to resolve current test executable")
+            .display()
+            .to_string();
+        process.args = vec!["--help".to_string()];
+        process
     }
 
     fn empty_manager(prefix: &str) -> ProcessManager {

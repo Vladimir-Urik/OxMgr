@@ -46,6 +46,7 @@ struct BundleService {
     args: Vec<String>,
     restart_policy: RestartPolicy,
     max_restarts: u32,
+    crash_restart_limit: u32,
     #[serde(default)]
     cwd: Option<PathBuf>,
     #[serde(default)]
@@ -272,6 +273,7 @@ impl BundleService {
             args: process.args.clone(),
             restart_policy: process.restart_policy.clone(),
             max_restarts: process.max_restarts,
+            crash_restart_limit: process.crash_restart_limit,
             cwd: process.cwd.clone(),
             env: process.env.clone(),
             health_check: process.health_check.clone(),
@@ -296,6 +298,7 @@ impl BundleService {
             name: Some(self.name),
             restart_policy: self.restart_policy,
             max_restarts: self.max_restarts,
+            crash_restart_limit: self.crash_restart_limit,
             cwd: self.cwd,
             env: self.env,
             health_check: self.health_check,
@@ -490,6 +493,7 @@ mod tests {
         assert_eq!(spec.command, "node server.js --port 3000");
         assert_eq!(spec.stop_timeout_secs, 15);
         assert_eq!(spec.max_restarts, 10);
+        assert_eq!(spec.crash_restart_limit, 3);
         assert!(spec.watch);
         assert_eq!(spec.git_repo.as_deref(), Some("git@github.com:org/api.git"));
         assert_eq!(spec.git_ref.as_deref(), Some("main"));
@@ -522,6 +526,7 @@ mod tests {
             args: vec!["server.js".to_string()],
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
+            crash_restart_limit: 3,
             cwd: None,
             env: HashMap::from([("BAD-KEY".to_string(), "1".to_string())]),
             health_check: None,
@@ -554,6 +559,7 @@ mod tests {
             args: vec!["server.js".to_string()],
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
+            crash_restart_limit: 3,
             cwd: None,
             env: HashMap::new(),
             health_check: None,
@@ -590,6 +596,8 @@ mod tests {
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             restart_count: 0,
+            crash_restart_limit: 3,
+            auto_restart_history: Vec::new(),
             namespace: Some("backend".to_string()),
             git_repo: Some("git@github.com:org/api.git".to_string()),
             git_ref: Some("main".to_string()),

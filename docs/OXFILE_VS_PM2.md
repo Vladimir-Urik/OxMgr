@@ -27,6 +27,7 @@ Use `oxfile.toml` when:
 3. More explicit profile overrides (`[apps.profiles.<name>]`).
 4. Dependency graph and start ordering designed for idempotent `oxmgr apply`.
 5. First-class support for Oxmgr pull webhook settings (`git_repo`, `git_ref`, `pull_secret`).
+6. Native crash-loop cutoff control (`crash_restart_limit`) with a clear default.
 
 ## Practical Differences
 
@@ -38,6 +39,7 @@ Use `oxfile.toml` when:
 | Dependencies | limited/indirect | explicit `depends_on` |
 | Start order | `priority` mappings | explicit `start_order` |
 | Pull webhook fields | imported/translated | native fields |
+| Crash-loop cutoff | compatibility import only | native `crash_restart_limit` |
 | Apply idempotency clarity | medium | high |
 
 ## Migration Pattern

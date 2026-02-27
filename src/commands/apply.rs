@@ -18,6 +18,7 @@ struct DesiredProcessSpec {
     command: String,
     restart_policy: RestartPolicy,
     max_restarts: u32,
+    crash_restart_limit: u32,
     cwd: Option<PathBuf>,
     env: HashMap<String, String>,
     health_check: Option<HealthCheck>,
@@ -204,6 +205,7 @@ fn expand_specs_for_apply(
                 command: spec.command.clone(),
                 restart_policy: spec.restart_policy.clone(),
                 max_restarts: spec.max_restarts,
+                crash_restart_limit: spec.crash_restart_limit,
                 cwd: spec.cwd.clone(),
                 env,
                 health_check: spec.health_check.clone(),
@@ -282,6 +284,7 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.args == desired_cmd.1
         && existing.restart_policy == desired.restart_policy
         && existing.max_restarts == desired.max_restarts
+        && existing.crash_restart_limit == desired.crash_restart_limit
         && existing.cwd == desired.cwd
         && existing.env == desired.env
         && existing.health_check == desired.health_check
@@ -315,6 +318,7 @@ fn start_request_from_spec(spec: DesiredProcessSpec) -> IpcRequest {
             name: Some(spec.name),
             restart_policy: spec.restart_policy,
             max_restarts: spec.max_restarts,
+            crash_restart_limit: spec.crash_restart_limit,
             cwd: spec.cwd,
             env: spec.env,
             health_check: spec.health_check,
@@ -401,6 +405,7 @@ mod tests {
             command: command.to_string(),
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
+            crash_restart_limit: 3,
             cwd: None,
             env: HashMap::new(),
             health_check: None,
@@ -438,6 +443,8 @@ mod tests {
             restart_policy: desired.restart_policy.clone(),
             max_restarts: desired.max_restarts,
             restart_count: 0,
+            crash_restart_limit: desired.crash_restart_limit,
+            auto_restart_history: Vec::new(),
             namespace: desired.namespace.clone(),
             git_repo: desired.git_repo.clone(),
             git_ref: desired.git_ref.clone(),

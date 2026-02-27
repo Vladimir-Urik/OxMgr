@@ -39,6 +39,7 @@ struct Oxfile {
 struct OxDefaults {
     restart_policy: Option<RestartPolicyValue>,
     max_restarts: Option<u32>,
+    crash_restart_limit: Option<u32>,
     cwd: Option<PathBuf>,
     env: Option<HashMap<String, String>>,
     stop_signal: Option<String>,
@@ -73,6 +74,7 @@ struct OxApp {
     env: Option<HashMap<String, String>>,
     restart_policy: Option<RestartPolicyValue>,
     max_restarts: Option<u32>,
+    crash_restart_limit: Option<u32>,
     stop_signal: Option<String>,
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
@@ -105,6 +107,7 @@ struct OxProfile {
     env: Option<HashMap<String, String>>,
     restart_policy: Option<RestartPolicyValue>,
     max_restarts: Option<u32>,
+    crash_restart_limit: Option<u32>,
     stop_signal: Option<String>,
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
@@ -136,6 +139,7 @@ struct Resolved {
     env: HashMap<String, String>,
     restart_policy: RestartPolicy,
     max_restarts: u32,
+    crash_restart_limit: u32,
     stop_signal: Option<String>,
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
@@ -172,6 +176,7 @@ struct OxAppOut {
     env: HashMap<String, String>,
     restart_policy: RestartPolicy,
     max_restarts: u32,
+    crash_restart_limit: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_signal: Option<String>,
     stop_timeout_secs: u64,
@@ -235,6 +240,7 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             name: app.name,
             restart_policy: resolved.restart_policy,
             max_restarts: resolved.max_restarts,
+            crash_restart_limit: resolved.crash_restart_limit,
             cwd: resolved.cwd,
             env: resolved.env,
             health_check: resolved.health_check,
@@ -275,6 +281,10 @@ fn resolve_app(
             .map(Into::into)
             .unwrap_or(RestartPolicy::OnFailure),
         max_restarts: app.max_restarts.or(defaults.max_restarts).unwrap_or(10),
+        crash_restart_limit: app
+            .crash_restart_limit
+            .or(defaults.crash_restart_limit)
+            .unwrap_or(3),
         stop_signal: app
             .stop_signal
             .clone()
@@ -376,6 +386,9 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     }
     if let Some(max_restarts) = profile.max_restarts {
         resolved.max_restarts = max_restarts;
+    }
+    if let Some(crash_restart_limit) = profile.crash_restart_limit {
+        resolved.crash_restart_limit = crash_restart_limit;
     }
     if let Some(stop_signal) = &profile.stop_signal {
         resolved.stop_signal = Some(stop_signal.clone());
@@ -541,6 +554,7 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             env: spec.env.clone(),
             restart_policy: spec.restart_policy.clone(),
             max_restarts: spec.max_restarts,
+            crash_restart_limit: spec.crash_restart_limit,
             stop_signal: spec.stop_signal.clone(),
             stop_timeout_secs: spec.stop_timeout_secs,
             restart_delay_secs: spec.restart_delay_secs,
@@ -617,6 +631,7 @@ version = 1
 [defaults]
 restart_policy = "on-failure"
 max_restarts = 5
+crash_restart_limit = 4
 start_order = 20
 max_memory_mb = 256
 cluster_mode = true
@@ -635,6 +650,7 @@ BASE = "1"
 instances = 3
 start_order = 2
 restart_policy = "always"
+crash_restart_limit = 6
 max_memory_mb = 512
 max_cpu_percent = 80
 cluster_instances = 4
@@ -651,6 +667,7 @@ NODE_ENV = "production"
         assert_eq!(app.instances, 3);
         assert_eq!(app.start_order, 2);
         assert_eq!(app.restart_policy, RestartPolicy::Always);
+        assert_eq!(app.crash_restart_limit, 6);
         assert!(app.cluster_mode);
         assert_eq!(app.cluster_instances, Some(4));
         assert_eq!(
@@ -675,6 +692,7 @@ NODE_ENV = "production"
             name: Some("worker".to_string()),
             restart_policy: RestartPolicy::Never,
             max_restarts: 0,
+            crash_restart_limit: 4,
             cwd: None,
             env: HashMap::new(),
             health_check: Some(HealthCheck {
@@ -714,6 +732,26 @@ NODE_ENV = "production"
         assert!(rendered.contains("max_cpu_percent = 60.0"));
         assert!(rendered.contains("cluster_mode = true"));
         assert!(rendered.contains("cluster_instances = 2"));
+        assert!(rendered.contains("crash_restart_limit = 4"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_with_profile_defaults_crash_restart_limit_to_three() {
+        let path = temp_file("oxfile-default-crash-limit");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "api"
+command = "node server.js"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+
+        let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].crash_restart_limit, 3);
 
         let _ = fs::remove_file(path);
     }

@@ -31,6 +31,14 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
         "Restarts",
         format!("{}/{}", process.restart_count, process.max_restarts),
     );
+    print_field(
+        "Crash Loop",
+        if process.crash_restart_limit == 0 {
+            "disabled".to_string()
+        } else {
+            format!("{} auto restarts / 5m", process.crash_restart_limit)
+        },
+    );
     print_field("Watch", if process.watch { "enabled" } else { "disabled" });
     print_field(
         "Cluster",

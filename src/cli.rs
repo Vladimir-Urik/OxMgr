@@ -68,6 +68,8 @@ pub enum Commands {
         restart: RestartArg,
         #[arg(long, default_value_t = 10)]
         max_restarts: u32,
+        #[arg(long, default_value_t = 3)]
+        crash_restart_limit: u32,
         #[arg(long)]
         cwd: Option<PathBuf>,
         #[arg(long = "env", value_parser = parse_env_var)]

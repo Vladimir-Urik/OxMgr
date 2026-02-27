@@ -109,6 +109,7 @@ Details:
 
 - `restart_policy`: `always | on_failure | never`
 - `max_restarts`: integer
+- `crash_restart_limit`: integer (`0` disables crash-loop cutoff, default `3`)
 - `cwd`: string path
 - `env`: key/value table
 - `stop_signal`: string (for example `SIGTERM`, `SIGINT`)
@@ -152,6 +153,13 @@ Details:
 - `always`: restart after any exit (until `max_restarts` is reached)
 - `on_failure`: restart only after non-zero/failed exit
 - `never`: never auto-restart
+
+Crash-loop cutoff:
+
+- `crash_restart_limit` stops daemon-triggered auto restarts after that many restart attempts inside a rolling 5-minute window.
+- Default is `3`.
+- Manual `start`, `restart`, and `reload` reset the counter.
+- Set `crash_restart_limit = 0` to disable the cutoff.
 
 ## Health Checks
 

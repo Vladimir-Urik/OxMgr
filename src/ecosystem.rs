@@ -15,6 +15,7 @@ pub struct EcosystemProcessSpec {
     pub name: Option<String>,
     pub restart_policy: RestartPolicy,
     pub max_restarts: u32,
+    pub crash_restart_limit: u32,
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
     pub health_check: Option<HealthCheck>,
@@ -51,6 +52,7 @@ struct EcosystemApp {
     autorestart: Option<bool>,
     restart_policy: Option<RestartPolicy>,
     max_restarts: Option<u32>,
+    crash_restart_limit: Option<u32>,
     restart_delay: Option<u64>,
     delay_start: Option<u64>,
     start_delay: Option<u64>,
@@ -103,6 +105,7 @@ struct EcosystemHealth {
 struct ResolvedSettings {
     restart_policy: RestartPolicy,
     max_restarts: u32,
+    crash_restart_limit: u32,
     cwd: Option<PathBuf>,
     env: HashMap<String, String>,
     health_check: Option<HealthCheck>,
@@ -162,6 +165,7 @@ impl EcosystemApp {
         let mut settings = ResolvedSettings {
             restart_policy: restart_policy_from(self.restart_policy, self.autorestart),
             max_restarts: self.max_restarts.unwrap_or(10),
+            crash_restart_limit: self.crash_restart_limit.unwrap_or(3),
             cwd: self.cwd,
             env: self.env.unwrap_or_default(),
             health_check: health_check_from(
@@ -207,6 +211,7 @@ impl EcosystemApp {
             name: self.name,
             restart_policy: settings.restart_policy,
             max_restarts: settings.max_restarts,
+            crash_restart_limit: settings.crash_restart_limit,
             cwd: settings.cwd,
             env: settings.env,
             health_check: settings.health_check,
@@ -327,6 +332,11 @@ fn apply_profile_overrides(
             "max_restarts" => {
                 if let Some(parsed) = value.as_u64() {
                     settings.max_restarts = parsed as u32;
+                }
+            }
+            "crash_restart_limit" => {
+                if let Some(parsed) = value.as_u64() {
+                    settings.crash_restart_limit = parsed as u32;
                 }
             }
             "restart_delay" => {
@@ -707,6 +717,7 @@ mod tests {
       "cmd": "node server.js",
       "restart_policy": "always",
       "max_restarts": 8,
+      "crash_restart_limit": 6,
       "health_cmd": "curl -fsS http://127.0.0.1:3000/health",
       "health_interval": 12,
       "health_timeout": 2,
@@ -727,6 +738,7 @@ mod tests {
         assert_eq!(app.command, "node server.js");
         assert_eq!(app.restart_policy, RestartPolicy::Always);
         assert_eq!(app.max_restarts, 8);
+        assert_eq!(app.crash_restart_limit, 6);
 
         let health = app.health_check.as_ref().expect("health check missing");
         assert_eq!(health.interval_secs, 12);
@@ -811,6 +823,7 @@ mod tests {
         "NODE_ENV": "production",
         "instances": 2,
         "priority": 10,
+        "crash_restart_limit": 4,
         "restart_delay": 7,
         "delay_start": 3,
         "pm2_kill_signal": "SIGINT",
@@ -837,6 +850,7 @@ mod tests {
         );
         assert_eq!(app.instances, 2);
         assert_eq!(app.start_order, 10);
+        assert_eq!(app.crash_restart_limit, 4);
         assert_eq!(app.restart_delay_secs, 7);
         assert_eq!(app.start_delay_secs, 3);
         assert_eq!(app.stop_signal.as_deref(), Some("SIGINT"));
@@ -848,6 +862,28 @@ mod tests {
             .expect("resource limits missing");
         assert_eq!(limits.max_memory_mb, Some(512));
         assert_eq!(limits.max_cpu_percent, Some(80.0));
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn load_defaults_crash_restart_limit_to_three() {
+        let file_path = temp_file("ecosystem-default-crash-limit");
+        let payload = r#"
+{
+  "apps": [
+    {
+      "name": "api",
+      "cmd": "node server.js"
+    }
+  ]
+}
+"#;
+        fs::write(&file_path, payload).expect("failed to write ecosystem fixture");
+
+        let specs = load_with_profile(&file_path, None).expect("failed to parse ecosystem config");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].crash_restart_limit, 3);
 
         let _ = fs::remove_file(file_path);
     }
