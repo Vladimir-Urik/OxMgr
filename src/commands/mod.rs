@@ -14,6 +14,7 @@ mod start;
 mod startup;
 mod status;
 mod stop;
+mod ui;
 mod validate;
 
 use anyhow::Result;
@@ -91,6 +92,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         Commands::Reload { target } => reload::run(config, target).await,
         Commands::Delete { target } => delete::run(config, target).await,
         Commands::List => list::run(config).await,
+        Commands::Ui { interval_ms } => ui::run(config, interval_ms).await,
         Commands::Status { target } => status::run(config, target).await,
         Commands::Logs {
             target,

@@ -68,6 +68,10 @@ pub enum Commands {
         target: String,
     },
     List,
+    Ui {
+        #[arg(long, default_value_t = 800)]
+        interval_ms: u64,
+    },
     Logs {
         target: String,
         #[arg(short = 'f', long)]
