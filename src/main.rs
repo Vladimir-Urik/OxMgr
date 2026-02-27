@@ -11,6 +11,7 @@ mod oxfile;
 mod process;
 mod process_manager;
 mod storage;
+mod ui;
 
 use anyhow::Result;
 use clap::Parser;
