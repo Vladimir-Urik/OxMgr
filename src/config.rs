@@ -57,12 +57,22 @@ impl AppConfig {
     }
 
     pub fn ensure_layout(&self) -> Result<()> {
-        fs::create_dir_all(&self.base_dir)
-            .with_context(|| format!("failed to create {}", self.base_dir.display()))?;
-        fs::create_dir_all(&self.log_dir)
-            .with_context(|| format!("failed to create {}", self.log_dir.display()))?;
+        ensure_private_dir(&self.base_dir)?;
+        ensure_private_dir(&self.log_dir)?;
         Ok(())
     }
+}
+
+fn ensure_private_dir(path: &std::path::Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn daemon_port() -> u16 {

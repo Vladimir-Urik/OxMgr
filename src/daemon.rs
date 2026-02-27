@@ -220,7 +220,7 @@ async fn execute_request(
         IpcRequest::Start { spec } => match manager.start_process(*spec).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("started {}", process.target_label()));
-                response.process = Some(process);
+                response.process = Some(process.redacted_for_transport());
                 response
             }
             Err(err) => IpcResponse::error(err.to_string()),
@@ -228,7 +228,7 @@ async fn execute_request(
         IpcRequest::Stop { target } => match manager.stop_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("stopped {}", process.target_label()));
-                response.process = Some(process);
+                response.process = Some(process.redacted_for_transport());
                 response
             }
             Err(err) => IpcResponse::error(err.to_string()),
@@ -236,7 +236,7 @@ async fn execute_request(
         IpcRequest::Restart { target } => match manager.restart_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("restarted {}", process.target_label()));
-                response.process = Some(process);
+                response.process = Some(process.redacted_for_transport());
                 response
             }
             Err(err) => IpcResponse::error(err.to_string()),
@@ -244,7 +244,7 @@ async fn execute_request(
         IpcRequest::Reload { target } => match manager.reload_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("reloaded {}", process.target_label()));
-                response.process = Some(process);
+                response.process = Some(process.redacted_for_transport());
                 response
             }
             Err(err) => IpcResponse::error(err.to_string()),
@@ -256,20 +256,20 @@ async fn execute_request(
         IpcRequest::Delete { target } => match manager.delete_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("deleted {}", process.target_label()));
-                response.process = Some(process);
+                response.process = Some(process.redacted_for_transport());
                 response
             }
             Err(err) => IpcResponse::error(err.to_string()),
         },
         IpcRequest::List => {
             let mut response = IpcResponse::ok("ok");
-            response.processes = manager.list_processes();
+            response.processes = redact_processes(manager.list_processes());
             response
         }
         IpcRequest::Status { target } => match manager.get_process(&target) {
             Ok(process) => {
                 let mut response = IpcResponse::ok("ok");
-                response.process = Some(process);
+                response.process = Some(process.redacted_for_transport());
                 response
             }
             Err(err) => IpcResponse::error(err.to_string()),
@@ -293,13 +293,13 @@ async fn execute_snapshot_request(
         IpcRequest::Ping => Some(IpcResponse::ok("pong")),
         IpcRequest::List => {
             let mut response = IpcResponse::ok("ok");
-            response.processes = snapshot.list_processes().await;
+            response.processes = redact_processes(snapshot.list_processes().await);
             Some(response)
         }
         IpcRequest::Status { target } => {
             let process = snapshot.get_process(target).await?;
             let mut response = IpcResponse::ok("ok");
-            response.process = Some(process);
+            response.process = Some(process.redacted_for_transport());
             Some(response)
         }
         IpcRequest::Logs { target } => {
@@ -310,6 +310,13 @@ async fn execute_snapshot_request(
         }
         _ => None,
     }
+}
+
+fn redact_processes(processes: Vec<ManagedProcess>) -> Vec<ManagedProcess> {
+    processes
+        .into_iter()
+        .map(|process| process.redacted_for_transport())
+        .collect()
 }
 
 async fn send_ipc_command(
@@ -730,6 +737,61 @@ mod tests {
         .await
         .expect("logs should be served from snapshot");
         assert!(logs.logs.is_some());
+
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn snapshot_request_redacts_env_and_pull_secret_hash() {
+        let mut manager = empty_manager("daemon-snapshot-redaction");
+        let exe = std::env::current_exe().expect("failed to read current executable path");
+        let command = format!("\"{}\" --help", exe.display());
+        let spec = StartProcessSpec {
+            command,
+            name: Some("api".to_string()),
+            restart_policy: RestartPolicy::Never,
+            max_restarts: 1,
+            crash_restart_limit: 3,
+            cwd: None,
+            env: HashMap::from([("SECRET_TOKEN".to_string(), "value".to_string())]),
+            health_check: None,
+            stop_signal: None,
+            stop_timeout_secs: 1,
+            restart_delay_secs: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            namespace: None,
+            resource_limits: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: Some(hash_secret("hook-secret")),
+        };
+
+        manager
+            .start_process(spec)
+            .await
+            .expect("failed to start redaction test service");
+
+        let snapshot = DaemonSnapshot::default();
+        snapshot.publish(&manager).await;
+
+        let status = execute_snapshot_request(
+            &crate::ipc::IpcRequest::Status {
+                target: "api".to_string(),
+            },
+            &snapshot,
+        )
+        .await
+        .expect("status should be served from snapshot");
+        let process = status.process.expect("expected process in status response");
+        assert!(process.env.is_empty(), "env should be redacted from IPC");
+        assert_eq!(
+            process.pull_secret_hash.as_deref(),
+            Some("<redacted>"),
+            "pull secret hash should be redacted from IPC"
+        );
 
         let _ = manager.shutdown_all().await;
     }

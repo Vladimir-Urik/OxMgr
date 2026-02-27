@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::io::{stdout, Write};
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -44,6 +45,7 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
             last_row: 11,
         },
         menu_layout: None,
+        delete_confirm_layout: None,
     };
 
     while !should_exit {
@@ -107,6 +109,112 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                                         form.error = None;
                                     }
                                 }
+                                needs_redraw = true;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    if let Some(confirm) = state.delete_confirm.as_mut() {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('n') => {
+                                state.close_delete_confirm();
+                                needs_full_clear = true;
+                                needs_redraw = true;
+                            }
+                            KeyCode::Left
+                            | KeyCode::Up
+                            | KeyCode::Char('h')
+                            | KeyCode::Char('k') => {
+                                confirm.selected = DeleteConfirmChoice::Cancel;
+                                needs_redraw = true;
+                            }
+                            KeyCode::Right
+                            | KeyCode::Down
+                            | KeyCode::Tab
+                            | KeyCode::Char('l')
+                            | KeyCode::Char('j') => {
+                                confirm.selected = DeleteConfirmChoice::Delete;
+                                needs_redraw = true;
+                            }
+                            KeyCode::Char('y') => {
+                                let target = confirm.target.clone();
+                                state.close_delete_confirm();
+                                delete_target(config, &target, &mut state).await;
+                                next_refresh_at = Instant::now();
+                                needs_full_clear = true;
+                                needs_redraw = true;
+                            }
+                            KeyCode::Enter => {
+                                let action = confirm.selected;
+                                let target = confirm.target.clone();
+                                state.close_delete_confirm();
+                                match action {
+                                    DeleteConfirmChoice::Cancel => {}
+                                    DeleteConfirmChoice::Delete => {
+                                        delete_target(config, &target, &mut state).await;
+                                        next_refresh_at = Instant::now();
+                                    }
+                                }
+                                needs_full_clear = true;
+                                needs_redraw = true;
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    if let Some(viewer) = state.log_viewer.as_mut() {
+                        let visible_rows = log_viewer_content_rows(
+                            terminal::size().ok().map(|(_, h)| h as usize).unwrap_or(20),
+                        );
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('l') => {
+                                state.close_log_viewer();
+                                needs_full_clear = true;
+                                needs_redraw = true;
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                viewer.scroll_up(1);
+                                needs_redraw = true;
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                viewer.scroll_down(visible_rows, 1);
+                                needs_redraw = true;
+                            }
+                            KeyCode::PageUp => {
+                                viewer.scroll_up(visible_rows.saturating_sub(1).max(1));
+                                needs_redraw = true;
+                            }
+                            KeyCode::PageDown => {
+                                viewer.scroll_down(
+                                    visible_rows,
+                                    visible_rows.saturating_sub(1).max(1),
+                                );
+                                needs_redraw = true;
+                            }
+                            KeyCode::Home => {
+                                viewer.scroll_to_top();
+                                needs_redraw = true;
+                            }
+                            KeyCode::End => {
+                                viewer.scroll_to_bottom(visible_rows);
+                                needs_redraw = true;
+                            }
+                            KeyCode::Tab => {
+                                viewer.toggle_source();
+                                needs_redraw = true;
+                            }
+                            KeyCode::Char('g') | KeyCode::Char(' ') => {
+                                viewer.reload();
+                                viewer.clamp_scroll(visible_rows);
+                                needs_redraw = true;
+                            }
+                            KeyCode::Char('q') => should_exit = true,
+                            KeyCode::Char('?') => {
+                                state.toggle_help();
+                                needs_full_clear = true;
                                 needs_redraw = true;
                             }
                             _ => {}
@@ -207,14 +315,25 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                             next_refresh_at = Instant::now();
                             needs_redraw = true;
                         }
+                        KeyCode::Char('d') => {
+                            if let Some(process) = processes.get(state.selected) {
+                                state.open_delete_confirm(process);
+                            }
+                            needs_redraw = true;
+                        }
                         KeyCode::Char('r') => {
+                            reload_selected(config, &processes, &mut state).await;
+                            next_refresh_at = Instant::now();
+                            needs_redraw = true;
+                        }
+                        KeyCode::Char('R') => {
                             restart_selected(config, &processes, &mut state).await;
                             next_refresh_at = Instant::now();
                             needs_redraw = true;
                         }
                         KeyCode::Char('l') => {
-                            reload_selected(config, &processes, &mut state).await;
-                            next_refresh_at = Instant::now();
+                            open_logs_selected(config, &processes, &mut state).await;
+                            needs_full_clear = true;
                             needs_redraw = true;
                         }
                         KeyCode::Char('p') => {
@@ -233,6 +352,50 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                     if state.create_form.is_some() {
                         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                             needs_redraw = true;
+                        }
+                        continue;
+                    }
+
+                    if state.delete_confirm.is_some() {
+                        if let Some(layout) = frame_info.delete_confirm_layout {
+                            if let Some(action) = handle_delete_confirm_mouse(mouse, layout) {
+                                let target = state
+                                    .delete_confirm
+                                    .as_ref()
+                                    .map(|confirm| confirm.target.clone());
+                                match action {
+                                    DeleteConfirmChoice::Cancel => {
+                                        state.close_delete_confirm();
+                                    }
+                                    DeleteConfirmChoice::Delete => {
+                                        state.close_delete_confirm();
+                                        if let Some(target) = target {
+                                            delete_target(config, &target, &mut state).await;
+                                            next_refresh_at = Instant::now();
+                                        }
+                                    }
+                                }
+                                needs_full_clear = true;
+                                needs_redraw = true;
+                            }
+                        }
+                        continue;
+                    }
+
+                    if let Some(viewer) = state.log_viewer.as_mut() {
+                        let visible_rows = log_viewer_content_rows(
+                            terminal::size().ok().map(|(_, h)| h as usize).unwrap_or(20),
+                        );
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => {
+                                viewer.scroll_up(3);
+                                needs_redraw = true;
+                            }
+                            MouseEventKind::ScrollDown => {
+                                viewer.scroll_down(visible_rows, 3);
+                                needs_redraw = true;
+                            }
+                            _ => {}
                         }
                         continue;
                     }
@@ -297,6 +460,8 @@ struct DashboardState {
     esc_menu_selected: EscMenuChoice,
     help_open: bool,
     create_form: Option<CreateProcessForm>,
+    delete_confirm: Option<DeleteConfirmState>,
+    log_viewer: Option<LogViewerState>,
 }
 
 #[derive(Debug)]
@@ -334,6 +499,38 @@ struct CreateProcessForm {
     error: Option<String>,
 }
 
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+enum DeleteConfirmChoice {
+    #[default]
+    Cancel,
+    Delete,
+}
+
+#[derive(Debug)]
+struct DeleteConfirmState {
+    target: String,
+    label: String,
+    selected: DeleteConfirmChoice,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum LogSource {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug)]
+struct LogViewerState {
+    process_name: String,
+    stdout_path: PathBuf,
+    stderr_path: PathBuf,
+    stdout_lines: Vec<String>,
+    stderr_lines: Vec<String>,
+    active_source: LogSource,
+    scroll: usize,
+    status: Option<String>,
+}
+
 #[derive(Debug, Copy, Clone)]
 struct EscMenuLayout {
     box_x: u16,
@@ -342,6 +539,17 @@ struct EscMenuLayout {
     box_height: u16,
     resume_x: u16,
     quit_x: u16,
+    buttons_y: u16,
+}
+
+#[derive(Debug, Copy, Clone)]
+struct DeleteConfirmLayout {
+    box_x: u16,
+    box_y: u16,
+    box_width: u16,
+    box_height: u16,
+    cancel_x: u16,
+    delete_x: u16,
     buttons_y: u16,
 }
 
@@ -372,6 +580,7 @@ struct FrameInfo {
     table_view: TableView,
     table_area: TableArea,
     menu_layout: Option<EscMenuLayout>,
+    delete_confirm_layout: Option<DeleteConfirmLayout>,
 }
 
 impl DashboardState {
@@ -449,6 +658,26 @@ impl DashboardState {
     fn close_create_form(&mut self) {
         self.create_form = None;
     }
+
+    fn open_delete_confirm(&mut self, process: &ManagedProcess) {
+        self.delete_confirm = Some(DeleteConfirmState {
+            target: process.name.clone(),
+            label: format!("{} (id {})", process.name, process.id),
+            selected: DeleteConfirmChoice::Cancel,
+        });
+    }
+
+    fn close_delete_confirm(&mut self) {
+        self.delete_confirm = None;
+    }
+
+    fn open_log_viewer(&mut self, viewer: LogViewerState) {
+        self.log_viewer = Some(viewer);
+    }
+
+    fn close_log_viewer(&mut self) {
+        self.log_viewer = None;
+    }
 }
 
 impl CreateProcessForm {
@@ -464,6 +693,98 @@ impl CreateProcessForm {
             CreateField::Command => &mut self.command,
             CreateField::Name => &mut self.name,
         }
+    }
+}
+
+impl LogViewerState {
+    fn from_logs(process_name: String, stdout_path: PathBuf, stderr_path: PathBuf) -> Self {
+        let mut viewer = Self {
+            process_name,
+            stdout_path,
+            stderr_path,
+            stdout_lines: Vec::new(),
+            stderr_lines: Vec::new(),
+            active_source: LogSource::Stderr,
+            scroll: 0,
+            status: None,
+        };
+        viewer.reload();
+        viewer
+    }
+
+    fn reload(&mut self) {
+        self.stderr_lines = read_last_lines(&self.stderr_path, 4000).unwrap_or_default();
+        self.stdout_lines = read_last_lines(&self.stdout_path, 4000).unwrap_or_default();
+
+        if self.current_lines().is_empty() {
+            if !self.stdout_lines.is_empty() {
+                self.active_source = LogSource::Stdout;
+            }
+        } else if self.active_source == LogSource::Stdout
+            && self.stdout_lines.is_empty()
+            && !self.stderr_lines.is_empty()
+        {
+            self.active_source = LogSource::Stderr;
+        }
+
+        self.status = Some(format!(
+            "{} stderr lines, {} stdout lines",
+            self.stderr_lines.len(),
+            self.stdout_lines.len()
+        ));
+    }
+
+    fn current_lines(&self) -> &[String] {
+        match self.active_source {
+            LogSource::Stdout => &self.stdout_lines,
+            LogSource::Stderr => &self.stderr_lines,
+        }
+    }
+
+    fn current_path(&self) -> &PathBuf {
+        match self.active_source {
+            LogSource::Stdout => &self.stdout_path,
+            LogSource::Stderr => &self.stderr_path,
+        }
+    }
+
+    fn source_label(&self) -> &'static str {
+        match self.active_source {
+            LogSource::Stdout => "stdout",
+            LogSource::Stderr => "stderr",
+        }
+    }
+
+    fn toggle_source(&mut self) {
+        self.active_source = match self.active_source {
+            LogSource::Stdout => LogSource::Stderr,
+            LogSource::Stderr => LogSource::Stdout,
+        };
+        self.scroll = 0;
+    }
+
+    fn clamp_scroll(&mut self, visible_rows: usize) {
+        let max_scroll = self.current_lines().len().saturating_sub(visible_rows);
+        if self.scroll > max_scroll {
+            self.scroll = max_scroll;
+        }
+    }
+
+    fn scroll_up(&mut self, amount: usize) {
+        self.scroll = self.scroll.saturating_sub(amount);
+    }
+
+    fn scroll_down(&mut self, visible_rows: usize, amount: usize) {
+        let max_scroll = self.current_lines().len().saturating_sub(visible_rows);
+        self.scroll = self.scroll.saturating_add(amount).min(max_scroll);
+    }
+
+    fn scroll_to_top(&mut self) {
+        self.scroll = 0;
+    }
+
+    fn scroll_to_bottom(&mut self, visible_rows: usize) {
+        self.scroll = self.current_lines().len().saturating_sub(visible_rows);
     }
 }
 
@@ -543,6 +864,23 @@ async fn restart_selected(
             },
             Err(err) => state.set_error(err.to_string()),
         }
+    }
+}
+
+async fn delete_target(config: &AppConfig, target: &str, state: &mut DashboardState) {
+    match send_request(
+        &config.daemon_addr,
+        &IpcRequest::Delete {
+            target: target.to_string(),
+        },
+    )
+    .await
+    {
+        Ok(response) => match expect_ok(response) {
+            Ok(ok) => state.set_info(ok.message),
+            Err(err) => state.set_error(err.to_string()),
+        },
+        Err(err) => state.set_error(err.to_string()),
     }
 }
 
@@ -626,6 +964,39 @@ async fn tail_selected(
                         } else {
                             state.set_info("log: no lines yet");
                         }
+                    } else {
+                        state.set_error("log paths unavailable");
+                    }
+                }
+                Err(err) => state.set_error(err.to_string()),
+            },
+            Err(err) => state.set_error(err.to_string()),
+        }
+    }
+}
+
+async fn open_logs_selected(
+    config: &AppConfig,
+    processes: &[ManagedProcess],
+    state: &mut DashboardState,
+) {
+    if let Some(target) = selected_name(processes, state.selected) {
+        match send_request(
+            &config.daemon_addr,
+            &IpcRequest::Logs {
+                target: target.to_string(),
+            },
+        )
+        .await
+        {
+            Ok(response) => match expect_ok(response) {
+                Ok(ok) => {
+                    if let Some(logs) = ok.logs {
+                        state.open_log_viewer(LogViewerState::from_logs(
+                            target.to_string(),
+                            logs.stdout,
+                            logs.stderr,
+                        ));
                     } else {
                         state.set_error("log paths unavailable");
                     }
@@ -762,6 +1133,49 @@ fn handle_menu_mouse(mouse: MouseEvent, layout: EscMenuLayout) -> Option<EscMenu
     None
 }
 
+fn delete_confirm_layout(width: usize, height: usize) -> Option<DeleteConfirmLayout> {
+    if width < 44 || height < 12 {
+        return None;
+    }
+
+    let box_width = 54_u16.min(width as u16 - 4);
+    let box_height = 8_u16.min(height as u16 - 4);
+    let box_x = ((width as u16).saturating_sub(box_width)) / 2;
+    let box_y = ((height as u16).saturating_sub(box_height)) / 2;
+
+    Some(DeleteConfirmLayout {
+        box_x,
+        box_y,
+        box_width,
+        box_height,
+        cancel_x: box_x + 4,
+        delete_x: box_x + box_width.saturating_sub(13),
+        buttons_y: box_y + 5,
+    })
+}
+
+fn handle_delete_confirm_mouse(
+    mouse: MouseEvent,
+    layout: DeleteConfirmLayout,
+) -> Option<DeleteConfirmChoice> {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return None;
+    }
+
+    if mouse.row != layout.buttons_y {
+        return None;
+    }
+
+    if mouse.column >= layout.cancel_x && mouse.column < layout.cancel_x + 8 {
+        return Some(DeleteConfirmChoice::Cancel);
+    }
+    if mouse.column >= layout.delete_x && mouse.column < layout.delete_x + 8 {
+        return Some(DeleteConfirmChoice::Delete);
+    }
+
+    None
+}
+
 fn handle_table_mouse_selection(
     mouse: MouseEvent,
     view: &TableView,
@@ -824,7 +1238,11 @@ fn draw_frame(
     let width = (width as usize).saturating_sub(1).max(1);
     let height = height as usize;
     let table_view = compute_table_view(height, state.selected);
-    let sidebar_layout = if !state.esc_menu_open && !state.help_open && state.create_form.is_none()
+    let log_viewer_open = state.log_viewer.is_some();
+    let sidebar_layout = if !log_viewer_open
+        && !state.esc_menu_open
+        && !state.help_open
+        && state.create_form.is_none()
     {
         processes
             .get(state.selected)
@@ -841,6 +1259,11 @@ fn draw_frame(
     };
     let menu_layout = if state.esc_menu_open {
         esc_menu_layout(width, height)
+    } else {
+        None
+    };
+    let delete_confirm_layout = if state.delete_confirm.is_some() {
+        delete_confirm_layout(width, height)
     } else {
         None
     };
@@ -867,8 +1290,42 @@ fn draw_frame(
             table_view,
             table_area,
             menu_layout,
+            delete_confirm_layout,
         });
     }
+
+    if let Some(viewer) = state.log_viewer.as_ref() {
+        draw_log_viewer_frame(&mut frame, viewer, width, height)?;
+
+        let mut out = stdout();
+        execute!(out, cursor::MoveTo(0, 0)).context("failed moving cursor")?;
+        if clear_all {
+            execute!(out, Clear(ClearType::All)).context("failed clearing terminal frame")?;
+        }
+        out.write_all(&frame)
+            .context("failed writing terminal log viewer frame")?;
+
+        if state.help_open {
+            draw_help_overlay(&mut out, width, height)?;
+        }
+
+        out.flush().context("failed flushing terminal log viewer")?;
+
+        return Ok(FrameInfo {
+            table_view,
+            table_area,
+            menu_layout: None,
+            delete_confirm_layout: None,
+        });
+    }
+
+    let frame_line_content = |content: &str| {
+        if sidebar_layout.is_some() {
+            frame_content_line_left(content, table_inner_width, width)
+        } else {
+            frame_content_line(content, width)
+        }
+    };
 
     let now = wall_clock_hms();
     let selected = processes.get(state.selected);
@@ -898,10 +1355,7 @@ fn draw_frame(
         &mut frame,
         &paint("1;36", &frame_line("╔", "╗", width, '═')),
     )?;
-    write_line(
-        &mut frame,
-        &paint("1;36", &frame_content_line(&title, width)),
-    )?;
+    write_line(&mut frame, &paint("1;36", &frame_line_content(&title)))?;
     write_line(
         &mut frame,
         &paint("1;36", &frame_line("╠", "╣", width, '═')),
@@ -931,7 +1385,7 @@ fn draw_frame(
         paint("2;37", &format!("stopped {stopped}")),
         paint("1;31", &format!("unhealthy {unhealthy}"))
     );
-    write_line(&mut frame, &frame_content_line(&summary, width))?;
+    write_line(&mut frame, &frame_line_content(&summary))?;
 
     if let Some(message) = state.flash.as_ref() {
         let code = match message.level {
@@ -939,13 +1393,12 @@ fn draw_frame(
             FlashLevel::Error => "1;31",
         };
         let text = format!(" {}", message.text);
-        write_line(&mut frame, &frame_content_line(&paint(code, &text), width))?;
+        write_line(&mut frame, &frame_line_content(&paint(code, &text)))?;
     } else {
         write_line(
             &mut frame,
-            &frame_content_line(
-                " Keys: j/k move  n new  s stop  r restart  l reload  p pull  t tail  g/space refresh  ? help  Esc menu ",
-                width,
+            &frame_line_content(
+                " Keys: j/k move  n new  s stop  d delete  r reload  R restart  l logs  p pull  t tail  g/space refresh  ? help  Esc menu ",
             ),
         )?;
     }
@@ -996,6 +1449,9 @@ fn draw_frame(
     if let Some(form) = state.create_form.as_ref() {
         draw_create_overlay(&mut out, width, height, form)?;
     }
+    if let (Some(confirm), Some(layout)) = (state.delete_confirm.as_ref(), delete_confirm_layout) {
+        draw_delete_confirm_overlay(&mut out, layout, confirm)?;
+    }
 
     out.flush().context("failed flushing terminal frame")?;
 
@@ -1003,7 +1459,92 @@ fn draw_frame(
         table_view,
         table_area,
         menu_layout,
+        delete_confirm_layout,
     })
+}
+
+fn draw_log_viewer_frame(
+    frame: &mut Vec<u8>,
+    viewer: &LogViewerState,
+    width: usize,
+    height: usize,
+) -> Result<()> {
+    let visible_rows = log_viewer_content_rows(height);
+    let lines = viewer.current_lines();
+    let scroll = viewer.scroll.min(lines.len().saturating_sub(visible_rows));
+    let start = scroll;
+    let end = min(lines.len(), start + visible_rows);
+    let inner = width.saturating_sub(2);
+    let source = viewer.source_label();
+    let status = viewer.status.as_deref().unwrap_or("no log metadata");
+    let title = format!(
+        " LOG VIEWER  │  {}  │  {}  │  {} lines ",
+        viewer.process_name,
+        source,
+        lines.len()
+    );
+    let path_line = format!(" Path: {} ", viewer.current_path().display());
+    let meta_line = format!(
+        " Scroll {}/{}  │  {} ",
+        start.saturating_add(1).min(lines.len()),
+        lines.len().max(1),
+        status
+    );
+    let controls =
+        " Keys: j/k or ↑/↓ scroll  PgUp/PgDn jump  Home/End  Tab switch stdout/stderr  g/space reload  l/Esc close ";
+
+    write_line(frame, &paint("1;35", &frame_line("╔", "╗", width, '═')))?;
+    write_line(frame, &paint("1;35", &frame_content_line(&title, width)))?;
+    write_line(
+        frame,
+        &frame_content_line(&paint("2;37", &path_line), width),
+    )?;
+    write_line(
+        frame,
+        &frame_content_line(&paint("1;36", &meta_line), width),
+    )?;
+    write_line(frame, &frame_content_line(&paint("1;34", controls), width))?;
+    write_line(
+        frame,
+        &paint("1;35", &frame_line_with_label("╠", "╣", width, '═', "LOGS")),
+    )?;
+
+    let line_no_width = lines.len().max(1).to_string().chars().count().max(3);
+    let line_inner = inner.saturating_sub(line_no_width + 3);
+    if lines.is_empty() {
+        write_line(
+            frame,
+            &frame_content_line(
+                &paint(
+                    "2;37",
+                    " no logs yet - use Tab to switch source or g to reload ",
+                ),
+                width,
+            ),
+        )?;
+        for _ in 1..visible_rows {
+            write_line(frame, &frame_content_line(" ", width))?;
+        }
+    } else {
+        for (row_idx, line) in lines.iter().enumerate().take(end).skip(start) {
+            let prefix = paint(
+                "2;36",
+                &format!("{:>width$} │ ", row_idx + 1, width = line_no_width),
+            );
+            let text = line.trim_end_matches(['\r', '\n']);
+            let text = truncate_visible_ansi(text, line_inner);
+            write_line(
+                frame,
+                &frame_content_line(&format!("{prefix}{text}"), width),
+            )?;
+        }
+        for _ in end.saturating_sub(start)..visible_rows {
+            write_line(frame, &frame_content_line(" ", width))?;
+        }
+    }
+
+    write_line(frame, &paint("1;35", &frame_line("╚", "╝", width, '═')))?;
+    Ok(())
 }
 
 fn draw_table(
@@ -1187,9 +1728,10 @@ fn draw_help_overlay(out: &mut impl Write, width: usize, height: usize) -> Resul
     let lines = [
         centered(" OXMGR UI HELP ", inner),
         " Navigation: j/k or ↑/↓, mouse wheel, left click row".to_string(),
-        " Actions: s stop, r restart, l reload (best effort no-downtime)".to_string(),
+        " Actions: s stop, d delete (confirm), r reload, Shift+R restart".to_string(),
         " Git: p pull selected service and auto reload/restart on commit change".to_string(),
-        " Logs: t show latest line snapshot (stderr preferred, then stdout)".to_string(),
+        " Logs: l opens fullscreen viewer, t shows latest line snapshot".to_string(),
+        " Log viewer: Tab switches stdout/stderr, PgUp/PgDn/Home/End scroll".to_string(),
         " Refresh: g or Space".to_string(),
         " Menu: Esc opens quick menu with Resume/Quit".to_string(),
         " Exit: q".to_string(),
@@ -1215,6 +1757,78 @@ fn draw_help_overlay(out: &mut impl Write, width: usize, height: usize) -> Resul
         cursor::MoveTo(box_x, box_y + box_height.saturating_sub(1))
     )?;
     write!(out, "{}", paint("1;34", &bottom))?;
+    Ok(())
+}
+
+fn draw_delete_confirm_overlay(
+    out: &mut impl Write,
+    layout: DeleteConfirmLayout,
+    confirm: &DeleteConfirmState,
+) -> Result<()> {
+    let x = layout.box_x;
+    let y = layout.box_y;
+    let inner = layout.box_width.saturating_sub(2) as usize;
+
+    let top = format!("╔{}╗", "═".repeat(inner));
+    let mid = format!("║{}║", " ".repeat(inner));
+    let bottom = format!("╚{}╝", "═".repeat(inner));
+
+    let title = centered(" DELETE PROCESS ", inner);
+    let target_line =
+        truncate_visible_ansi(&format!(" Remove {} from oxmgr? ", confirm.label), inner);
+    let hint_line =
+        truncate_visible_ansi(" Enter/y confirm  Esc/n cancel  Arrows/Tab switch ", inner);
+
+    execute!(out, cursor::MoveTo(x, y))?;
+    write!(out, "{}", paint("1;31", &top))?;
+    execute!(out, cursor::MoveTo(x, y + 1))?;
+    write!(out, "{}", paint("1;31", "║"))?;
+    write!(out, "{}", paint("1;37", &title))?;
+    write!(out, "{}", paint("1;31", "║"))?;
+
+    execute!(out, cursor::MoveTo(x, y + 2))?;
+    write!(out, "{}", paint("1;31", "║"))?;
+    write!(out, "{target_line}")?;
+    let target_fill = inner.saturating_sub(visible_len(&target_line));
+    if target_fill > 0 {
+        write!(out, "{}", " ".repeat(target_fill))?;
+    }
+    write!(out, "{}", paint("1;31", "║"))?;
+
+    execute!(out, cursor::MoveTo(x, y + 3))?;
+    write!(out, "{}", paint("1;31", "║"))?;
+    write!(out, "{}", paint("2;37", &hint_line))?;
+    let hint_fill = inner.saturating_sub(visible_len(&hint_line));
+    if hint_fill > 0 {
+        write!(out, "{}", " ".repeat(hint_fill))?;
+    }
+    write!(out, "{}", paint("1;31", "║"))?;
+
+    execute!(out, cursor::MoveTo(x, y + 4))?;
+    write!(out, "{}", paint("1;31", &mid))?;
+    execute!(out, cursor::MoveTo(x, layout.buttons_y))?;
+    write!(out, "{}", paint("1;31", &mid))?;
+
+    let cancel = if confirm.selected == DeleteConfirmChoice::Cancel {
+        paint("1;30;42", " Cancel ")
+    } else {
+        paint("1;32", "[Cancel]")
+    };
+    let delete = if confirm.selected == DeleteConfirmChoice::Delete {
+        paint("1;37;41", " Delete ")
+    } else {
+        paint("1;31", "[Delete]")
+    };
+    execute!(out, cursor::MoveTo(layout.cancel_x, layout.buttons_y))?;
+    write!(out, "{cancel}")?;
+    execute!(out, cursor::MoveTo(layout.delete_x, layout.buttons_y))?;
+    write!(out, "{delete}")?;
+
+    execute!(
+        out,
+        cursor::MoveTo(x, y + layout.box_height.saturating_sub(1))
+    )?;
+    write!(out, "{}", paint("1;31", &bottom))?;
     Ok(())
 }
 
@@ -1338,7 +1952,7 @@ fn process_sidebar_layout(width: usize, height: usize) -> Option<ProcessSidebarL
         .min(max_sidebar)
         .max(min_sidebar) as u16;
     let box_x = (width as u16).saturating_sub(box_width + 1);
-    let box_y = 5_u16;
+    let box_y = 1_u16;
     let box_height = (height as u16).saturating_sub(box_y).max(9);
 
     Some(ProcessSidebarLayout {
@@ -1478,6 +2092,10 @@ fn draw_process_sidebar(
     )?;
     write!(out, "{}", paint("1;34", &bottom))?;
     Ok(())
+}
+
+fn log_viewer_content_rows(height: usize) -> usize {
+    height.saturating_sub(6).max(1)
 }
 
 fn centered(text: &str, width: usize) -> String {
@@ -1709,16 +2327,24 @@ fn wall_clock_hms() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
+    use crate::process::{
+        DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
+    };
+
     use super::{
-        compute_table_view, esc_menu_layout, format_memory_cell, frame_content_line_left,
-        frame_line_with_label, handle_menu_mouse, handle_table_mouse_selection,
+        compute_table_view, delete_confirm_layout, esc_menu_layout, format_memory_cell,
+        frame_content_line_left, frame_line_with_label, handle_delete_confirm_mouse,
+        handle_menu_mouse, handle_table_mouse_selection, log_viewer_content_rows,
         process_sidebar_layout, progress_bar, table_inner_width, truncate, truncate_visible_ansi,
-        visible_len, CreateField, CreateProcessForm, DashboardState, EscMenuChoice, EscMenuLayout,
-        FlashLevel, FlashMessage, ProcessSidebarLayout, TableArea, TableView,
+        visible_len, CreateField, CreateProcessForm, DashboardState, DeleteConfirmChoice,
+        DeleteConfirmLayout, EscMenuChoice, EscMenuLayout, FlashLevel, FlashMessage, LogSource,
+        LogViewerState, ProcessSidebarLayout, TableArea, TableView,
     };
 
     #[test]
@@ -1828,8 +2454,8 @@ mod tests {
     #[test]
     fn process_sidebar_layout_uses_full_body_height() {
         let layout = process_sidebar_layout(140, 30).expect("sidebar layout should exist");
-        assert_eq!(layout.box_y, 5);
-        assert_eq!(layout.box_height, 25);
+        assert_eq!(layout.box_y, 1);
+        assert_eq!(layout.box_height, 29);
     }
 
     #[test]
@@ -1917,5 +2543,150 @@ mod tests {
         let changed = handle_table_mouse_selection(click, &view, area, &mut state, 5);
         assert!(!changed);
         assert_eq!(state.selected, 1);
+    }
+
+    #[test]
+    fn delete_confirm_layout_is_centered_and_usable() {
+        let layout = delete_confirm_layout(120, 30).expect("layout should exist");
+        assert_eq!(layout.box_width, 54);
+        assert_eq!(layout.box_height, 8);
+        assert_eq!(layout.buttons_y, layout.box_y + 5);
+    }
+
+    #[test]
+    fn handle_delete_confirm_mouse_detects_buttons() {
+        let layout = DeleteConfirmLayout {
+            box_x: 20,
+            box_y: 6,
+            box_width: 54,
+            box_height: 8,
+            cancel_x: 24,
+            delete_x: 61,
+            buttons_y: 11,
+        };
+
+        let cancel_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: layout.cancel_x + 1,
+            row: layout.buttons_y,
+            modifiers: KeyModifiers::empty(),
+        };
+        let delete_click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: layout.delete_x + 1,
+            row: layout.buttons_y,
+            modifiers: KeyModifiers::empty(),
+        };
+
+        assert_eq!(
+            handle_delete_confirm_mouse(cancel_click, layout),
+            Some(DeleteConfirmChoice::Cancel)
+        );
+        assert_eq!(
+            handle_delete_confirm_mouse(delete_click, layout),
+            Some(DeleteConfirmChoice::Delete)
+        );
+    }
+
+    #[test]
+    fn open_delete_confirm_captures_process_identity() {
+        let mut state = DashboardState::default();
+        let process = ManagedProcess {
+            id: 7,
+            name: "api".to_string(),
+            command: "node".to_string(),
+            args: vec!["server.js".to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            restart_count: 0,
+            crash_restart_limit: 3,
+            auto_restart_history: Vec::new(),
+            namespace: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
+            stop_signal: None,
+            stop_timeout_secs: 5,
+            restart_delay_secs: 0,
+            restart_backoff_cap_secs: 0,
+            restart_backoff_reset_secs: 0,
+            restart_backoff_attempt: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            resource_limits: None,
+            cgroup_path: None,
+            pid: Some(4242),
+            status: ProcessStatus::Running,
+            desired_state: DesiredState::Running,
+            last_exit_code: None,
+            stdout_log: PathBuf::from("stdout.log"),
+            stderr_log: PathBuf::from("stderr.log"),
+            health_check: None,
+            health_status: HealthStatus::Unknown,
+            health_failures: 0,
+            last_health_check: None,
+            next_health_check: None,
+            last_health_error: None,
+            cpu_percent: 0.0,
+            memory_bytes: 0,
+            last_metrics_at: None,
+            last_started_at: None,
+            last_stopped_at: None,
+            config_fingerprint: String::new(),
+        };
+
+        state.open_delete_confirm(&process);
+
+        let confirm = state.delete_confirm.as_ref().expect("confirm should open");
+        assert_eq!(confirm.target, "api");
+        assert_eq!(confirm.label, "api (id 7)");
+        assert_eq!(confirm.selected, DeleteConfirmChoice::Cancel);
+    }
+
+    #[test]
+    fn log_viewer_content_rows_reserves_header_space() {
+        assert_eq!(log_viewer_content_rows(20), 14);
+        assert_eq!(log_viewer_content_rows(6), 1);
+    }
+
+    #[test]
+    fn log_viewer_toggle_source_resets_scroll() {
+        let mut viewer = LogViewerState {
+            process_name: "api".to_string(),
+            stdout_path: "stdout.log".into(),
+            stderr_path: "stderr.log".into(),
+            stdout_lines: vec!["out".to_string()],
+            stderr_lines: vec!["err".to_string()],
+            active_source: LogSource::Stderr,
+            scroll: 8,
+            status: None,
+        };
+
+        viewer.toggle_source();
+
+        assert_eq!(viewer.active_source, LogSource::Stdout);
+        assert_eq!(viewer.scroll, 0);
+    }
+
+    #[test]
+    fn log_viewer_scroll_down_clamps_to_bottom() {
+        let mut viewer = LogViewerState {
+            process_name: "api".to_string(),
+            stdout_path: "stdout.log".into(),
+            stderr_path: "stderr.log".into(),
+            stdout_lines: (0..10).map(|idx| format!("line-{idx}")).collect(),
+            stderr_lines: Vec::new(),
+            active_source: LogSource::Stdout,
+            scroll: 0,
+            status: None,
+        };
+
+        viewer.scroll_down(4, 99);
+
+        assert_eq!(viewer.scroll, 6);
     }
 }

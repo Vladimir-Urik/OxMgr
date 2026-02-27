@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -60,6 +61,7 @@ impl ProcessManager {
             process.memory_bytes = 0;
             process.last_metrics_at = None;
             process.cgroup_path = None;
+            process.refresh_config_fingerprint();
             processes.insert(process.name.clone(), process);
         }
 
@@ -75,26 +77,29 @@ impl ProcessManager {
     }
 
     pub async fn recover_processes(&mut self) -> Result<()> {
-        let stale: Vec<(String, u32, Option<String>, u64)> = self
+        let stale: Vec<ManagedProcess> = self
             .processes
             .values()
-            .filter_map(|process| {
-                process.pid.map(|pid| {
-                    (
-                        process.name.clone(),
-                        pid,
-                        process.stop_signal.clone(),
-                        process.stop_timeout_secs,
-                    )
-                })
-            })
+            .filter(|process| process.pid.is_some())
+            .cloned()
             .collect();
 
-        for (name, pid, stop_signal, stop_timeout_secs) in stale {
+        for process in stale {
+            let name = process.name.clone();
+            let Some(pid) = process.pid else {
+                continue;
+            };
             if process_exists(pid) {
+                if !self.pid_matches_managed_process(pid, &process) {
+                    warn!(
+                        "skipping stale pid cleanup for process {} because pid {} no longer matches expected command",
+                        name, pid
+                    );
+                    continue;
+                }
                 warn!("cleaning stale pid {pid} for process {name}");
-                let timeout = Duration::from_secs(stop_timeout_secs.max(1));
-                let _ = terminate_pid(pid, stop_signal.as_deref(), timeout).await;
+                let timeout = Duration::from_secs(process.stop_timeout_secs.max(1));
+                let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
             }
         }
 
@@ -226,7 +231,9 @@ impl ProcessManager {
             last_metrics_at: None,
             last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
+            config_fingerprint: String::new(),
         };
+        process.refresh_config_fingerprint();
 
         if process.start_delay_secs > 0 {
             sleep(Duration::from_secs(process.start_delay_secs)).await;
@@ -904,6 +911,20 @@ impl ProcessManager {
         };
 
         save_state(&self.config.state_path, &state)
+    }
+
+    fn pid_matches_managed_process(&self, pid: u32, process: &ManagedProcess) -> bool {
+        let spawn = match resolve_spawn_program(process, &self.config.base_dir) {
+            Ok(spawn) => spawn,
+            Err(err) => {
+                warn!(
+                    "failed to resolve expected spawn program for process {} while verifying stale pid {}: {}",
+                    process.name, pid, err
+                );
+                return false;
+            }
+        };
+        pid_matches_expected_process(pid, &spawn.program, &spawn.args, process.cwd.as_deref())
     }
 
     fn resolve_target(&self, target: &str) -> Result<String> {
@@ -1822,6 +1843,90 @@ fn cleanup_process_cgroup(process: &mut ManagedProcess) {
     }
 }
 
+fn pid_matches_expected_process(
+    pid: u32,
+    expected_program: &str,
+    expected_args: &[String],
+    expected_cwd: Option<&Path>,
+) -> bool {
+    let mut system = System::new_all();
+    system.refresh_processes(ProcessesToUpdate::Some(&[SysPid::from_u32(pid)]), true);
+
+    let Some(info) = system.process(SysPid::from_u32(pid)) else {
+        return false;
+    };
+
+    if let Some(expected_cwd) = expected_cwd {
+        match info.cwd() {
+            Some(actual_cwd) if actual_cwd == expected_cwd => {}
+            _ => return false,
+        }
+    }
+
+    if !program_matches_expected(info.exe(), expected_program) {
+        return false;
+    }
+
+    args_match_expected(info.cmd(), expected_program, expected_args)
+}
+
+fn program_matches_expected(actual_exe: Option<&Path>, expected_program: &str) -> bool {
+    let Some(actual_exe) = actual_exe else {
+        return false;
+    };
+    let expected_path = Path::new(expected_program);
+
+    if expected_path.is_absolute() {
+        return actual_exe == expected_path;
+    }
+
+    actual_exe
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case(expected_program))
+        .unwrap_or(false)
+}
+
+fn args_match_expected(
+    actual_args: &[OsString],
+    expected_program: &str,
+    expected_args: &[String],
+) -> bool {
+    if actual_args.len() == expected_args.len()
+        && actual_args.iter().zip(expected_args).all(|(actual, expected)| {
+            actual
+                .to_str()
+                .map(|value| value == expected)
+                .unwrap_or(false)
+        })
+    {
+        return true;
+    }
+
+    actual_args.len() == expected_args.len().saturating_add(1)
+        && actual_args
+            .first()
+            .and_then(|value| value.to_str())
+            .map(|value| {
+                let actual = Path::new(value)
+                    .file_name()
+                    .and_then(|item| item.to_str())
+                    .unwrap_or(value);
+                let expected = Path::new(expected_program)
+                    .file_name()
+                    .and_then(|item| item.to_str())
+                    .unwrap_or(expected_program);
+                actual.eq_ignore_ascii_case(expected)
+            })
+            .unwrap_or(false)
+        && actual_args[1..].iter().zip(expected_args).all(|(actual, expected)| {
+            actual
+                .to_str()
+                .map(|value| value == expected)
+                .unwrap_or(false)
+        })
+}
+
 #[derive(Debug)]
 struct PullOutcome {
     changed: bool,
@@ -1958,6 +2063,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command as StdCommand;
@@ -1968,7 +2074,8 @@ mod tests {
     #[cfg(unix)]
     use super::graceful_wait_before_force_kill;
     use super::{
-        compute_restart_delay_secs, constant_time_eq, maybe_reset_backoff_attempt, now_epoch_secs,
+        args_match_expected, compute_restart_delay_secs, constant_time_eq,
+        maybe_reset_backoff_attempt, now_epoch_secs, program_matches_expected,
         resolve_spawn_program, sha256_hex, short_commit, watch_fingerprint_for_dir, ProcessManager,
     };
     use crate::config::AppConfig;
@@ -2157,6 +2264,40 @@ mod tests {
     fn short_commit_truncates_to_eight_chars() {
         assert_eq!(short_commit("0123456789abcdef"), "01234567");
         assert_eq!(short_commit("abcd"), "abcd");
+    }
+
+    #[test]
+    fn program_matches_expected_checks_absolute_and_basename_forms() {
+        let exe = std::env::current_exe().expect("failed to resolve current exe");
+        assert!(program_matches_expected(Some(&exe), &exe.display().to_string()));
+
+        let basename = exe
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("missing exe basename");
+        assert!(program_matches_expected(Some(&exe), basename));
+        assert!(!program_matches_expected(Some(&exe), "definitely-not-this-binary"));
+    }
+
+    #[test]
+    fn args_match_expected_requires_exact_argument_match() {
+        let actual = vec![OsString::from("--help"), OsString::from("api")];
+        let expected = vec!["--help".to_string(), "api".to_string()];
+        let different = vec!["--help".to_string(), "worker".to_string()];
+
+        assert!(args_match_expected(&actual, "oxmgr", &expected));
+        assert!(!args_match_expected(&actual, "oxmgr", &different));
+    }
+
+    #[test]
+    fn args_match_expected_accepts_leading_executable_in_process_snapshot() {
+        let actual = vec![
+            OsString::from("/usr/local/bin/oxmgr"),
+            OsString::from("--help"),
+        ];
+        let expected = vec!["--help".to_string()];
+
+        assert!(args_match_expected(&actual, "oxmgr", &expected));
     }
 
     #[test]
@@ -2488,6 +2629,7 @@ mod tests {
             last_metrics_at: None,
             last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
+            config_fingerprint: String::new(),
         }
     }
 

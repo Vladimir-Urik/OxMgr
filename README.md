@@ -164,14 +164,17 @@ oxmgr logs api -f
 - `n` opens create-process modal directly in UI.
 - Run actions directly on selected service:
 - `s` stop
-- `r` restart
-- `l` reload
+- `d` delete (with confirm modal)
+- `r` reload
+- `Shift+R` restart
+- `l` fullscreen logs
 - `p` git pull (with conditional reload/restart on change)
 - `t` preview latest log line
 - `g` / `Space` force refresh
 - `?` toggle help overlay
 - Mouse row selection and wheel scrolling are supported.
-- Selected process gets a right-side detail sidebar (status, health, cpu/ram bars, git/process info).
+- Selected process gets a full-height right-side detail sidebar (status, health, cpu/ram bars, git/process info).
+- Fullscreen log viewer supports scrolling, stdout/stderr switching, and live reload from disk.
 
 More details: [docs/UI.md](./docs/UI.md).
 

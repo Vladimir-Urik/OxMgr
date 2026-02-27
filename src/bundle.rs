@@ -633,6 +633,7 @@ mod tests {
             last_metrics_at: None,
             last_started_at: None,
             last_stopped_at: None,
+            config_fingerprint: String::new(),
         }
     }
 }

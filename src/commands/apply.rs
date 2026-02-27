@@ -275,6 +275,12 @@ fn plan_apply_actions(
 }
 
 fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec) -> bool {
+    let desired_start = desired_to_start_spec(desired.clone());
+
+    if !existing.config_fingerprint.is_empty() {
+        return existing.config_fingerprint == desired_start.config_fingerprint();
+    }
+
     let desired_cmd = match split_command_line(&desired.command) {
         Ok(value) => value,
         Err(_) => return false,
@@ -286,7 +292,6 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.max_restarts == desired.max_restarts
         && existing.crash_restart_limit == desired.crash_restart_limit
         && existing.cwd == desired.cwd
-        && existing.env == desired.env
         && existing.health_check == desired.health_check
         && existing.stop_signal == desired.stop_signal
         && existing.stop_timeout_secs == desired.stop_timeout_secs
@@ -298,7 +303,6 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.resource_limits == desired.resource_limits
         && existing.git_repo == desired.git_repo
         && existing.git_ref == desired.git_ref
-        && existing.pull_secret_hash == desired.pull_secret_hash
 }
 
 fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
@@ -313,28 +317,32 @@ fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
 
 fn start_request_from_spec(spec: DesiredProcessSpec) -> IpcRequest {
     IpcRequest::Start {
-        spec: Box::new(StartProcessSpec {
-            command: spec.command,
-            name: Some(spec.name),
-            restart_policy: spec.restart_policy,
-            max_restarts: spec.max_restarts,
-            crash_restart_limit: spec.crash_restart_limit,
-            cwd: spec.cwd,
-            env: spec.env,
-            health_check: spec.health_check,
-            stop_signal: spec.stop_signal,
-            stop_timeout_secs: spec.stop_timeout_secs.max(1),
-            restart_delay_secs: spec.restart_delay_secs,
-            start_delay_secs: spec.start_delay_secs,
-            watch: false,
-            cluster_mode: spec.cluster_mode,
-            cluster_instances: spec.cluster_instances,
-            namespace: spec.namespace,
-            resource_limits: spec.resource_limits,
-            git_repo: spec.git_repo,
-            git_ref: spec.git_ref,
-            pull_secret_hash: spec.pull_secret_hash,
-        }),
+        spec: Box::new(desired_to_start_spec(spec)),
+    }
+}
+
+fn desired_to_start_spec(spec: DesiredProcessSpec) -> StartProcessSpec {
+    StartProcessSpec {
+        command: spec.command,
+        name: Some(spec.name),
+        restart_policy: spec.restart_policy,
+        max_restarts: spec.max_restarts,
+        crash_restart_limit: spec.crash_restart_limit,
+        cwd: spec.cwd,
+        env: spec.env,
+        health_check: spec.health_check,
+        stop_signal: spec.stop_signal,
+        stop_timeout_secs: spec.stop_timeout_secs.max(1),
+        restart_delay_secs: spec.restart_delay_secs,
+        start_delay_secs: spec.start_delay_secs,
+        watch: false,
+        cluster_mode: spec.cluster_mode,
+        cluster_instances: spec.cluster_instances,
+        namespace: spec.namespace,
+        resource_limits: spec.resource_limits,
+        git_repo: spec.git_repo,
+        git_ref: spec.git_ref,
+        pull_secret_hash: spec.pull_secret_hash,
     }
 }
 
@@ -478,6 +486,7 @@ mod tests {
             last_metrics_at: None,
             last_started_at: None,
             last_stopped_at: None,
+            config_fingerprint: String::new(),
         }
     }
 }

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use url::Url;
 
@@ -182,10 +183,12 @@ async fn download_remote_bundle(url: &Url) -> Result<Vec<u8>> {
         .arg("30")
         .arg("--connect-timeout")
         .arg("10")
-        .arg(url.as_str());
+        .arg(url.as_str())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
-    let output = match command.output().await {
-        Ok(output) => output,
+    let mut child = match command.spawn() {
+        Ok(child) => child,
         Err(err) if err.kind() == ErrorKind::NotFound => {
             anyhow::bail!(
                 "curl is required for remote imports but is not available in PATH on this machine"
@@ -196,19 +199,53 @@ async fn download_remote_bundle(url: &Url) -> Result<Vec<u8>> {
         }
     };
 
+    let stdout = child
+        .stdout
+        .take()
+        .context("failed to capture curl stdout for remote import")?;
+    let bytes = read_with_limit(stdout, max_bundle_bytes(), &mut child).await?;
+    let output = child
+        .wait_with_output()
+        .await
+        .with_context(|| format!("failed waiting for curl to finish for {url}"))?;
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("failed to download {url} via curl: {}", stderr.trim());
     }
 
-    if output.stdout.len() > max_bundle_bytes() {
-        anyhow::bail!(
-            "remote import exceeds max allowed size of {} bytes",
-            max_bundle_bytes()
-        );
+    Ok(bytes)
+}
+
+async fn read_with_limit<R>(
+    mut reader: R,
+    max_bytes: usize,
+    child: &mut tokio::process::Child,
+) -> Result<Vec<u8>>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut buffer = Vec::new();
+    let mut chunk = [0_u8; 8192];
+
+    loop {
+        let read = reader
+            .read(&mut chunk)
+            .await
+            .context("failed reading remote import payload")?;
+        if read == 0 {
+            break;
+        }
+
+        if buffer.len().saturating_add(read) > max_bytes {
+            let _ = child.kill().await;
+            anyhow::bail!("remote import exceeds max allowed size of {} bytes", max_bytes);
+        }
+
+        buffer.extend_from_slice(&chunk[..read]);
     }
 
-    Ok(output.stdout)
+    Ok(buffer)
 }
 
 fn parse_secure_remote_url(source: &str) -> Result<Url> {
@@ -377,10 +414,15 @@ mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use tokio::io::AsyncWriteExt;
+
     use crate::bundle::encode_bundle;
     use crate::process::RestartPolicy;
 
-    use super::{is_remote_source, load_local_specs, parse_secure_remote_url, verify_sha256};
+    use super::{
+        is_remote_source, load_local_specs, parse_secure_remote_url, read_with_limit,
+        verify_sha256,
+    };
 
     #[test]
     fn parse_secure_remote_url_accepts_https_without_credentials() {
@@ -439,6 +481,33 @@ mod tests {
         assert!(is_remote_source("https://example.com/a.oxpkg"));
         assert!(is_remote_source("http://example.com/a.oxpkg"));
         assert!(!is_remote_source("./a.oxpkg"));
+    }
+
+    #[tokio::test]
+    async fn read_with_limit_rejects_payloads_over_limit() {
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let mut child = tokio::process::Command::new(
+            std::env::current_exe().expect("failed to resolve current exe"),
+        )
+        .arg("--help")
+        .spawn()
+        .expect("failed to spawn helper child");
+
+        let writer_task = tokio::spawn(async move {
+            writer
+                .write_all(b"0123456789")
+                .await
+                .expect("failed to write payload");
+            writer.shutdown().await.expect("failed to close payload");
+        });
+
+        let err = read_with_limit(reader, 4, &mut child)
+            .await
+            .expect_err("expected payload limit error");
+        assert!(err.to_string().contains("remote import exceeds max allowed size"));
+
+        writer_task.await.expect("writer task failed");
+        let _ = child.wait().await;
     }
 
     #[test]
@@ -525,6 +594,7 @@ mod tests {
             last_metrics_at: None,
             last_started_at: None,
             last_stopped_at: None,
+            config_fingerprint: String::new(),
         }])
         .expect("failed to encode test bundle");
         fs::write(&path, encoded).expect("failed to write test bundle");

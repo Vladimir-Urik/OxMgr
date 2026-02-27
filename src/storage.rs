@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -59,16 +60,15 @@ pub fn load_state(path: &Path) -> Result<PersistedState> {
 
 pub fn save_state(path: &Path, state: &PersistedState) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+        ensure_private_dir(parent)?;
     }
 
     let payload = serde_json::to_vec_pretty(state)?;
     let tmp_path = tmp_state_path(path);
 
-    fs::write(&tmp_path, payload)
-        .with_context(|| format!("failed to write temporary state {}", tmp_path.display()))?;
+    write_private_file(&tmp_path, &payload)?;
     replace_state_file(&tmp_path, path)?;
+    set_private_file_permissions(path)?;
 
     Ok(())
 }
@@ -106,6 +106,51 @@ fn replace_state_file(tmp_path: &Path, path: &Path) -> Result<()> {
                 .with_context(|| format!("failed to replace state file {}", path.display()))
         }
     }
+}
+
+fn ensure_private_dir(path: &Path) -> Result<()> {
+    let existed = path.exists();
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if !existed {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn write_private_file(path: &Path, payload: &[u8]) -> Result<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to open {}", path.display()))?;
+    file.write_all(payload)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    file.flush()
+        .with_context(|| format!("failed to flush {}", path.display()))?;
+    Ok(())
+}
+
+fn set_private_file_permissions(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

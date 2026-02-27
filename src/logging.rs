@@ -29,27 +29,74 @@ pub fn process_logs(log_dir: &Path, name: &str) -> ProcessLogs {
 
 pub fn open_log_writers(logs: &ProcessLogs, policy: LogRotationPolicy) -> Result<(File, File)> {
     if let Some(parent) = logs.stdout.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
+        ensure_private_dir(parent)?;
     }
     rotate_log_if_needed(&logs.stdout, policy)?;
     rotate_log_if_needed(&logs.stderr, policy)?;
     cleanup_rotated_logs(&logs.stdout, policy)?;
     cleanup_rotated_logs(&logs.stderr, policy)?;
 
-    let stdout = OpenOptions::new()
+    let mut stdout_options = OpenOptions::new();
+    stdout_options
         .create(true)
         .append(true)
+        .write(true)
+        .read(true)
+        .truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        stdout_options.mode(0o600);
+    }
+    let stdout = stdout_options
         .open(&logs.stdout)
         .with_context(|| format!("failed opening {}", logs.stdout.display()))?;
+    set_private_file_permissions(&logs.stdout)?;
 
-    let stderr = OpenOptions::new()
+    let mut stderr_options = OpenOptions::new();
+    stderr_options
         .create(true)
         .append(true)
+        .write(true)
+        .read(true)
+        .truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        stderr_options.mode(0o600);
+    }
+    let stderr = stderr_options
         .open(&logs.stderr)
         .with_context(|| format!("failed opening {}", logs.stderr.display()))?;
+    set_private_file_permissions(&logs.stderr)?;
 
     Ok((stdout, stderr))
+}
+
+fn ensure_private_dir(path: &Path) -> Result<()> {
+    let existed = path.exists();
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if !existed {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn set_private_file_permissions(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn rotate_log_if_needed(path: &Path, policy: LogRotationPolicy) -> Result<()> {
