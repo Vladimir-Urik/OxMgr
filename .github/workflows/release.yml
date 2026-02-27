@@ -264,7 +264,6 @@ jobs:
           mkdir -p tap/Formula
 
           ./scripts/generate_homebrew_formula.sh \
-            "$VERSION" \
             "$REPO" \
             "$LINUX_URL" "$LINUX_SHA" \
             "$MAC_INTEL_URL" "$MAC_INTEL_SHA" \
@@ -322,8 +321,14 @@ jobs:
 
           Copy-Item "packaging/choco/tools/chocolateyuninstall.ps1" "choco-build/tools/chocolateyuninstall.ps1" -Force
 
-          choco pack "choco-build/oxmgr.nuspec" --outputdirectory "choco-build"
+          Push-Location "choco-build"
+          choco pack "oxmgr.nuspec" --outputdirectory "."
+          Pop-Location
+
           $nupkg = Get-ChildItem choco-build -Filter "oxmgr.$version.nupkg" | Select-Object -First 1
+          if (-not $nupkg) {
+            throw "Failed to create Chocolatey package oxmgr.$version.nupkg"
+          }
           choco push $nupkg.FullName --api-key "$env:CHOCO_API_KEY" --source "https://push.chocolatey.org/"
 
   publish-apt:
