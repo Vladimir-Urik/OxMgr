@@ -198,6 +198,13 @@ fn logs_contain_cwd_env_marker(log_output: &str, expected_cwd: &str, env_value: 
     })
 }
 
+fn status_field_value<'a>(status_output: &'a str, field: &str) -> Option<&'a str> {
+    status_output.lines().find_map(|line| {
+        let (label, value) = line.split_once(':')?;
+        (label.trim() == field).then_some(value.trim())
+    })
+}
+
 fn escape_toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -825,9 +832,11 @@ fn e2e_start_applies_cwd_env_namespace_and_limits() {
         status_stdout.contains("Namespace:") && status_stdout.contains("ops"),
         "namespace missing from status output:\n{status_stdout}"
     );
+    let expected_cwd = normalize_path_for_compare(&working_dir);
+    let actual_cwd = status_field_value(&status_stdout, "Working Dir")
+        .expect("Working Dir missing from status output");
     assert!(
-        status_stdout.contains("Working Dir:")
-            && status_stdout.contains(&path_string(&working_dir)),
+        normalize_path_text_for_compare(actual_cwd) == expected_cwd,
         "working dir missing from status output:\n{status_stdout}"
     );
     assert!(
@@ -837,7 +846,6 @@ fn e2e_start_applies_cwd_env_namespace_and_limits() {
         "limits missing from status output:\n{status_stdout}"
     );
 
-    let expected_cwd = normalize_path_for_compare(&working_dir);
     let mut last_logs = String::new();
     let found_log_line = wait_until(Duration::from_secs(8), || {
         let logs = env.run(&["logs", "options-app", "--lines", "50"]);
@@ -908,13 +916,14 @@ fn e2e_start_defaults_cwd_to_invocation_directory() {
         String::from_utf8_lossy(&status.stderr)
     );
     let status_stdout = String::from_utf8_lossy(&status.stdout);
+    let expected_cwd = normalize_path_for_compare(&working_dir);
+    let actual_cwd = status_field_value(&status_stdout, "Working Dir")
+        .expect("Working Dir missing from status output");
     assert!(
-        status_stdout.contains("Working Dir:")
-            && status_stdout.contains(&path_string(&working_dir)),
+        normalize_path_text_for_compare(actual_cwd) == expected_cwd,
         "working dir missing from status output:\n{status_stdout}"
     );
 
-    let expected_cwd = normalize_path_for_compare(&working_dir);
     let mut last_logs = String::new();
     let found_log_line = wait_until(Duration::from_secs(8), || {
         let logs = env.run(&["logs", "default-cwd-app", "--lines", "50"]);
