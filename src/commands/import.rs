@@ -239,7 +239,10 @@ where
 
         if buffer.len().saturating_add(read) > max_bytes {
             let _ = child.kill().await;
-            anyhow::bail!("remote import exceeds max allowed size of {} bytes", max_bytes);
+            anyhow::bail!(
+                "remote import exceeds max allowed size of {} bytes",
+                max_bytes
+            );
         }
 
         buffer.extend_from_slice(&chunk[..read]);
@@ -420,8 +423,7 @@ mod tests {
     use crate::process::RestartPolicy;
 
     use super::{
-        is_remote_source, load_local_specs, parse_secure_remote_url, read_with_limit,
-        verify_sha256,
+        is_remote_source, load_local_specs, parse_secure_remote_url, read_with_limit, verify_sha256,
     };
 
     #[test]
@@ -504,7 +506,9 @@ mod tests {
         let err = read_with_limit(reader, 4, &mut child)
             .await
             .expect_err("expected payload limit error");
-        assert!(err.to_string().contains("remote import exceeds max allowed size"));
+        assert!(err
+            .to_string()
+            .contains("remote import exceeds max allowed size"));
 
         writer_task.await.expect("writer task failed");
         let _ = child.wait().await;

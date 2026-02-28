@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::fs;
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1893,12 +1893,15 @@ fn args_match_expected(
     expected_args: &[String],
 ) -> bool {
     if actual_args.len() == expected_args.len()
-        && actual_args.iter().zip(expected_args).all(|(actual, expected)| {
-            actual
-                .to_str()
-                .map(|value| value == expected)
-                .unwrap_or(false)
-        })
+        && actual_args
+            .iter()
+            .zip(expected_args)
+            .all(|(actual, expected)| {
+                actual
+                    .to_str()
+                    .map(|value| value == expected)
+                    .unwrap_or(false)
+            })
     {
         return true;
     }
@@ -1919,12 +1922,15 @@ fn args_match_expected(
                 actual.eq_ignore_ascii_case(expected)
             })
             .unwrap_or(false)
-        && actual_args[1..].iter().zip(expected_args).all(|(actual, expected)| {
-            actual
-                .to_str()
-                .map(|value| value == expected)
-                .unwrap_or(false)
-        })
+        && actual_args[1..]
+            .iter()
+            .zip(expected_args)
+            .all(|(actual, expected)| {
+                actual
+                    .to_str()
+                    .map(|value| value == expected)
+                    .unwrap_or(false)
+            })
 }
 
 #[derive(Debug)]
@@ -2269,14 +2275,20 @@ mod tests {
     #[test]
     fn program_matches_expected_checks_absolute_and_basename_forms() {
         let exe = std::env::current_exe().expect("failed to resolve current exe");
-        assert!(program_matches_expected(Some(&exe), &exe.display().to_string()));
+        assert!(program_matches_expected(
+            Some(&exe),
+            &exe.display().to_string()
+        ));
 
         let basename = exe
             .file_name()
             .and_then(|value| value.to_str())
             .expect("missing exe basename");
         assert!(program_matches_expected(Some(&exe), basename));
-        assert!(!program_matches_expected(Some(&exe), "definitely-not-this-binary"));
+        assert!(!program_matches_expected(
+            Some(&exe),
+            "definitely-not-this-binary"
+        ));
     }
 
     #[test]
