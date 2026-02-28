@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,12 @@ pub fn process_logs(log_dir: &Path, name: &str) -> ProcessLogs {
         stdout: log_dir.join(format!("{name}.out.log")),
         stderr: log_dir.join(format!("{name}.err.log")),
     }
+}
+
+pub fn log_modified_at(path: &Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .unwrap_or(UNIX_EPOCH)
 }
 
 pub fn open_log_writers(logs: &ProcessLogs, policy: LogRotationPolicy) -> Result<(File, File)> {

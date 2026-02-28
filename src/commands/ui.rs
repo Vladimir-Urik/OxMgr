@@ -17,7 +17,7 @@ use crossterm::terminal::{
 
 use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest};
-use crate::logging::read_last_lines;
+use crate::logging::{log_modified_at, read_last_lines};
 use crate::process::ManagedProcess;
 use crate::ui::format_process_uptime;
 
@@ -203,7 +203,8 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                                 needs_redraw = true;
                             }
                             KeyCode::Tab => {
-                                viewer.toggle_source();
+                                viewer.toggle_source(visible_rows);
+                                viewer.clamp_scroll(visible_rows);
                                 needs_redraw = true;
                             }
                             KeyCode::Char('g') | KeyCode::Char(' ') => {
@@ -709,6 +710,7 @@ impl LogViewerState {
             status: None,
         };
         viewer.reload();
+        viewer.active_source = default_log_source(&viewer.stdout_lines, &viewer.stderr_lines);
         viewer
     }
 
@@ -755,12 +757,12 @@ impl LogViewerState {
         }
     }
 
-    fn toggle_source(&mut self) {
+    fn toggle_source(&mut self, visible_rows: usize) {
         self.active_source = match self.active_source {
             LogSource::Stdout => LogSource::Stderr,
             LogSource::Stderr => LogSource::Stdout,
         };
-        self.scroll = 0;
+        self.scroll_to_bottom(visible_rows);
     }
 
     fn clamp_scroll(&mut self, visible_rows: usize) {
@@ -785,6 +787,36 @@ impl LogViewerState {
 
     fn scroll_to_bottom(&mut self, visible_rows: usize) {
         self.scroll = self.current_lines().len().saturating_sub(visible_rows);
+    }
+}
+
+fn default_log_source(stdout_lines: &[String], stderr_lines: &[String]) -> LogSource {
+    if !stdout_lines.is_empty() {
+        LogSource::Stdout
+    } else if !stderr_lines.is_empty() {
+        LogSource::Stderr
+    } else {
+        LogSource::Stderr
+    }
+}
+
+fn preferred_log_source(
+    stdout_path: &PathBuf,
+    stderr_path: &PathBuf,
+    stdout_lines: &[String],
+    stderr_lines: &[String],
+) -> LogSource {
+    match (stdout_lines.is_empty(), stderr_lines.is_empty()) {
+        (false, true) => LogSource::Stdout,
+        (true, false) => LogSource::Stderr,
+        (true, true) => LogSource::Stderr,
+        (false, false) => {
+            if log_modified_at(stdout_path) > log_modified_at(stderr_path) {
+                LogSource::Stdout
+            } else {
+                LogSource::Stderr
+            }
+        }
     }
 }
 
@@ -947,18 +979,27 @@ async fn tail_selected(
             Ok(response) => match expect_ok(response) {
                 Ok(ok) => {
                     if let Some(logs) = ok.logs {
-                        let mut lines = read_last_lines(&logs.stderr, 1)
+                        let stdout_lines = read_last_lines(&logs.stdout, 1)
                             .unwrap_or_default()
                             .into_iter()
                             .filter(|line| !line.trim().is_empty())
                             .collect::<Vec<_>>();
-                        if lines.is_empty() {
-                            lines = read_last_lines(&logs.stdout, 1)
-                                .unwrap_or_default()
-                                .into_iter()
-                                .filter(|line| !line.trim().is_empty())
-                                .collect::<Vec<_>>();
-                        }
+                        let stderr_lines = read_last_lines(&logs.stderr, 1)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|line| !line.trim().is_empty())
+                            .collect::<Vec<_>>();
+                        let lines = match preferred_log_source(
+                            &logs.stdout,
+                            &logs.stderr,
+                            &stdout_lines,
+                            &stderr_lines,
+                        ) {
+                            LogSource::Stdout if !stdout_lines.is_empty() => stdout_lines,
+                            LogSource::Stderr if !stderr_lines.is_empty() => stderr_lines,
+                            LogSource::Stdout => stderr_lines,
+                            LogSource::Stderr => stdout_lines,
+                        };
                         if let Some(line) = lines.last() {
                             state.set_info(format!("log: {}", truncate(line.trim(), 90)));
                         } else {
@@ -992,11 +1033,14 @@ async fn open_logs_selected(
             Ok(response) => match expect_ok(response) {
                 Ok(ok) => {
                     if let Some(logs) = ok.logs {
-                        state.open_log_viewer(LogViewerState::from_logs(
-                            target.to_string(),
-                            logs.stdout,
-                            logs.stderr,
-                        ));
+                        let mut viewer =
+                            LogViewerState::from_logs(target.to_string(), logs.stdout, logs.stderr);
+                        let visible_rows = log_viewer_content_rows(
+                            terminal::size().ok().map(|(_, h)| h as usize).unwrap_or(20),
+                        );
+                        viewer.scroll_to_bottom(visible_rows);
+                        viewer.clamp_scroll(visible_rows);
+                        state.open_log_viewer(viewer);
                     } else {
                         state.set_error("log paths unavailable");
                     }
@@ -2328,23 +2372,28 @@ fn wall_clock_hms() -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::fs;
     use std::path::PathBuf;
+    use std::thread::sleep;
     use std::time::{Duration, Instant};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
+    use crate::logging::log_modified_at;
     use crate::process::{
         DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
     };
 
     use super::{
-        compute_table_view, delete_confirm_layout, esc_menu_layout, format_memory_cell,
-        frame_content_line_left, frame_line_with_label, handle_delete_confirm_mouse,
-        handle_menu_mouse, handle_table_mouse_selection, log_viewer_content_rows,
-        process_sidebar_layout, progress_bar, table_inner_width, truncate, truncate_visible_ansi,
-        visible_len, CreateField, CreateProcessForm, DashboardState, DeleteConfirmChoice,
-        DeleteConfirmLayout, EscMenuChoice, EscMenuLayout, FlashLevel, FlashMessage, LogSource,
-        LogViewerState, ProcessSidebarLayout, TableArea, TableView,
+        compute_table_view, default_log_source, delete_confirm_layout, esc_menu_layout,
+        format_memory_cell, frame_content_line_left, frame_line_with_label,
+        handle_delete_confirm_mouse, handle_menu_mouse, handle_table_mouse_selection,
+        log_viewer_content_rows, preferred_log_source, process_sidebar_layout, progress_bar,
+        table_inner_width, truncate, truncate_visible_ansi, visible_len, CreateField,
+        CreateProcessForm, DashboardState, DeleteConfirmChoice, DeleteConfirmLayout, EscMenuChoice,
+        EscMenuLayout, FlashLevel, FlashMessage, LogSource, LogViewerState, ProcessSidebarLayout,
+        TableArea, TableView,
     };
 
     #[test]
@@ -2654,22 +2703,22 @@ mod tests {
     }
 
     #[test]
-    fn log_viewer_toggle_source_resets_scroll() {
+    fn log_viewer_toggle_source_jumps_to_latest_tail() {
         let mut viewer = LogViewerState {
             process_name: "api".to_string(),
             stdout_path: "stdout.log".into(),
             stderr_path: "stderr.log".into(),
-            stdout_lines: vec!["out".to_string()],
-            stderr_lines: vec!["err".to_string()],
+            stdout_lines: (0..10).map(|idx| format!("out-{idx}")).collect(),
+            stderr_lines: (0..10).map(|idx| format!("err-{idx}")).collect(),
             active_source: LogSource::Stderr,
             scroll: 8,
             status: None,
         };
 
-        viewer.toggle_source();
+        viewer.toggle_source(4);
 
         assert_eq!(viewer.active_source, LogSource::Stdout);
-        assert_eq!(viewer.scroll, 0);
+        assert_eq!(viewer.scroll, 6);
     }
 
     #[test]
@@ -2688,5 +2737,57 @@ mod tests {
         viewer.scroll_down(4, 99);
 
         assert_eq!(viewer.scroll, 6);
+    }
+
+    #[test]
+    fn preferred_log_source_uses_newer_nonempty_stream() {
+        let tmp = temp_dir("preferred-log-source");
+        let stdout = tmp.join("stdout.log");
+        let stderr = tmp.join("stderr.log");
+
+        fs::write(&stderr, "older\n").expect("failed to seed stderr");
+        let older_mtime = log_modified_at(&stderr);
+        write_until_newer(&stdout, "newer\n", older_mtime);
+
+        let source = preferred_log_source(
+            &stdout,
+            &stderr,
+            &["newer".to_string()],
+            &["older".to_string()],
+        );
+
+        assert_eq!(source, LogSource::Stdout);
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn default_log_source_prefers_stdout_when_available() {
+        let source = default_log_source(&["out".to_string()], &["err".to_string()]);
+        assert_eq!(source, LogSource::Stdout);
+
+        let source = default_log_source(&[], &["err".to_string()]);
+        assert_eq!(source, LogSource::Stderr);
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("oxmgr-ui-test-{prefix}-{nonce}"));
+        fs::create_dir_all(&dir).expect("failed to create temp dir");
+        dir
+    }
+
+    fn write_until_newer(path: &std::path::Path, contents: &str, older_than: SystemTime) {
+        for _ in 0..10 {
+            fs::write(path, contents).expect("failed to write ui test log");
+            if log_modified_at(path) > older_than {
+                return;
+            }
+            sleep(Duration::from_millis(20));
+        }
+        panic!("failed to produce a newer mtime for {}", path.display());
     }
 }
