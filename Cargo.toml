@@ -28,7 +28,7 @@ tokio = { version = "1.44", features = [
     "io-util",
     "sync",
 ] }
-toml = "0.8"
+toml = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
