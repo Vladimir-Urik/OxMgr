@@ -39,6 +39,14 @@ impl TestEnv {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        self.run_with(args, None)
+    }
+
+    fn run_in_dir(&self, args: &[&str], cwd: &Path) -> Output {
+        self.run_with(args, Some(cwd))
+    }
+
+    fn run_with(&self, args: &[&str], cwd: Option<&Path>) -> Output {
         let bin = env!("CARGO_BIN_EXE_oxmgr");
         let command_id = COMMAND_SEQ.fetch_add(1, Ordering::Relaxed);
         let stdout_path = self.home.join(format!("cmd-{command_id}.stdout.log"));
@@ -46,7 +54,8 @@ impl TestEnv {
         let stdout_file = fs::File::create(&stdout_path).expect("failed to create stdout capture");
         let stderr_file = fs::File::create(&stderr_path).expect("failed to create stderr capture");
 
-        let mut child = Command::new(bin)
+        let mut command = Command::new(bin);
+        command
             .args(args)
             .env("OXMGR_HOME", &self.home)
             .env("OXMGR_DAEMON_ADDR", &self.daemon_addr)
@@ -54,9 +63,12 @@ impl TestEnv {
             .env("OXMGR_LOG_MAX_FILES", "3")
             .env("OXMGR_LOG_MAX_DAYS", "1")
             .stdout(Stdio::from(stdout_file))
-            .stderr(Stdio::from(stderr_file))
-            .spawn()
-            .expect("failed to spawn oxmgr command");
+            .stderr(Stdio::from(stderr_file));
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+
+        let mut child = command.spawn().expect("failed to spawn oxmgr command");
 
         let timeout = Duration::from_secs(60);
         let deadline = Instant::now() + timeout;
@@ -851,6 +863,83 @@ fn e2e_start_applies_cwd_env_namespace_and_limits() {
     );
 
     let _ = env.run(&["delete", "options-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_start_defaults_cwd_to_invocation_directory() {
+    if !should_run_e2e("e2e_start_defaults_cwd_to_invocation_directory") {
+        return;
+    }
+
+    let env = TestEnv::new("start-default-cwd");
+    let working_dir = env.home.join("workspace/service-b");
+    fs::create_dir_all(&working_dir).expect("failed to create working directory fixture");
+
+    let env_key = "OXMGR_E2E_DEFAULT_CWD";
+    let env_value = "cwd-default-check";
+    let start = env.run_in_dir(
+        &[
+            "start",
+            &print_pwd_and_env_then_sleep_command(env_key, 20),
+            "--name",
+            "default-cwd-app",
+            "--restart",
+            "never",
+            "--stop-timeout",
+            "1",
+            "--env",
+            &format!("{env_key}={env_value}"),
+        ],
+        &working_dir,
+    );
+    assert!(
+        start.status.success(),
+        "start with implicit cwd failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "default-cwd-app", Duration::from_secs(8))
+        .expect("expected default-cwd-app pid after startup");
+
+    let status = env.run(&["status", "default-cwd-app"]);
+    assert!(
+        status.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("Working Dir:")
+            && status_stdout.contains(&path_string(&working_dir)),
+        "working dir missing from status output:\n{status_stdout}"
+    );
+
+    let expected_cwd = normalize_path_for_compare(&working_dir);
+    let mut last_logs = String::new();
+    let found_log_line = wait_until(Duration::from_secs(8), || {
+        let logs = env.run(&["logs", "default-cwd-app", "--lines", "50"]);
+        if !logs.status.success() {
+            last_logs = format!(
+                "stdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&logs.stdout),
+                String::from_utf8_lossy(&logs.stderr)
+            );
+            return false;
+        }
+        let stdout = String::from_utf8_lossy(&logs.stdout).into_owned();
+        last_logs = format!(
+            "stdout:\n{}\nstderr:\n{}",
+            stdout,
+            String::from_utf8_lossy(&logs.stderr)
+        );
+        logs_contain_cwd_env_marker(&stdout, &expected_cwd, env_value)
+    });
+    assert!(
+        found_log_line,
+        "expected cwd/env marker in logs for {expected_cwd}|{env_value}\n{last_logs}"
+    );
+
+    let _ = env.run(&["delete", "default-cwd-app"]);
 }
 
 #[test]

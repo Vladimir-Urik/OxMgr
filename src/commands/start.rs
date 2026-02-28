@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use crate::cli::{build_health_check, build_resource_limits, env_pairs_to_map, RestartArg};
 use crate::config::AppConfig;
@@ -46,11 +46,10 @@ pub(crate) fn validate_flags(cluster: bool, cluster_instances: Option<u32>) -> R
 pub(crate) async fn run(config: &AppConfig, args: StartArgs) -> Result<()> {
     validate_flags(args.cluster, args.cluster_instances)?;
 
-    let cwd = if args.watch {
-        args.cwd.clone().or_else(|| std::env::current_dir().ok())
-    } else {
-        args.cwd.clone()
-    };
+    let cwd = Some(match args.cwd {
+        Some(cwd) => cwd,
+        None => std::env::current_dir().context("failed to resolve current working directory")?,
+    });
 
     let health_check = build_health_check(
         args.health_cmd,
