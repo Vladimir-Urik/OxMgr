@@ -210,10 +210,10 @@ fn sanitize_cgroup_name(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(target_os = "linux")]
-    use super::{ensure_controller_enabled, sanitize_cgroup_name};
     #[cfg(not(target_os = "linux"))]
     use super::{apply_limits, cleanup};
+    #[cfg(target_os = "linux")]
+    use super::{ensure_controller_enabled, sanitize_cgroup_name};
     #[cfg(not(target_os = "linux"))]
     use crate::process::ResourceLimits;
 
@@ -356,7 +356,10 @@ mod tests {
         )
         .expect_err("expected cgroup enforcement to be unsupported");
 
-        assert_eq!(err.to_string(), "cgroup enforcement is only supported on Linux");
+        assert_eq!(
+            err.to_string(),
+            "cgroup enforcement is only supported on Linux"
+        );
     }
 
     #[cfg(not(target_os = "linux"))]

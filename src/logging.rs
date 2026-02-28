@@ -377,16 +377,12 @@ mod tests {
         let empty = tmp.join("empty.log");
         fs::write(&empty, "").expect("failed to create empty log file");
 
-        assert!(
-            read_last_lines(&missing, 5)
-                .expect("missing file should be handled")
-                .is_empty()
-        );
-        assert!(
-            read_last_lines(&empty, 5)
-                .expect("empty file should be handled")
-                .is_empty()
-        );
+        assert!(read_last_lines(&missing, 5)
+            .expect("missing file should be handled")
+            .is_empty());
+        assert!(read_last_lines(&empty, 5)
+            .expect("empty file should be handled")
+            .is_empty());
 
         let _ = fs::remove_dir_all(tmp);
     }

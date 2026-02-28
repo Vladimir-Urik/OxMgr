@@ -26,6 +26,15 @@ use crate::cli::{Commands, DaemonCommand};
 use crate::config::AppConfig;
 
 pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
+    if let Commands::Start {
+        cluster,
+        cluster_instances,
+        ..
+    } = &command
+    {
+        start::validate_flags(*cluster, *cluster_instances)?;
+    }
+
     let needs_daemon = !matches!(
         command,
         Commands::Startup { .. }

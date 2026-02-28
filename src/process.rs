@@ -599,7 +599,9 @@ mod tests {
     #[test]
     fn redacted_for_transport_clears_sensitive_fields_and_populates_fingerprint() {
         let mut process = fixture_process();
-        process.env.insert("API_KEY".to_string(), "secret".to_string());
+        process
+            .env
+            .insert("API_KEY".to_string(), "secret".to_string());
         process.pull_secret_hash = Some("top-secret".to_string());
 
         let redacted = process.redacted_for_transport();
@@ -613,7 +615,9 @@ mod tests {
     fn redacted_for_transport_preserves_existing_fingerprint_without_mutating_original() {
         let mut process = fixture_process();
         process.config_fingerprint = "precomputed".to_string();
-        process.env.insert("TOKEN".to_string(), "secret".to_string());
+        process
+            .env
+            .insert("TOKEN".to_string(), "secret".to_string());
         process.pull_secret_hash = Some("hashed-secret".to_string());
 
         let redacted = process.redacted_for_transport();
@@ -624,10 +628,7 @@ mod tests {
 
         assert_eq!(process.config_fingerprint, "precomputed");
         assert_eq!(process.env.get("TOKEN").map(String::as_str), Some("secret"));
-        assert_eq!(
-            process.pull_secret_hash.as_deref(),
-            Some("hashed-secret")
-        );
+        assert_eq!(process.pull_secret_hash.as_deref(), Some("hashed-secret"));
     }
 
     #[test]

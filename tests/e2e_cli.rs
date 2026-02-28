@@ -152,6 +152,40 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn normalize_path_for_compare(path: &Path) -> String {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    normalize_path_text_for_compare(&canonical.to_string_lossy())
+}
+
+fn normalize_path_text_for_compare(value: &str) -> String {
+    let trimmed = value.trim().trim_matches('"');
+    let canonical = fs::canonicalize(trimmed).unwrap_or_else(|_| PathBuf::from(trimmed));
+    let rendered = canonical.to_string_lossy();
+
+    #[cfg(windows)]
+    {
+        rendered
+            .trim_start_matches(r"\\?\")
+            .replace('/', "\\")
+            .to_ascii_lowercase()
+    }
+
+    #[cfg(not(windows))]
+    {
+        rendered.into_owned()
+    }
+}
+
+fn logs_contain_cwd_env_marker(log_output: &str, expected_cwd: &str, env_value: &str) -> bool {
+    log_output.lines().any(|line| {
+        let Some((cwd, logged_env_value)) = line.rsplit_once('|') else {
+            return false;
+        };
+
+        logged_env_value.trim() == env_value && normalize_path_text_for_compare(cwd) == expected_cwd
+    })
+}
+
 fn escape_toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -791,18 +825,29 @@ fn e2e_start_applies_cwd_env_namespace_and_limits() {
         "limits missing from status output:\n{status_stdout}"
     );
 
-    let expected_log_line = format!("{}|{}", working_dir.display(), env_value);
+    let expected_cwd = normalize_path_for_compare(&working_dir);
+    let mut last_logs = String::new();
     let found_log_line = wait_until(Duration::from_secs(8), || {
         let logs = env.run(&["logs", "options-app", "--lines", "50"]);
         if !logs.status.success() {
+            last_logs = format!(
+                "stdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&logs.stdout),
+                String::from_utf8_lossy(&logs.stderr)
+            );
             return false;
         }
-        let stdout = String::from_utf8_lossy(&logs.stdout);
-        stdout.contains(&expected_log_line)
+        let stdout = String::from_utf8_lossy(&logs.stdout).into_owned();
+        last_logs = format!(
+            "stdout:\n{}\nstderr:\n{}",
+            stdout,
+            String::from_utf8_lossy(&logs.stderr)
+        );
+        logs_contain_cwd_env_marker(&stdout, &expected_cwd, env_value)
     });
     assert!(
         found_log_line,
-        "expected cwd/env marker in logs: {expected_log_line}"
+        "expected cwd/env marker in logs for {expected_cwd}|{env_value}\n{last_logs}"
     );
 
     let _ = env.run(&["delete", "options-app"]);

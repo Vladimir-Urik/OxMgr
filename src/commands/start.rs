@@ -35,10 +35,16 @@ pub(crate) struct StartArgs {
     pub(crate) deny_gpu: bool,
 }
 
-pub(crate) async fn run(config: &AppConfig, args: StartArgs) -> Result<()> {
-    if args.cluster_instances.is_some() && !args.cluster {
+pub(crate) fn validate_flags(cluster: bool, cluster_instances: Option<u32>) -> Result<()> {
+    if cluster_instances.is_some() && !cluster {
         anyhow::bail!("--cluster-instances requires --cluster");
     }
+
+    Ok(())
+}
+
+pub(crate) async fn run(config: &AppConfig, args: StartArgs) -> Result<()> {
+    validate_flags(args.cluster, args.cluster_instances)?;
 
     let cwd = if args.watch {
         args.cwd.clone().or_else(|| std::env::current_dir().ok())

@@ -161,7 +161,10 @@ mod tests {
             .await
             .expect("failed reading raw payload");
 
-        assert_eq!(payload, br#"{"type":"ping"}"#.iter().chain(b"\n").copied().collect::<Vec<_>>());
+        assert_eq!(
+            payload,
+            br#"{"type":"ping"}"#.iter().chain(b"\n").copied().collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
@@ -243,8 +246,7 @@ mod tests {
             .expect_err("expected request to fail without listener");
 
         assert!(
-            err.to_string()
-                .contains("failed to connect to daemon at"),
+            err.to_string().contains("failed to connect to daemon at"),
             "unexpected error: {err}"
         );
     }

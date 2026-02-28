@@ -311,7 +311,12 @@ mod tests {
 
     #[test]
     fn validate_resolved_specs_rejects_cluster_mode_with_node_flags_before_script() {
-        let mut spec = fixture_spec("api", "node --require ts-node/register server.js", vec![], 1);
+        let mut spec = fixture_spec(
+            "api",
+            "node --require ts-node/register server.js",
+            vec![],
+            1,
+        );
         spec.cluster_mode = true;
 
         let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
