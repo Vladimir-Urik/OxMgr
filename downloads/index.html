@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oxmgr Download Metrics</title>
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: rgba(255, 252, 247, 0.86);
+      --panel-strong: #fffaf2;
+      --ink: #142013;
+      --muted: #576256;
+      --accent: #cb5f2d;
+      --border: rgba(20, 32, 19, 0.12);
+      --ok: #235d3a;
+      --warn: #915b00;
+      --shadow: 0 24px 60px rgba(37, 30, 20, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(203, 95, 45, 0.18), transparent 30%),
+        radial-gradient(circle at top right, rgba(35, 93, 58, 0.14), transparent 24%),
+        linear-gradient(180deg, #faf5ec 0%, var(--bg) 100%);
+      font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      line-height: 1.5;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .shell {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 40px 0 56px;
+    }
+
+    .hero {
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      background: linear-gradient(145deg, rgba(255, 250, 242, 0.94), rgba(255, 247, 238, 0.72));
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -60px -60px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(203, 95, 45, 0.22), transparent 70%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.2rem, 5vw, 4.4rem);
+      line-height: 0.96;
+      max-width: 11ch;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+
+    .hero-copy {
+      margin: 18px 0 0;
+      max-width: 70ch;
+      color: var(--muted);
+      font-size: 1.02rem;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .link-chip,
+    .hero-actions a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.72);
+      text-decoration: none;
+      font-size: 0.95rem;
+    }
+
+    .hero-actions a.primary {
+      background: var(--ink);
+      color: #fff8ef;
+      border-color: var(--ink);
+    }
+
+    .overview {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .overview-card,
+    .panel,
+    .stat-card {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .overview-card {
+      padding: 18px 18px 20px;
+    }
+
+    .overview-card p,
+    .stat-card p,
+    .muted {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .overview-card strong,
+    .stat-card strong {
+      display: block;
+      margin-top: 10px;
+      font-size: 1.9rem;
+      line-height: 1;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .panel {
+      padding: 22px;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .pill.ok {
+      background: rgba(35, 93, 58, 0.12);
+      color: var(--ok);
+      border-color: rgba(35, 93, 58, 0.16);
+    }
+
+    .pill.warn {
+      background: rgba(145, 91, 0, 0.12);
+      color: var(--warn);
+      border-color: rgba(145, 91, 0, 0.16);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .stat-card {
+      padding: 16px;
+      background: var(--panel-strong);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    th,
+    td {
+      padding: 12px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+
+    tbody tr:last-child th,
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .spacer {
+      height: 18px;
+    }
+
+    .footer {
+      margin-top: 18px;
+      padding: 20px 4px 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 980px) {
+      .overview,
+      .grid,
+      .stats-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(100% - 20px, 1180px);
+        padding-top: 24px;
+      }
+
+      .hero,
+      .panel,
+      .overview-card,
+      .stat-card {
+        border-radius: 20px;
+      }
+
+      .overview,
+      .grid,
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel-head {
+        flex-direction: column;
+      }
+
+      table,
+      thead,
+      tbody,
+      th,
+      td,
+      tr {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tbody tr {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      tbody tr:last-child {
+        border-bottom: none;
+      }
+
+      tbody th,
+      tbody td {
+        padding: 4px 0;
+        border-bottom: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">Oxmgr distribution telemetry</p>
+      <h1>Download Metrics</h1>
+      <p class="hero-copy">Published package and artifact signals for <strong>Vladimir-Urik/OxMgr</strong>. This report distinguishes exact counters from proxies and explicitly keeps blind spots visible instead of pretending the data exists.</p>
+      <div class="hero-actions">
+        <a class="primary" href="https://github.com/Vladimir-Urik/OxMgr">Repository</a>
+        <a href="https://Vladimir-Urik.github.io/OxMgr/downloads/data.json">Raw JSON</a>
+        <a href="https://community.chocolatey.org/packages/oxmgr">Chocolatey package</a>
+      </div>
+      <div class="overview">
+        <article class="overview-card">
+          <p>GitHub asset downloads</p>
+          <strong>81</strong>
+        </article>
+        <article class="overview-card">
+          <p>Releases tracked</p>
+          <strong>11</strong>
+        </article>
+        <article class="overview-card">
+          <p>Chocolatey total</p>
+          <strong>2</strong>
+        </article>
+        <article class="overview-card">
+          <p>Homebrew exact</p>
+          <strong>n/a</strong>
+          <span class="muted">custom tap</span>
+        </article>
+      </div>
+      <p class="hero-copy">Latest release: <strong>v0.0.12</strong> on <strong>2026-02-28</strong>. Snapshot generated at <strong>2026-02-28T14:07:51+00:00</strong>.</p>
+    </section>
+
+    <section class="grid">
+      
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">GitHub Releases</p>
+          <h2>Release asset downloads</h2>
+        </div>
+        <span class="pill ok">exact per asset</span>
+      </div>
+      <p class="muted">These counts come directly from GitHub release assets. They are exact for the files, but some assets are shared across multiple install channels.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Asset type</th>
+            <th>Total downloads</th>
+            <th>Interpretation</th>
+          </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <th>Linux tar.gz</th>
+          <td>44</td>
+          <td>Shared by Homebrew, npm postinstall, and direct manual downloads.</td>
+        </tr>
+        
+        <tr>
+          <th>macOS Intel tar.gz</th>
+          <td>5</td>
+          <td>Shared by Homebrew, npm postinstall, and direct manual downloads.</td>
+        </tr>
+        
+        <tr>
+          <th>macOS Apple Silicon tar.gz</th>
+          <td>4</td>
+          <td>Shared by Homebrew, npm postinstall, and direct manual downloads.</td>
+        </tr>
+        
+        <tr>
+          <th>Windows zip</th>
+          <td>25</td>
+          <td>Shared by Chocolatey, npm postinstall, and direct manual downloads.</td>
+        </tr>
+        
+        <tr>
+          <th>Debian .deb</th>
+          <td>3</td>
+          <td>Tracks direct .deb downloads only. APT installs from GitHub Pages are not visible here.</td>
+        </tr>
+        </tbody>
+      </table>
+      <div class="spacer"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Release</th>
+            <th>Published</th>
+            <th>Linux</th>
+            <th>macOS Intel</th>
+            <th>macOS ARM</th>
+            <th>Windows</th>
+            <th>.deb</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.12">v0.0.12</a></th>
+              <td>2026-02-28</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.11">v0.0.11</a></th>
+              <td>2026-02-28</td>
+              <td>3</td>
+              <td>0</td>
+              <td>0</td>
+              <td>2</td>
+              <td>0</td>
+              <td>5</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.10">v0.0.10</a></th>
+              <td>2026-02-28</td>
+              <td>4</td>
+              <td>0</td>
+              <td>0</td>
+              <td>2</td>
+              <td>0</td>
+              <td>6</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.9">v0.0.9</a></th>
+              <td>2026-02-27</td>
+              <td>6</td>
+              <td>1</td>
+              <td>1</td>
+              <td>4</td>
+              <td>0</td>
+              <td>12</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.8">v0.0.8</a></th>
+              <td>2026-02-27</td>
+              <td>7</td>
+              <td>1</td>
+              <td>0</td>
+              <td>3</td>
+              <td>0</td>
+              <td>11</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.7">v0.0.7</a></th>
+              <td>2026-02-27</td>
+              <td>3</td>
+              <td>0</td>
+              <td>0</td>
+              <td>2</td>
+              <td>0</td>
+              <td>5</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.6">v0.0.6</a></th>
+              <td>2026-02-27</td>
+              <td>6</td>
+              <td>1</td>
+              <td>0</td>
+              <td>2</td>
+              <td>1</td>
+              <td>10</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.5">v0.0.5</a></th>
+              <td>2026-02-27</td>
+              <td>4</td>
+              <td>0</td>
+              <td>0</td>
+              <td>1</td>
+              <td>0</td>
+              <td>5</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.4">v0.0.4</a></th>
+              <td>2026-02-27</td>
+              <td>4</td>
+              <td>0</td>
+              <td>0</td>
+              <td>5</td>
+              <td>0</td>
+              <td>9</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.3">v0.0.3</a></th>
+              <td>2026-02-27</td>
+              <td>6</td>
+              <td>1</td>
+              <td>1</td>
+              <td>2</td>
+              <td>1</td>
+              <td>11</td>
+            </tr>
+            
+            <tr>
+              <th><a href="https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.2">v0.0.2</a></th>
+              <td>2026-02-26</td>
+              <td>1</td>
+              <td>1</td>
+              <td>2</td>
+              <td>2</td>
+              <td>1</td>
+              <td>7</td>
+            </tr>
+            </tbody>
+      </table>
+    </div>
+    
+      
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Chocolatey</p>
+          <h2>Exact package page counts</h2>
+        </div>
+        <a class="link-chip" href="https://community.chocolatey.org/packages/oxmgr">community.chocolatey.org</a>
+      </div>
+      <div class="stats-grid">
+        <article class="stat-card">
+          <p>Total downloads</p>
+          <strong>2</strong>
+        </article>
+        <article class="stat-card">
+          <p>Downloads of v0.0.4</p>
+          <strong>2</strong>
+        </article>
+        <article class="stat-card">
+          <p>Last updated on package page</p>
+          <strong>27 Feb 2026</strong>
+        </article>
+      </div>
+    </div>
+    
+      
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Homebrew</p>
+          <h2>Indirect signal only</h2>
+        </div>
+        <span class="pill warn">custom tap blind spot</span>
+      </div>
+      <p class="muted">No public formulae.brew.sh analytics entry was found for this formula.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Artifact</th>
+            <th>GitHub downloads</th>
+            <th>Interpretation</th>
+          </tr>
+        </thead>
+        <tbody>
+            <tr>
+              <th>Linux tar.gz</th>
+              <td>44</td>
+              <td>Shared by Homebrew, npm postinstall, and direct manual downloads.</td>
+            </tr>
+            
+            <tr>
+              <th>macOS Intel tar.gz</th>
+              <td>5</td>
+              <td>Shared by Homebrew, npm postinstall, and direct manual downloads.</td>
+            </tr>
+            
+            <tr>
+              <th>macOS Apple Silicon tar.gz</th>
+              <td>4</td>
+              <td>Shared by Homebrew, npm postinstall, and direct manual downloads.</td>
+            </tr>
+            </tbody>
+      </table>
+    </div>
+    
+      
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">APT</p>
+          <h2>No exact install counter</h2>
+        </div>
+        <span class="pill warn">GitHub Pages blind spot</span>
+      </div>
+      <p class="muted">The APT repository is currently served as static files from GitHub Pages. That setup does not give this project per-package download or install logs, so exact APT usage is intentionally called out as unknown here.</p>
+    </div>
+    
+    </section>
+
+    <p class="footer">The Linux and macOS tarballs are shared between Homebrew installs, npm postinstall downloads, and manual downloads. The Windows zip is shared between Chocolatey, npm postinstall, and manual downloads. Exact APT installs are not observable with the current GitHub Pages hosting model.</p>
+  </main>
+</body>
+</html>
