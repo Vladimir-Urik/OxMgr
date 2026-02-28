@@ -34,7 +34,7 @@ cargo build --release
 - `packaging/`: npm and Chocolatey packaging assets
 - `scripts/`: packaging/release helper scripts
 
-For a higher-level architecture summary, see [README.md](./README.md).
+For a higher-level internal overview, see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ## Daily Workflow
 

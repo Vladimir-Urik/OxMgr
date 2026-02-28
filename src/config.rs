@@ -1,3 +1,6 @@
+//! Application-wide configuration derived from environment variables and local
+//! filesystem conventions.
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -7,6 +10,10 @@ use anyhow::{Context, Result};
 use crate::logging::LogRotationPolicy;
 
 #[derive(Debug, Clone)]
+/// Resolved runtime configuration for the local Oxmgr installation.
+///
+/// The values are loaded from environment variables where available and then
+/// normalised into absolute paths and bind addresses used by the CLI and daemon.
 pub struct AppConfig {
     pub base_dir: PathBuf,
     pub daemon_addr: String,
@@ -17,6 +24,16 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    /// Loads configuration from the environment and creates the required
+    /// directory layout if it does not already exist.
+    ///
+    /// Recognised environment variables:
+    /// - `OXMGR_HOME`
+    /// - `OXMGR_DAEMON_ADDR`
+    /// - `OXMGR_API_ADDR`
+    /// - `OXMGR_LOG_MAX_SIZE_MB`
+    /// - `OXMGR_LOG_MAX_FILES`
+    /// - `OXMGR_LOG_MAX_DAYS`
     pub fn load() -> Result<Self> {
         let base_dir = env::var("OXMGR_HOME")
             .map(PathBuf::from)
@@ -56,6 +73,8 @@ impl AppConfig {
         Ok(config)
     }
 
+    /// Ensures the base directory and log directory exist with private
+    /// permissions where the platform supports them.
     pub fn ensure_layout(&self) -> Result<()> {
         ensure_private_dir(&self.base_dir)?;
         ensure_private_dir(&self.log_dir)?;

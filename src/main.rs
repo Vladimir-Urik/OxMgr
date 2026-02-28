@@ -1,3 +1,9 @@
+//! Entry point for the `oxmgr` binary.
+//!
+//! The binary is intentionally thin: it configures tracing, parses CLI input,
+//! loads the local application configuration, and then hands control to either
+//! the daemon loop or the command dispatcher.
+
 mod bundle;
 mod cgroup;
 mod cli;

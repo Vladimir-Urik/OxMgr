@@ -3,6 +3,7 @@ use std::io;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+/// Domain-specific errors produced by Oxmgr runtime and orchestration code.
 pub enum OxmgrError {
     #[error("process not found: {0}")]
     ProcessNotFound(String),

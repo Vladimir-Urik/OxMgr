@@ -1,3 +1,6 @@
+//! In-memory orchestration of managed processes, including persistence,
+//! restarts, health checks, file watching, and metric collection.
+
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
@@ -25,6 +28,7 @@ use crate::process::{
 };
 use crate::storage::{load_state, save_state, PersistedState};
 
+/// Coordinates process lifecycle operations for one local Oxmgr daemon.
 pub struct ProcessManager {
     config: AppConfig,
     processes: HashMap<String, ManagedProcess>,
@@ -38,6 +42,8 @@ pub struct ProcessManager {
 const CRASH_RESTART_WINDOW_SECS: u64 = 5 * 60;
 
 impl ProcessManager {
+    /// Rebuilds the manager from persisted state and prepares runtime-only
+    /// bookkeeping such as health scheduling and system metrics.
     pub fn new(config: AppConfig, exit_tx: UnboundedSender<ProcessExitEvent>) -> Result<Self> {
         let state = load_state(&config.state_path)?;
 
@@ -76,6 +82,8 @@ impl ProcessManager {
         })
     }
 
+    /// Reconciles persisted process state with the live machine and respawns
+    /// processes whose desired state is running.
     pub async fn recover_processes(&mut self) -> Result<()> {
         let stale: Vec<ManagedProcess> = self
             .processes
@@ -137,6 +145,7 @@ impl ProcessManager {
         self.save()
     }
 
+    /// Runs the daemon's periodic maintenance tasks.
     pub async fn run_periodic_tasks(&mut self) -> Result<()> {
         self.run_scheduled_restarts().await?;
         self.refresh_resource_metrics();
@@ -145,6 +154,7 @@ impl ProcessManager {
         self.run_health_checks().await
     }
 
+    /// Registers a new process, persists it, and starts it immediately.
     pub async fn start_process(&mut self, spec: StartProcessSpec) -> Result<ManagedProcess> {
         let StartProcessSpec {
             command: command_line,
@@ -259,6 +269,7 @@ impl ProcessManager {
         Ok(process)
     }
 
+    /// Stops a managed process and marks its desired state as stopped.
     pub async fn stop_process(&mut self, target: &str) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
         let mut process = self
@@ -291,6 +302,8 @@ impl ProcessManager {
         Ok(process)
     }
 
+    /// Restarts a managed process, resetting restart backoff state before the
+    /// fresh spawn.
     pub async fn restart_process(&mut self, target: &str) -> Result<ManagedProcess> {
         self.restart_process_internal(target, true).await
     }
@@ -341,6 +354,8 @@ impl ProcessManager {
         self.spawn_existing(&name).await
     }
 
+    /// Reloads a managed process, preferring replacement semantics over a full
+    /// downtime window when the process is already running.
     pub async fn reload_process(&mut self, target: &str) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
 
@@ -392,6 +407,8 @@ impl ProcessManager {
         Ok(replacement)
     }
 
+    /// Pulls Git updates for one or more managed processes and applies the
+    /// corresponding reload or restart only when the checked-out revision changed.
     pub async fn pull_processes(&mut self, target: Option<&str>) -> Result<String> {
         let mut targets = if let Some(target) = target {
             vec![self.resolve_target(target)?]
@@ -458,6 +475,8 @@ impl ProcessManager {
         Ok(summary)
     }
 
+    /// Verifies that a webhook secret matches the stored digest for the target
+    /// process.
     pub fn verify_pull_webhook_secret(&self, target: &str, provided_secret: &str) -> Result<()> {
         let name = self.resolve_target(target)?;
         let process = self
@@ -477,6 +496,7 @@ impl ProcessManager {
         Ok(())
     }
 
+    /// Deletes a managed process and removes its persisted metadata.
     pub async fn delete_process(&mut self, target: &str) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
 
@@ -566,12 +586,14 @@ impl ProcessManager {
         })
     }
 
+    /// Returns an ordered snapshot of all managed processes.
     pub fn list_processes(&self) -> Vec<ManagedProcess> {
         let mut list: Vec<ManagedProcess> = self.processes.values().cloned().collect();
         list.sort_by_key(|process| process.id);
         list
     }
 
+    /// Returns one managed process identified by name or numeric id.
     pub fn get_process(&self, target: &str) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
         self.processes
@@ -580,6 +602,7 @@ impl ProcessManager {
             .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()).into())
     }
 
+    /// Returns the stdout and stderr log paths for one managed process.
     pub fn logs_for(&self, target: &str) -> Result<ProcessLogs> {
         let process = self.get_process(target)?;
         Ok(ProcessLogs {
@@ -588,6 +611,8 @@ impl ProcessManager {
         })
     }
 
+    /// Updates internal state after a child process exits and schedules an
+    /// automatic restart when policy allows.
     pub async fn handle_exit_event(&mut self, event: ProcessExitEvent) -> Result<()> {
         let Some(mut process) = self.processes.get(&event.name).cloned() else {
             return Ok(());
@@ -682,6 +707,7 @@ impl ProcessManager {
         Ok(())
     }
 
+    /// Stops every managed process as part of daemon shutdown.
     pub async fn shutdown_all(&mut self) -> Result<()> {
         let names: Vec<String> = self.processes.keys().cloned().collect();
         for name in names {
@@ -864,6 +890,7 @@ impl ProcessManager {
         }
     }
 
+    /// Executes delayed restarts whose scheduled timestamp has already passed.
     pub async fn run_scheduled_restarts(&mut self) -> Result<()> {
         let now = now_epoch_secs();
         let mut due: Vec<(String, u64)> = self

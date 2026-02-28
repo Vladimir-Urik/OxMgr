@@ -1,3 +1,5 @@
+//! Linux cgroup helpers used when optional resource enforcement is enabled.
+
 #[cfg(target_os = "linux")]
 use anyhow::Context;
 use anyhow::{bail, Result};
@@ -17,6 +19,8 @@ const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 const OXMGR_SLICE: &str = "oxmgr";
 
 #[cfg(target_os = "linux")]
+/// Applies Linux cgroup v2 limits to a running child process and returns the
+/// created cgroup path when enforcement is enabled.
 pub fn apply_limits(
     process_name: &str,
     process_id: u64,
@@ -89,6 +93,7 @@ pub fn apply_limits(
 }
 
 #[cfg(not(target_os = "linux"))]
+/// Validates resource-limit settings on non-Linux platforms.
 pub fn apply_limits(_: &str, _: u64, _: u32, limits: &ResourceLimits) -> Result<Option<String>> {
     if limits.cgroup_enforce {
         bail!("cgroup enforcement is only supported on Linux");
@@ -97,6 +102,7 @@ pub fn apply_limits(_: &str, _: u64, _: u32, limits: &ResourceLimits) -> Result<
 }
 
 #[cfg(target_os = "linux")]
+/// Removes the process-specific cgroup directory when it is still safe to do so.
 pub fn cleanup(path: &str) -> Result<()> {
     let group = PathBuf::from(path);
     let root = Path::new(CGROUP_ROOT)
@@ -135,6 +141,7 @@ pub fn cleanup(path: &str) -> Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
+/// No-op cgroup cleanup for platforms that do not support Linux cgroups.
 pub fn cleanup(_: &str) -> Result<()> {
     Ok(())
 }

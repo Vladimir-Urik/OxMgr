@@ -4,6 +4,7 @@ Project docs live here.
 
 ## Guides
 
+- [Architecture Overview](./ARCHITECTURE.md)
 - [User Guide](./USAGE.md)
 - [Installation Guide](./install.md)
 - [CLI Reference](./CLI.md)

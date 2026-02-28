@@ -1,3 +1,5 @@
+//! Command dispatcher for the non-daemon `oxmgr` CLI entry points.
+
 mod apply;
 mod common;
 mod convert;
@@ -25,6 +27,7 @@ use anyhow::Result;
 use crate::cli::{Commands, DaemonCommand};
 use crate::config::AppConfig;
 
+/// Dispatches one parsed CLI command to its concrete implementation.
 pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
     if let Commands::Start {
         cluster,
