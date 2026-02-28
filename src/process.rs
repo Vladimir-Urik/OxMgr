@@ -416,8 +416,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        default_crash_restart_limit, default_stop_timeout_secs, DesiredState, HealthStatus,
-        ManagedProcess, ProcessStatus, RestartPolicy, DEFAULT_CRASH_RESTART_LIMIT,
+        default_crash_restart_limit, default_stop_timeout_secs, DesiredState, HealthCheck,
+        HealthStatus, ManagedProcess, ProcessStatus, ResourceLimits, RestartPolicy,
+        StartProcessSpec, DEFAULT_CRASH_RESTART_LIMIT,
     };
 
     #[test]
@@ -477,6 +478,169 @@ mod tests {
         assert_eq!(DEFAULT_CRASH_RESTART_LIMIT, 3);
     }
 
+    #[test]
+    fn config_fingerprint_matches_between_start_spec_and_managed_process() {
+        let mut env = HashMap::new();
+        env.insert("NODE_ENV".to_string(), "production".to_string());
+
+        let health_check = Some(HealthCheck {
+            command: "curl -f http://127.0.0.1:3000/health".to_string(),
+            interval_secs: 10,
+            timeout_secs: 2,
+            max_failures: 3,
+        });
+        let resource_limits = Some(ResourceLimits {
+            max_memory_mb: Some(512),
+            max_cpu_percent: Some(75.0),
+            cgroup_enforce: true,
+            deny_gpu: false,
+        });
+
+        let spec = StartProcessSpec {
+            command: "node server.js --port 3000".to_string(),
+            name: Some("api".to_string()),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 5,
+            crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
+            cwd: Some(PathBuf::from("/srv/api")),
+            env: env.clone(),
+            health_check: health_check.clone(),
+            stop_signal: Some("SIGTERM".to_string()),
+            stop_timeout_secs: 15,
+            restart_delay_secs: 4,
+            start_delay_secs: 2,
+            watch: true,
+            cluster_mode: true,
+            cluster_instances: Some(2),
+            namespace: Some("prod".to_string()),
+            resource_limits: resource_limits.clone(),
+            git_repo: Some("https://example.com/repo.git".to_string()),
+            git_ref: Some("main".to_string()),
+            pull_secret_hash: Some("abc123".to_string()),
+        };
+
+        let mut process = fixture_process();
+        process.command = "node".to_string();
+        process.args = vec![
+            "server.js".to_string(),
+            "--port".to_string(),
+            "3000".to_string(),
+        ];
+        process.cwd = spec.cwd.clone();
+        process.env = env;
+        process.max_restarts = spec.max_restarts;
+        process.health_check = health_check;
+        process.stop_timeout_secs = spec.stop_timeout_secs;
+        process.restart_delay_secs = spec.restart_delay_secs;
+        process.start_delay_secs = spec.start_delay_secs;
+        process.watch = spec.watch;
+        process.cluster_mode = spec.cluster_mode;
+        process.cluster_instances = spec.cluster_instances;
+        process.namespace = spec.namespace.clone();
+        process.resource_limits = resource_limits;
+        process.git_repo = spec.git_repo.clone();
+        process.git_ref = spec.git_ref.clone();
+        process.pull_secret_hash = spec.pull_secret_hash.clone();
+
+        assert_eq!(spec.config_fingerprint(), process.config_fingerprint());
+    }
+
+    #[test]
+    fn config_fingerprint_is_stable_across_env_insertion_order() {
+        let mut env_a = HashMap::new();
+        env_a.insert("PORT".to_string(), "3000".to_string());
+        env_a.insert("NODE_ENV".to_string(), "production".to_string());
+
+        let mut env_b = HashMap::new();
+        env_b.insert("NODE_ENV".to_string(), "production".to_string());
+        env_b.insert("PORT".to_string(), "3000".to_string());
+
+        let mut spec_a = fixture_start_spec();
+        spec_a.env = env_a;
+
+        let mut spec_b = fixture_start_spec();
+        spec_b.env = env_b;
+
+        assert_eq!(spec_a.config_fingerprint(), spec_b.config_fingerprint());
+    }
+
+    #[test]
+    fn config_fingerprint_falls_back_to_raw_command_when_shell_parsing_fails() {
+        let mut broken = fixture_start_spec();
+        broken.command = "node \"unterminated".to_string();
+
+        let mut changed = fixture_start_spec();
+        changed.command = "node \"unterminated extra".to_string();
+
+        assert_ne!(broken.config_fingerprint(), changed.config_fingerprint());
+    }
+
+    #[test]
+    fn config_fingerprint_changes_when_resource_limits_change() {
+        let mut baseline = fixture_start_spec();
+        baseline.resource_limits = Some(ResourceLimits {
+            max_memory_mb: Some(512),
+            max_cpu_percent: Some(50.0),
+            cgroup_enforce: false,
+            deny_gpu: false,
+        });
+
+        let mut changed = baseline.clone();
+        changed.resource_limits = Some(ResourceLimits {
+            max_memory_mb: Some(1024),
+            max_cpu_percent: Some(50.0),
+            cgroup_enforce: false,
+            deny_gpu: false,
+        });
+
+        assert_ne!(baseline.config_fingerprint(), changed.config_fingerprint());
+    }
+
+    #[test]
+    fn redacted_for_transport_clears_sensitive_fields_and_populates_fingerprint() {
+        let mut process = fixture_process();
+        process.env.insert("API_KEY".to_string(), "secret".to_string());
+        process.pull_secret_hash = Some("top-secret".to_string());
+
+        let redacted = process.redacted_for_transport();
+
+        assert!(redacted.env.is_empty());
+        assert_eq!(redacted.pull_secret_hash.as_deref(), Some("<redacted>"));
+        assert_eq!(redacted.config_fingerprint, process.config_fingerprint());
+    }
+
+    #[test]
+    fn redacted_for_transport_preserves_existing_fingerprint_without_mutating_original() {
+        let mut process = fixture_process();
+        process.config_fingerprint = "precomputed".to_string();
+        process.env.insert("TOKEN".to_string(), "secret".to_string());
+        process.pull_secret_hash = Some("hashed-secret".to_string());
+
+        let redacted = process.redacted_for_transport();
+
+        assert_eq!(redacted.config_fingerprint, "precomputed");
+        assert!(redacted.env.is_empty());
+        assert_eq!(redacted.pull_secret_hash.as_deref(), Some("<redacted>"));
+
+        assert_eq!(process.config_fingerprint, "precomputed");
+        assert_eq!(process.env.get("TOKEN").map(String::as_str), Some("secret"));
+        assert_eq!(
+            process.pull_secret_hash.as_deref(),
+            Some("hashed-secret")
+        );
+    }
+
+    #[test]
+    fn refresh_config_fingerprint_updates_stored_value() {
+        let mut process = fixture_process();
+        process.config_fingerprint = "stale".to_string();
+
+        process.refresh_config_fingerprint();
+
+        assert_eq!(process.config_fingerprint, process.config_fingerprint());
+        assert_ne!(process.config_fingerprint, "stale");
+    }
+
     fn fixture_process() -> ManagedProcess {
         ManagedProcess {
             id: 42,
@@ -524,6 +688,31 @@ mod tests {
             last_started_at: None,
             last_stopped_at: None,
             config_fingerprint: String::new(),
+        }
+    }
+
+    fn fixture_start_spec() -> StartProcessSpec {
+        StartProcessSpec {
+            command: "node server.js".to_string(),
+            name: Some("api".to_string()),
+            restart_policy: RestartPolicy::OnFailure,
+            max_restarts: 10,
+            crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
+            cwd: Some(PathBuf::from("/srv/api")),
+            env: HashMap::new(),
+            health_check: None,
+            stop_signal: Some("SIGTERM".to_string()),
+            stop_timeout_secs: 5,
+            restart_delay_secs: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            namespace: None,
+            resource_limits: None,
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
         }
     }
 }

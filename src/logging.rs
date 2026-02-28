@@ -350,6 +350,48 @@ mod tests {
     }
 
     #[test]
+    fn read_last_lines_returns_all_lines_without_trailing_newline() {
+        let tmp = temp_dir("read-no-trailing-newline");
+        fs::create_dir_all(&tmp).expect("failed to create temp directory");
+        let path = tmp.join("app.out.log");
+        fs::write(&path, "line1\nline2\nline3").expect("failed to write test log file");
+
+        let lines = read_last_lines(&path, 10).expect("failed reading lines");
+        assert_eq!(
+            lines,
+            vec![
+                "line1".to_string(),
+                "line2".to_string(),
+                "line3".to_string()
+            ]
+        );
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn read_last_lines_returns_empty_for_missing_or_empty_file() {
+        let tmp = temp_dir("read-empty");
+        fs::create_dir_all(&tmp).expect("failed to create temp directory");
+        let missing = tmp.join("missing.log");
+        let empty = tmp.join("empty.log");
+        fs::write(&empty, "").expect("failed to create empty log file");
+
+        assert!(
+            read_last_lines(&missing, 5)
+                .expect("missing file should be handled")
+                .is_empty()
+        );
+        assert!(
+            read_last_lines(&empty, 5)
+                .expect("empty file should be handled")
+                .is_empty()
+        );
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
     fn read_last_lines_with_zero_limit_returns_empty() {
         let tmp = temp_dir("read-zero");
         fs::create_dir_all(&tmp).expect("failed to create temp directory");
@@ -358,6 +400,70 @@ mod tests {
 
         let lines = read_last_lines(&path, 0).expect("failed reading lines");
         assert!(lines.is_empty());
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn open_log_writers_creates_parent_directory_and_files() {
+        let tmp = temp_dir("create-files");
+        let logs = ProcessLogs {
+            stdout: tmp.join("nested").join("app.out.log"),
+            stderr: tmp.join("nested").join("app.err.log"),
+        };
+
+        let policy = LogRotationPolicy {
+            max_size_bytes: 1024,
+            max_files: 2,
+            max_age_days: 30,
+        };
+
+        let _ = open_log_writers(&logs, policy).expect("failed opening logs");
+
+        assert!(logs.stdout.exists(), "stdout log should be created");
+        assert!(logs.stderr.exists(), "stderr log should be created");
+        assert!(
+            logs.stdout.parent().is_some_and(|parent| parent.exists()),
+            "log directory should be created"
+        );
+
+        let _ = fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn open_log_writers_rotates_existing_chain_forward() {
+        let tmp = temp_dir("rotate-chain");
+        let logs = ProcessLogs {
+            stdout: tmp.join("app.out.log"),
+            stderr: tmp.join("app.err.log"),
+        };
+        fs::create_dir_all(&tmp).expect("failed to create temp directory");
+        fs::write(&logs.stdout, "current-out").expect("failed to write stdout seed");
+        fs::write(&logs.stderr, "current-err").expect("failed to write stderr seed");
+        fs::write(tmp.join("app.out.log.1"), "older-out-1").expect("failed to write out.1");
+        fs::write(tmp.join("app.out.log.2"), "older-out-2").expect("failed to write out.2");
+        fs::write(tmp.join("app.err.log.1"), "older-err-1").expect("failed to write err.1");
+        fs::write(tmp.join("app.err.log.2"), "older-err-2").expect("failed to write err.2");
+
+        let policy = LogRotationPolicy {
+            max_size_bytes: 1,
+            max_files: 3,
+            max_age_days: 30,
+        };
+        let _ = open_log_writers(&logs, policy).expect("failed opening logs");
+
+        assert_eq!(
+            fs::read_to_string(tmp.join("app.out.log.1")).expect("failed to read out.1"),
+            "current-out"
+        );
+        assert_eq!(
+            fs::read_to_string(tmp.join("app.out.log.2")).expect("failed to read out.2"),
+            "older-out-1"
+        );
+        assert_eq!(
+            fs::read_to_string(tmp.join("app.out.log.3")).expect("failed to read out.3"),
+            "older-out-2"
+        );
 
         let _ = fs::remove_dir_all(tmp);
     }

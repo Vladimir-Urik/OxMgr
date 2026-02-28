@@ -256,6 +256,12 @@ mod tests {
     }
 
     #[test]
+    fn validate_resolved_specs_rejects_empty_app_list() {
+        let error = validate_resolved_specs(&[]).expect_err("validation should fail");
+        assert_eq!(error.to_string(), "empty app list");
+    }
+
+    #[test]
     fn validate_resolved_specs_rejects_invalid_health_command_syntax() {
         let mut spec = fixture_spec("api", "node server.js", vec![], 1);
         spec.health_check = Some(HealthCheck {
@@ -289,6 +295,36 @@ mod tests {
     }
 
     #[test]
+    fn validate_resolved_specs_rejects_cluster_mode_without_script_argument() {
+        let mut spec = fixture_spec("api", "node", vec![], 1);
+        spec.cluster_mode = true;
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("cluster_mode but command has no script argument"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_cluster_mode_with_node_flags_before_script() {
+        let mut spec = fixture_spec("api", "node --require ts-node/register server.js", vec![], 1);
+        spec.cluster_mode = true;
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported Node flags before script path"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
     fn validate_resolved_specs_rejects_cluster_instances_without_cluster_mode() {
         let mut spec = fixture_spec("api", "node app.js", vec![], 1);
         spec.cluster_instances = Some(2);
@@ -301,6 +337,17 @@ mod tests {
             "unexpected error: {}",
             error
         );
+    }
+
+    #[test]
+    fn validate_resolved_specs_accepts_absolute_node_binary_in_cluster_mode() {
+        let mut spec = fixture_spec("api", "/usr/local/bin/node server.js", vec![], 1);
+        spec.cluster_mode = true;
+        spec.cluster_instances = Some(2);
+
+        let report = validate_resolved_specs(&[spec]).expect("validation should pass");
+        assert_eq!(report.app_count, 1);
+        assert_eq!(report.expanded_process_count, 1);
     }
 
     #[test]

@@ -156,6 +156,11 @@ fn escape_toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn output_contains(output: &Output, needle: &str) -> bool {
+    String::from_utf8_lossy(&output.stdout).contains(needle)
+        || String::from_utf8_lossy(&output.stderr).contains(needle)
+}
+
 #[cfg(windows)]
 fn sleep_command(seconds: u64) -> String {
     format!("powershell -NoProfile -Command \"Start-Sleep -Seconds {seconds}\"")
@@ -176,6 +181,30 @@ fn echo_and_sleep_command(marker: &str, seconds: u64) -> String {
 #[cfg(not(windows))]
 fn echo_and_sleep_command(marker: &str, seconds: u64) -> String {
     format!("sh -c 'echo {marker}; sleep {seconds}'")
+}
+
+#[cfg(windows)]
+fn echo_two_lines_and_sleep_command(first: &str, second: &str, seconds: u64) -> String {
+    format!(
+        "powershell -NoProfile -Command \"Write-Output {first}; Write-Output {second}; Start-Sleep -Seconds {seconds}\""
+    )
+}
+
+#[cfg(not(windows))]
+fn echo_two_lines_and_sleep_command(first: &str, second: &str, seconds: u64) -> String {
+    format!("sh -c 'printf \"%s\\n%s\\n\" \"{first}\" \"{second}\"; sleep {seconds}'")
+}
+
+#[cfg(windows)]
+fn print_pwd_and_env_then_sleep_command(env_key: &str, seconds: u64) -> String {
+    format!(
+        "powershell -NoProfile -Command \"$cwd = (Get-Location).Path; $value = [Environment]::GetEnvironmentVariable('{env_key}'); Write-Output \\\"$cwd|$value\\\"; Start-Sleep -Seconds {seconds}\""
+    )
+}
+
+#[cfg(not(windows))]
+fn print_pwd_and_env_then_sleep_command(env_key: &str, seconds: u64) -> String {
+    format!("sh -c 'printf \"%s|%s\\n\" \"$PWD\" \"${{{env_key}}}\"; sleep {seconds}'")
 }
 
 fn parse_pid_from_status(output: &str) -> Option<u32> {
@@ -517,4 +546,819 @@ fn e2e_logs_show_stdout_content() {
     assert!(found, "expected marker to be present in logs output");
 
     let _ = env.run(&["delete", "logs-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_apply_prune_removes_unmanaged_process() {
+    if !should_run_e2e("e2e_apply_prune_removes_unmanaged_process") {
+        return;
+    }
+
+    let env = TestEnv::new("apply-prune");
+
+    let start_orphan = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(25),
+        "--name".to_string(),
+        "orphan-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start_orphan.status.success(),
+        "failed to start orphan app: {}",
+        String::from_utf8_lossy(&start_orphan.stderr)
+    );
+    wait_for_pid(&env, "orphan-app", Duration::from_secs(8))
+        .expect("expected orphan app pid after startup");
+
+    let oxfile = format!(
+        r#"version = 1
+
+[[apps]]
+name = "managed-app"
+command = "{command}"
+restart_policy = "never"
+max_restarts = 0
+stop_timeout_secs = 1
+"#,
+        command = escape_toml_string(&sleep_command(25))
+    );
+    let oxfile_path = env.write_file("fixtures/oxfile.prune.toml", &oxfile);
+
+    let apply = env.run_vec(vec![
+        "apply".to_string(),
+        path_string(&oxfile_path),
+        "--prune".to_string(),
+    ]);
+    assert!(
+        apply.status.success(),
+        "apply --prune failed: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply_stdout = String::from_utf8_lossy(&apply.stdout);
+    assert!(
+        apply_stdout.contains("Apply complete:")
+            && apply_stdout.contains("1 created")
+            && apply_stdout.contains("1 pruned"),
+        "unexpected apply --prune output: {apply_stdout}"
+    );
+
+    wait_for_pid(&env, "managed-app", Duration::from_secs(8))
+        .expect("expected managed app pid after apply");
+
+    let orphan_removed = wait_until(Duration::from_secs(8), || {
+        let status = env.run(&["status", "orphan-app"]);
+        !status.status.success()
+    });
+    assert!(orphan_removed, "expected orphan-app to be pruned");
+
+    let list = env.run(&["list"]);
+    assert!(
+        list.status.success(),
+        "list failed after apply --prune: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("managed-app") && !list_stdout.contains("orphan-app"),
+        "unexpected list output after prune: {list_stdout}"
+    );
+
+    let _ = env.run(&["delete", "managed-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_export_import_bundle_roundtrip() {
+    if !should_run_e2e("e2e_export_import_bundle_roundtrip") {
+        return;
+    }
+
+    let env = TestEnv::new("bundle-roundtrip");
+
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(25),
+        "--name".to_string(),
+        "bundle-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+        "--namespace".to_string(),
+        "bundle-ns".to_string(),
+        "--max-memory-mb".to_string(),
+        "64".to_string(),
+        "--max-cpu-percent".to_string(),
+        "25".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "bundle-app", Duration::from_secs(8))
+        .expect("expected bundle-app pid after startup");
+
+    let bundle_path = env.home.join("exports/bundle-app.oxpkg");
+    let export = env.run_vec(vec![
+        "export".to_string(),
+        "bundle-app".to_string(),
+        "--out".to_string(),
+        path_string(&bundle_path),
+    ]);
+    assert!(
+        export.status.success(),
+        "export failed: {}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let export_stdout = String::from_utf8_lossy(&export.stdout);
+    assert!(
+        export_stdout.contains("Exported service bundle:")
+            && export_stdout.contains(&path_string(&bundle_path)),
+        "unexpected export output: {export_stdout}"
+    );
+    let bundle_bytes = fs::read(&bundle_path).expect("expected exported bundle to exist");
+    assert!(
+        !bundle_bytes.is_empty(),
+        "expected exported bundle to contain data"
+    );
+
+    let delete_original = env.run(&["delete", "bundle-app"]);
+    assert!(
+        delete_original.status.success(),
+        "failed to delete original bundle-app: {}",
+        String::from_utf8_lossy(&delete_original.stderr)
+    );
+
+    let import = env.run_vec(vec!["import".to_string(), path_string(&bundle_path)]);
+    assert!(
+        import.status.success(),
+        "import failed: {}",
+        String::from_utf8_lossy(&import.stderr)
+    );
+    let import_stdout = String::from_utf8_lossy(&import.stdout);
+    assert!(
+        import_stdout.contains("Imported: 1 started, 0 failed"),
+        "unexpected import output: {import_stdout}"
+    );
+    wait_for_pid(&env, "bundle-app", Duration::from_secs(8))
+        .expect("expected bundle-app pid after import");
+
+    let status = env.run(&["status", "bundle-app"]);
+    assert!(
+        status.status.success(),
+        "status failed after import: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("bundle-ns")
+            && status_stdout.contains("memory=64 MB")
+            && status_stdout.contains("cpu=25.0%")
+            && status_stdout.contains("Policy:      never"),
+        "unexpected imported status output:\n{status_stdout}"
+    );
+
+    let _ = env.run(&["delete", "bundle-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_start_applies_cwd_env_namespace_and_limits() {
+    if !should_run_e2e("e2e_start_applies_cwd_env_namespace_and_limits") {
+        return;
+    }
+
+    let env = TestEnv::new("start-options");
+    let working_dir = env.home.join("workspace/service-a");
+    fs::create_dir_all(&working_dir).expect("failed to create working directory fixture");
+
+    let env_key = "OXMGR_E2E_MARKER";
+    let env_value = "cwd-env-check";
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        print_pwd_and_env_then_sleep_command(env_key, 20),
+        "--name".to_string(),
+        "options-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+        "--cwd".to_string(),
+        path_string(&working_dir),
+        "--env".to_string(),
+        format!("{env_key}={env_value}"),
+        "--namespace".to_string(),
+        "ops".to_string(),
+        "--max-memory-mb".to_string(),
+        "96".to_string(),
+        "--max-cpu-percent".to_string(),
+        "12.5".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start with options failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "options-app", Duration::from_secs(8))
+        .expect("expected options-app pid after startup");
+
+    let status = env.run(&["status", "options-app"]);
+    assert!(
+        status.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("Namespace:") && status_stdout.contains("ops"),
+        "namespace missing from status output:\n{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("Working Dir:")
+            && status_stdout.contains(&path_string(&working_dir)),
+        "working dir missing from status output:\n{status_stdout}"
+    );
+    assert!(
+        status_stdout.contains("Limits:")
+            && status_stdout.contains("memory=96 MB")
+            && status_stdout.contains("cpu=12.5%"),
+        "limits missing from status output:\n{status_stdout}"
+    );
+
+    let expected_log_line = format!("{}|{}", working_dir.display(), env_value);
+    let found_log_line = wait_until(Duration::from_secs(8), || {
+        let logs = env.run(&["logs", "options-app", "--lines", "50"]);
+        if !logs.status.success() {
+            return false;
+        }
+        let stdout = String::from_utf8_lossy(&logs.stdout);
+        stdout.contains(&expected_log_line)
+    });
+    assert!(
+        found_log_line,
+        "expected cwd/env marker in logs: {expected_log_line}"
+    );
+
+    let _ = env.run(&["delete", "options-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_validate_profile_and_only_reports_expanded_processes() {
+    if !should_run_e2e("e2e_validate_profile_and_only_reports_expanded_processes") {
+        return;
+    }
+
+    let env = TestEnv::new("validate-profile-only");
+    let oxfile = format!(
+        "{}/docs/examples/oxfile.profiles.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+
+    let output = env.run(&["validate", &oxfile, "--env", "prod", "--only", "api"]);
+    assert!(
+        output.status.success(),
+        "validate with profile/only failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Oxfile validation: OK")
+            && stdout.contains("Profile: prod")
+            && stdout.contains("Apps: 1")
+            && stdout.contains("Expanded Processes: 4"),
+        "unexpected validate profile/only output:\n{stdout}"
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_validate_rejects_only_filter_without_matches() {
+    if !should_run_e2e("e2e_validate_rejects_only_filter_without_matches") {
+        return;
+    }
+
+    let env = TestEnv::new("validate-only-miss");
+    let oxfile = format!(
+        "{}/docs/examples/oxfile.profiles.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+
+    let output = env.run(&["validate", &oxfile, "--only", "missing-app"]);
+    assert!(
+        !output.status.success(),
+        "validate unexpectedly succeeded for missing --only match"
+    );
+    assert!(
+        output_contains(&output, "no apps matched --only filter (missing-app)"),
+        "unexpected validate --only failure\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_validate_rejects_invalid_cluster_command() {
+    if !should_run_e2e("e2e_validate_rejects_invalid_cluster_command") {
+        return;
+    }
+
+    let env = TestEnv::new("validate-bad-cluster");
+    let oxfile = env.write_file(
+        "fixtures/oxfile.bad-cluster.toml",
+        r#"version = 1
+
+[[apps]]
+name = "bad-cluster"
+command = "python worker.py"
+cluster_mode = true
+cluster_instances = 2
+"#,
+    );
+
+    let output = env.run_vec(vec!["validate".to_string(), path_string(&oxfile)]);
+    assert!(
+        !output.status.success(),
+        "validate unexpectedly succeeded for invalid cluster command"
+    );
+    assert!(
+        output_contains(&output, "cluster_mode but command is not Node.js"),
+        "unexpected invalid cluster validation output\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_import_oxfile_profile_and_only_expands_instances() {
+    if !should_run_e2e("e2e_import_oxfile_profile_and_only_expands_instances") {
+        return;
+    }
+
+    let env = TestEnv::new("import-profile-only");
+    let sleep = escape_toml_string(&sleep_command(25));
+    let oxfile = format!(
+        r#"version = 1
+
+[[apps]]
+name = "api"
+command = "{sleep}"
+restart_policy = "never"
+max_restarts = 0
+stop_timeout_secs = 1
+
+[apps.profiles.prod]
+instances = 2
+namespace = "blue"
+
+[apps.profiles.prod.env]
+MODE = "prod"
+
+[[apps]]
+name = "worker"
+command = "{sleep}"
+restart_policy = "never"
+max_restarts = 0
+stop_timeout_secs = 1
+
+[apps.profiles.prod]
+disabled = true
+"#
+    );
+    let oxfile_path = env.write_file("fixtures/oxfile.import-profile.toml", &oxfile);
+
+    let import = env.run_vec(vec![
+        "import".to_string(),
+        path_string(&oxfile_path),
+        "--env".to_string(),
+        "prod".to_string(),
+        "--only".to_string(),
+        "api-0,api-1".to_string(),
+    ]);
+    assert!(
+        import.status.success(),
+        "import failed: {}",
+        String::from_utf8_lossy(&import.stderr)
+    );
+    let import_stdout = String::from_utf8_lossy(&import.stdout);
+    assert!(
+        import_stdout.contains("Imported: 2 started, 0 failed"),
+        "unexpected import output:\n{import_stdout}"
+    );
+
+    for target in ["api-0", "api-1"] {
+        wait_for_pid(&env, target, Duration::from_secs(8))
+            .unwrap_or_else(|| panic!("expected {target} pid after import"));
+    }
+
+    let list = env.run(&["list"]);
+    assert!(
+        list.status.success(),
+        "list failed after import: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("api-0")
+            && list_stdout.contains("api-1")
+            && !list_stdout.contains("worker"),
+        "unexpected import list output:\n{list_stdout}"
+    );
+
+    let status = env.run(&["status", "api-0"]);
+    assert!(
+        status.status.success(),
+        "status failed for imported api-0: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("Namespace:") && status_stdout.contains("blue"),
+        "expected namespace from profile in imported process status:\n{status_stdout}"
+    );
+
+    for target in ["api-0", "api-1"] {
+        let _ = env.run(&["delete", target]);
+    }
+}
+
+#[test]
+#[serial]
+fn e2e_export_rejects_existing_output_file() {
+    if !should_run_e2e("e2e_export_rejects_existing_output_file") {
+        return;
+    }
+
+    let env = TestEnv::new("export-existing-file");
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(25),
+        "--name".to_string(),
+        "export-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "export-app", Duration::from_secs(8))
+        .expect("expected export-app pid after startup");
+
+    let bundle_path = env.write_file("exports/existing.oxpkg", "already here");
+    let export = env.run_vec(vec![
+        "export".to_string(),
+        "export-app".to_string(),
+        "--out".to_string(),
+        path_string(&bundle_path),
+    ]);
+    assert!(
+        !export.status.success(),
+        "export unexpectedly succeeded despite existing output file"
+    );
+    assert!(
+        output_contains(&export, "failed to create bundle file"),
+        "unexpected export failure output\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&export.stdout),
+        String::from_utf8_lossy(&export.stderr)
+    );
+
+    let _ = env.run(&["delete", "export-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_doctor_reports_running_daemon_and_processes() {
+    if !should_run_e2e("e2e_doctor_reports_running_daemon_and_processes") {
+        return;
+    }
+
+    let env = TestEnv::new("doctor");
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(20),
+        "--name".to_string(),
+        "doctor-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "doctor-app", Duration::from_secs(8))
+        .expect("expected doctor-app pid after startup");
+
+    let doctor = env.run(&["doctor"]);
+    assert!(
+        doctor.status.success(),
+        "doctor failed: {}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&doctor.stdout);
+    assert!(
+        stdout.contains("Oxmgr doctor")
+            && stdout.contains("[OK] daemon_ping")
+            && stdout.contains("[OK] daemon_list")
+            && stdout.contains("1 managed process(es)"),
+        "unexpected doctor output:\n{stdout}"
+    );
+
+    let _ = env.run(&["delete", "doctor-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_start_rejects_cluster_instances_without_cluster() {
+    if !should_run_e2e("e2e_start_rejects_cluster_instances_without_cluster") {
+        return;
+    }
+
+    let env = TestEnv::new("start-bad-cluster");
+    let output = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(10),
+        "--name".to_string(),
+        "bad-cluster".to_string(),
+        "--cluster-instances".to_string(),
+        "2".to_string(),
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "start unexpectedly succeeded without --cluster"
+    );
+    assert!(
+        output_contains(&output, "--cluster-instances requires --cluster"),
+        "unexpected cluster validation output\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_list_empty_prints_no_managed_processes() {
+    if !should_run_e2e("e2e_list_empty_prints_no_managed_processes") {
+        return;
+    }
+
+    let env = TestEnv::new("list-empty");
+    let list = env.run(&["list"]);
+    assert!(
+        list.status.success(),
+        "list failed on empty env: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("No managed processes."),
+        "unexpected empty list output:\n{stdout}"
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_stop_clears_pid_and_marks_process_stopped() {
+    if !should_run_e2e("e2e_stop_clears_pid_and_marks_process_stopped") {
+        return;
+    }
+
+    let env = TestEnv::new("stop-status");
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(25),
+        "--name".to_string(),
+        "stop-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "stop-app", Duration::from_secs(8))
+        .expect("expected stop-app pid after startup");
+
+    let stop = env.run(&["stop", "stop-app"]);
+    assert!(
+        stop.status.success(),
+        "stop failed: {}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert!(
+        output_contains(&stop, "stopped stop-app"),
+        "unexpected stop output\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
+
+    let status = env.run(&["status", "stop-app"]);
+    assert!(
+        status.status.success(),
+        "status failed after stop: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        stdout.contains("Status:      stopped") && stdout.contains("PID:         -"),
+        "unexpected stopped status output:\n{stdout}"
+    );
+
+    let list = env.run(&["list"]);
+    assert!(
+        list.status.success(),
+        "list failed after stop: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("stop-app") && list_stdout.contains("stopped"),
+        "unexpected list output after stop:\n{list_stdout}"
+    );
+
+    let _ = env.run(&["delete", "stop-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_doctor_warns_when_daemon_not_running() {
+    if !should_run_e2e("e2e_doctor_warns_when_daemon_not_running") {
+        return;
+    }
+
+    let env = TestEnv::new("doctor-no-daemon");
+    let doctor = env.run(&["doctor"]);
+    assert!(
+        doctor.status.success(),
+        "doctor failed unexpectedly: {}",
+        String::from_utf8_lossy(&doctor.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&doctor.stdout);
+    assert!(
+        stdout.contains("Oxmgr doctor")
+            && stdout.contains("[WARN] daemon_ping")
+            && stdout.contains("daemon not reachable")
+            && stdout.contains("Summary:")
+            && stdout.contains("warning(s), 0 failure(s)"),
+        "unexpected doctor no-daemon output:\n{stdout}"
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_daemon_stop_reports_not_running_when_idle() {
+    if !should_run_e2e("e2e_daemon_stop_reports_not_running_when_idle") {
+        return;
+    }
+
+    let env = TestEnv::new("daemon-stop-idle");
+    let output = env.run(&["daemon", "stop"]);
+    assert!(
+        output.status.success(),
+        "daemon stop should succeed when idle: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Daemon is not running."),
+        "unexpected daemon stop output:\n{stdout}"
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_apply_profile_with_all_apps_disabled_reports_no_apps() {
+    if !should_run_e2e("e2e_apply_profile_with_all_apps_disabled_reports_no_apps") {
+        return;
+    }
+
+    let env = TestEnv::new("apply-no-apps");
+    let oxfile = env.write_file(
+        "fixtures/oxfile.no-apps.toml",
+        &format!(
+            r#"version = 1
+
+[[apps]]
+name = "disabled-app"
+command = "{command}"
+restart_policy = "never"
+max_restarts = 0
+stop_timeout_secs = 1
+
+[apps.profiles.prod]
+disabled = true
+"#,
+            command = escape_toml_string(&sleep_command(10))
+        ),
+    );
+
+    let apply = env.run_vec(vec![
+        "apply".to_string(),
+        path_string(&oxfile),
+        "--env".to_string(),
+        "prod".to_string(),
+    ]);
+    assert!(
+        apply.status.success(),
+        "apply should succeed when profile disables all apps: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&apply.stdout);
+    assert!(
+        stdout.contains("No apps found in"),
+        "unexpected apply no-apps output:\n{stdout}"
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_logs_lines_returns_only_tail() {
+    if !should_run_e2e("e2e_logs_lines_returns_only_tail") {
+        return;
+    }
+
+    let env = TestEnv::new("logs-tail");
+    let first = "OXMGR_E2E_FIRST";
+    let second = "OXMGR_E2E_SECOND";
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        echo_two_lines_and_sleep_command(first, second, 15),
+        "--name".to_string(),
+        "tail-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+
+    let found = wait_until(Duration::from_secs(8), || {
+        let logs = env.run(&["logs", "tail-app", "--lines", "1"]);
+        if !logs.status.success() {
+            return false;
+        }
+        let stdout = String::from_utf8_lossy(&logs.stdout);
+        stdout.contains(second) && !stdout.contains(first)
+    });
+    assert!(found, "expected logs --lines 1 to show only the tail line");
+
+    let _ = env.run(&["delete", "tail-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_missing_target_commands_report_process_not_found() {
+    if !should_run_e2e("e2e_missing_target_commands_report_process_not_found") {
+        return;
+    }
+
+    let env = TestEnv::new("missing-targets");
+    let commands = [
+        vec!["status".to_string(), "missing-app".to_string()],
+        vec!["logs".to_string(), "missing-app".to_string()],
+        vec!["stop".to_string(), "missing-app".to_string()],
+        vec!["restart".to_string(), "missing-app".to_string()],
+        vec!["reload".to_string(), "missing-app".to_string()],
+        vec!["delete".to_string(), "missing-app".to_string()],
+        vec!["export".to_string(), "missing-app".to_string()],
+    ];
+
+    for args in commands {
+        let output = env.run_vec(args.clone());
+        assert!(
+            !output.status.success(),
+            "command unexpectedly succeeded for missing target: {:?}",
+            args
+        );
+        assert!(
+            output_contains(&output, "process not found: missing-app"),
+            "unexpected missing-target output for {:?}\nstdout:\n{}\nstderr:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

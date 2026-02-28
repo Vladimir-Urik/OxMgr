@@ -166,6 +166,18 @@ mod tests {
     }
 
     #[test]
+    fn env_u64_parses_trimmed_numeric_values() {
+        let _guard = env_lock().lock().expect("failed to acquire env lock");
+        let old = std::env::var("OXMGR_TEST_ENV_U64").ok();
+        std::env::set_var("OXMGR_TEST_ENV_U64", " 17 ");
+
+        let parsed = env_u64("OXMGR_TEST_ENV_U64", 42);
+        assert_eq!(parsed, 17);
+
+        restore_env("OXMGR_TEST_ENV_U64", old);
+    }
+
+    #[test]
     fn app_config_load_uses_env_and_creates_layout() {
         let _guard = env_lock().lock().expect("failed to acquire env lock");
         let base = temp_dir("config-load");
@@ -211,6 +223,29 @@ mod tests {
         restore_env("OXMGR_LOG_MAX_SIZE_MB", old_size);
         restore_env("OXMGR_LOG_MAX_FILES", old_files);
         restore_env("OXMGR_LOG_MAX_DAYS", old_days);
+    }
+
+    #[test]
+    fn app_config_load_honors_explicit_addresses() {
+        let _guard = env_lock().lock().expect("failed to acquire env lock");
+        let base = temp_dir("config-explicit-addrs");
+
+        let old_home = std::env::var("OXMGR_HOME").ok();
+        let old_addr = std::env::var("OXMGR_DAEMON_ADDR").ok();
+        let old_api_addr = std::env::var("OXMGR_API_ADDR").ok();
+
+        std::env::set_var("OXMGR_HOME", &base);
+        std::env::set_var("OXMGR_DAEMON_ADDR", "127.0.0.1:40123");
+        std::env::set_var("OXMGR_API_ADDR", "127.0.0.1:41123");
+
+        let config = AppConfig::load().expect("expected config load to succeed");
+        assert_eq!(config.daemon_addr, "127.0.0.1:40123");
+        assert_eq!(config.api_addr, "127.0.0.1:41123");
+
+        let _ = fs::remove_dir_all(&base);
+        restore_env("OXMGR_HOME", old_home);
+        restore_env("OXMGR_DAEMON_ADDR", old_addr);
+        restore_env("OXMGR_API_ADDR", old_api_addr);
     }
 
     #[test]

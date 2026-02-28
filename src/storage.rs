@@ -156,9 +156,33 @@ fn set_private_file_permissions(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{load_state, save_state, PersistedState};
+
+    #[test]
+    fn load_state_returns_default_when_file_is_missing() {
+        let path = temp_state_file("missing");
+
+        let loaded = load_state(&path).expect("missing state file should use defaults");
+
+        assert_eq!(loaded.next_id, 1);
+        assert!(loaded.processes.is_empty());
+    }
+
+    #[test]
+    fn load_state_returns_default_when_file_is_empty() {
+        let path = temp_state_file("empty");
+        fs::write(&path, "").expect("failed to write empty state file");
+
+        let loaded = load_state(&path).expect("empty state file should use defaults");
+
+        assert_eq!(loaded.next_id, 1);
+        assert!(loaded.processes.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
 
     #[test]
     fn save_and_load_roundtrip() {
@@ -197,6 +221,52 @@ mod tests {
         assert!(loaded.processes.is_empty());
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_state_creates_parent_directories() {
+        let base = temp_dir("save-parent");
+        let path = base.join("nested").join("state.json");
+        let state = PersistedState::default();
+
+        save_state(&path, &state).expect("save_state should create missing parent directories");
+
+        assert!(path.exists(), "state file should be created");
+        assert!(
+            path.parent().is_some_and(|parent| parent.exists()),
+            "parent directory should be created"
+        );
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_state_sets_private_permissions_on_created_paths() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = temp_dir("save-perms");
+        let dir = base.join("state-dir");
+        let path = dir.join("state.json");
+        let state = PersistedState::default();
+
+        save_state(&path, &state).expect("save_state should write private state file");
+
+        let dir_mode = fs::metadata(&dir)
+            .expect("failed to stat parent dir")
+            .permissions()
+            .mode()
+            & 0o777;
+        let file_mode = fs::metadata(&path)
+            .expect("failed to stat state file")
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(dir_mode, 0o700);
+        assert_eq!(file_mode, 0o600);
+
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]
@@ -252,5 +322,13 @@ mod tests {
             .expect("clock failure")
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{nonce}.state.json"))
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        std::env::temp_dir().join(format!("oxmgr-storage-{prefix}-{nonce}"))
     }
 }

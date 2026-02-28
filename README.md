@@ -746,20 +746,7 @@ src/
 
 ## Contributing
 
-1. Fork and create branch (`codex/<feature-name>`)
-2. Add/update tests for behavior changes
-3. Run:
-
-```bash
-cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-```
-
-4. Open PR with:
-- problem statement
-- design summary
-- migration/backward compatibility notes
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, local checks, E2E test instructions, documentation expectations, and PR guidelines.
 
 ## License
 

@@ -207,3 +207,161 @@ fn sanitize_cgroup_name(name: &str) -> String {
         sanitized
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[cfg(target_os = "linux")]
+    use super::{ensure_controller_enabled, sanitize_cgroup_name};
+    #[cfg(not(target_os = "linux"))]
+    use super::{apply_limits, cleanup};
+    #[cfg(not(target_os = "linux"))]
+    use crate::process::ResourceLimits;
+
+    #[cfg(target_os = "linux")]
+    use std::fs;
+    #[cfg(target_os = "linux")]
+    use std::path::{Path, PathBuf};
+    #[cfg(target_os = "linux")]
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(target_os = "linux")]
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "oxmgr-cgroup-{label}-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("failed to create temporary test directory");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sanitize_cgroup_name_replaces_invalid_characters_and_defaults_empty() {
+        assert_eq!(sanitize_cgroup_name("api/service #1"), "api_service__1");
+        assert_eq!(sanitize_cgroup_name(""), "process");
+        assert_eq!(sanitize_cgroup_name("worker-1.prod"), "worker-1.prod");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ensure_controller_enabled_writes_subtree_when_controller_is_available() {
+        let temp = TempDir::new("enable-controller");
+        fs::write(temp.path().join("cgroup.controllers"), "cpu memory\n")
+            .expect("failed to write controllers file");
+        fs::write(temp.path().join("cgroup.subtree_control"), "memory\n")
+            .expect("failed to write subtree control file");
+
+        ensure_controller_enabled(temp.path(), "cpu")
+            .expect("expected cpu controller to be enabled");
+
+        assert_eq!(
+            fs::read_to_string(temp.path().join("cgroup.subtree_control"))
+                .expect("failed to read subtree control"),
+            "+cpu\n"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ensure_controller_enabled_is_noop_when_controller_already_enabled() {
+        let temp = TempDir::new("controller-noop");
+        fs::write(temp.path().join("cgroup.controllers"), "cpu memory\n")
+            .expect("failed to write controllers file");
+        fs::write(temp.path().join("cgroup.subtree_control"), "cpu memory\n")
+            .expect("failed to write subtree control file");
+
+        ensure_controller_enabled(temp.path(), "cpu")
+            .expect("expected already-enabled controller to succeed");
+
+        assert_eq!(
+            fs::read_to_string(temp.path().join("cgroup.subtree_control"))
+                .expect("failed to read subtree control"),
+            "cpu memory\n"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ensure_controller_enabled_rejects_unavailable_controller() {
+        let temp = TempDir::new("missing-controller");
+        fs::write(temp.path().join("cgroup.controllers"), "memory io\n")
+            .expect("failed to write controllers file");
+        fs::write(temp.path().join("cgroup.subtree_control"), "")
+            .expect("failed to write subtree control file");
+
+        let err = ensure_controller_enabled(temp.path(), "cpu")
+            .expect_err("expected unavailable controller to fail");
+
+        assert!(
+            err.to_string()
+                .contains("cgroup controller 'cpu' is not available"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn apply_limits_returns_none_without_enforcement() {
+        let result = apply_limits(
+            "api",
+            7,
+            1234,
+            &ResourceLimits {
+                max_memory_mb: Some(256),
+                max_cpu_percent: Some(50.0),
+                cgroup_enforce: false,
+                deny_gpu: false,
+            },
+        )
+        .expect("expected limits to be ignored off Linux");
+
+        assert!(result.is_none());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn apply_limits_rejects_enforcement_on_non_linux() {
+        let err = apply_limits(
+            "api",
+            7,
+            1234,
+            &ResourceLimits {
+                max_memory_mb: None,
+                max_cpu_percent: None,
+                cgroup_enforce: true,
+                deny_gpu: false,
+            },
+        )
+        .expect_err("expected cgroup enforcement to be unsupported");
+
+        assert_eq!(err.to_string(), "cgroup enforcement is only supported on Linux");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn cleanup_is_a_noop_on_non_linux() {
+        cleanup("/tmp/not-a-real-cgroup").expect("cleanup should be a no-op off Linux");
+    }
+}

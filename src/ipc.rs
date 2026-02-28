@@ -104,7 +104,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::{duplex, AsyncWriteExt};
+    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     use super::{read_json_line, send_request, write_json_line, IpcRequest, IpcResponse};
@@ -144,6 +144,24 @@ mod tests {
             IpcRequest::Status { target } => assert_eq!(target, "api"),
             other => panic!("unexpected request variant decoded: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn write_json_line_appends_newline_delimiter() {
+        let (mut writer, mut reader) = duplex(1024);
+
+        write_json_line(&mut writer, &IpcRequest::Ping)
+            .await
+            .expect("failed writing request payload");
+        drop(writer);
+
+        let mut payload = Vec::new();
+        reader
+            .read_to_end(&mut payload)
+            .await
+            .expect("failed reading raw payload");
+
+        assert_eq!(payload, br#"{"type":"ping"}"#.iter().chain(b"\n").copied().collect::<Vec<_>>());
     }
 
     #[tokio::test]
@@ -208,5 +226,26 @@ mod tests {
         assert_eq!(response.message, "pong");
 
         server.await.expect("server task failed");
+    }
+
+    #[tokio::test]
+    async fn send_request_reports_connection_failure() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind local listener");
+        let addr = listener
+            .local_addr()
+            .expect("failed to resolve listener addr");
+        drop(listener);
+
+        let err = send_request(&addr.to_string(), &IpcRequest::Ping)
+            .await
+            .expect_err("expected request to fail without listener");
+
+        assert!(
+            err.to_string()
+                .contains("failed to connect to daemon at"),
+            "unexpected error: {err}"
+        );
     }
 }
