@@ -10,6 +10,7 @@ Project docs live here.
 - [Terminal UI Guide](./UI.md)
 - [Pull and Webhook Guide](./PULL_WEBHOOK.md)
 - [Deployment Guide](./DEPLOY.md)
+- [Download Metrics](./DOWNLOAD_METRICS.md)
 - [Service Bundles](./BUNDLES.md)
 - [Oxfile Documentation](./OXFILE.md)
 - [Why Oxfile vs PM2 Ecosystem](./OXFILE_VS_PM2.md)

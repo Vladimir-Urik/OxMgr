@@ -73,3 +73,11 @@ When `APT_GPG_*` secrets are set, workflow also publishes:
 
 - npm installer verifies downloaded artifact checksum (`.sha256`) before extraction.
 - If APT signing secrets are configured, metadata is signed and you can avoid `trusted=yes`.
+
+## Download metrics dashboard
+
+Distribution metrics are published by [`.github/workflows/download-metrics.yml`](../.github/workflows/download-metrics.yml).
+
+- Live dashboard: https://vladimir-urik.github.io/OxMgr/downloads/
+- Publish target: `gh-pages/downloads`
+- Refresh cadence: daily schedule or manual workflow dispatch

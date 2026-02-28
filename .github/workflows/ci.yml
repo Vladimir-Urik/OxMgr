@@ -27,6 +27,10 @@ jobs:
       - name: Cargo check
         run: cargo check --all-targets
 
+      - name: Validate download metrics script
+        if: runner.os == 'Linux'
+        run: python3 -m py_compile scripts/generate_download_metrics.py
+
       - name: Cargo test
         run: cargo test --all-targets
 

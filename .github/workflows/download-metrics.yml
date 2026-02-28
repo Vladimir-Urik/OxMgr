@@ -1,0 +1,44 @@
+name: Download Metrics
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: download-metrics
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish download dashboard
+    runs-on: ubuntu-latest
+    if: github.repository == 'Vladimir-Urik/OxMgr'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate dashboard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/generate_download_metrics.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --brew-formula "oxmgr" \
+            --choco-package "oxmgr" \
+            --pages-base-url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}" \
+            --output-dir "site/downloads"
+
+      - name: Publish to gh-pages/downloads
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site/downloads
+          destination_dir: downloads
+          keep_files: true

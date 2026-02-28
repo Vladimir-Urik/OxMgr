@@ -1,77 +1,40 @@
 # Oxmgr
 
-**Oxmgr** is a lightweight, language-agnostic process manager written in Rust.
+[![CI](https://github.com/Vladimir-Urik/OxMgr/actions/workflows/ci.yml/badge.svg)](https://github.com/Vladimir-Urik/OxMgr/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](./LICENSE)
 
-It is a modern, production-minded alternative to PM2 for any executable (Node.js, Python, Go, Rust, shell commands, and more).
+Oxmgr is a lightweight, cross-platform Rust process manager and PM2 alternative.
 
-It can be used as a drop-in replacement for many PM2 setups because Oxmgr supports PM2 ecosystem config format (`ecosystem.config.json`).
+Use it to run, supervise, reload, and monitor long-running services on Linux, macOS, and Windows. Oxmgr is language-agnostic, so it works with Node.js, Python, Go, Rust binaries, and shell commands.
 
-Supported platforms: **Linux, macOS, Windows**.
+## Why Oxmgr
 
-## Documentation
+- Language-agnostic: manage any executable, not just Node.js apps
+- Cross-platform: Linux, macOS, and Windows
+- Low overhead: Rust daemon with persistent local state
+- Practical operations: restart policies, health checks, logs, and CPU/RAM metrics
+- Config-first workflows with idempotent `oxmgr apply`
+- PM2 ecosystem compatibility via `ecosystem.config.json`
+- Interactive terminal UI for day-to-day operations
 
-- [Docs Index](./docs/README.md)
-- [User Guide](./docs/USAGE.md)
-- [Installation Guide](./docs/install.md)
-- [CLI Reference](./docs/CLI.md)
-- [Terminal UI Guide](./docs/UI.md)
-- [Pull and Webhook Guide](./docs/PULL_WEBHOOK.md)
-- [Deployment Guide](./docs/DEPLOY.md)
-- [Service Bundles](./docs/BUNDLES.md)
-- [Oxfile Specification](./docs/OXFILE.md)
-- [Oxfile vs PM2 Ecosystem](./docs/OXFILE_VS_PM2.md)
-- [Oxfile Examples](./docs/examples)
+## Core Features
 
-## Why Oxmgr Instead Of PM2?
-
-- Language-agnostic by design
-- Rust performance and low overhead
-- Durable daemon model with persistent state
-- Explicit restart policies + health checks
-- Idempotent config apply (`oxmgr apply`)
-- Built-in per-process logs and runtime metrics
-- Drop-in migration path via PM2 ecosystem config compatibility
-
-## Features
-
-- Start/stop/restart/reload/delete managed processes
-- Named processes (`--name`) with safe auto-generated names
-- Restart policies: `always`, `on-failure`, `never`
-- Configurable max restart count (`--max-restarts`)
-- Crash-loop cutoff: stop after `3` auto restarts in `5` minutes by default (`--crash-restart-limit`)
-- Optional file watching restart loop (`--watch`)
-- Background daemon with local IPC over localhost TCP
-- CLI auto-starts daemon when needed
-- Persistent state in JSON (`state.json`)
-- Per-process stdout/stderr logs + tail mode
-- Interactive terminal UI (`oxmgr ui`) with keyboard + mouse controls, ESC menu, and help overlay
-- Automatic log rotation and retention policy
-- Process statuses: `running`, `stopped`, `crashed`, `restarting`, `errored`
-- Graceful shutdown (SIGTERM, then SIGKILL on timeout)
-- Process-tree aware shutdown (Unix process groups / Windows taskkill tree)
-- Node.js cluster mode (`--cluster`, `--cluster-instances`) for network server fan-out
+- Start, stop, restart, reload, and delete managed processes
+- Named services and namespaces
+- Restart policies: `always`, `on-failure`, and `never`
 - Health checks with automatic restart on repeated failures
-- CPU/RAM monitoring in `list` and `status`
-- Resource limits (`max_memory_mb`, `max_cpu_percent`) with auto-restart
-- Optional Linux cgroup v2 hard limits (`--cgroup-enforce`) and GPU deny env masking (`--deny-gpu`)
-- Exponential restart backoff with jitter and cooldown reset
-- Ecosystem config import (`ecosystem.config.json` style) for PM2 drop-in compatibility
-- Compact service export/import bundles (`.oxpkg`) with local + HTTPS import support
-- Built-in git pull + no-downtime reload (`oxmgr pull`)
-- Webhook API (`POST /pull/<name|id>`) with per-service secret
-- Local/remote service transfer via compact `.oxpkg` export/import bundles
-- Idempotent config reconcile via `oxmgr apply`
-- Reload without downtime (best-effort hot replacement)
-- PM2-style remote deployment workflow (`oxmgr deploy ...`)
+- Log tailing, log rotation, and per-process stdout/stderr logs
+- Best-effort zero-downtime reloads
+- Git pull and webhook-driven update workflow
+- Import and export bundles with `.oxpkg`
+- Service installation for `systemd`, `launchd`, and Windows Task Scheduler
 
-## Installation
+## Install
 
-### npm / yarn
+### npm
 
 ```bash
 npm install -g oxmgr
-# or
-yarn global add oxmgr
 ```
 
 ### Homebrew
@@ -95,665 +58,83 @@ sudo apt update
 sudo apt install oxmgr
 ```
 
-Signed-key setup (recommended when signing is enabled) is documented in [docs/install.md](./docs/install.md).
-
 ### Build from source
 
 ```bash
 git clone https://github.com/Vladimir-Urik/OxMgr.git
 cd OxMgr
 cargo build --release
+./target/release/oxmgr --help
 ```
 
-Binary:
-
-```bash
-./target/release/oxmgr
-```
-
-### Install locally
-
-```bash
-cargo install --path .
-```
+For signed APT setup, local installation, and platform-specific notes, see [docs/install.md](./docs/install.md).
 
 ## Quick Start
 
-```bash
-# Start process with restart policy
-oxmgr start "node server.js" --name api --restart always --max-restarts 20 --crash-restart-limit 3
+Start a service:
 
-# Check fleet
+```bash
+oxmgr start "node server.js" --name api --restart always
+```
+
+Inspect and operate it:
+
+```bash
 oxmgr list
-
-# Reconcile config idempotently (only changed apps restart)
-oxmgr apply ./oxfile.toml --env prod
-
-# Validate oxfile syntax + dependencies + expanded names
-oxmgr validate ./oxfile.toml --env prod
-
-# Run environment + daemon diagnostics
-oxmgr doctor
-
-# Install daemon service on current platform
-oxmgr service install --system auto
-
-# Detailed status (includes CPU/RAM + health)
 oxmgr status api
-
-# Launch interactive dashboard
-oxmgr ui
-
-# Reload with minimal disruption (best effort)
-oxmgr reload api
-
-# Pull git updates and hot-reload when changed
-oxmgr pull api
-
-# Logs
-oxmgr logs api
 oxmgr logs api -f
+oxmgr ui
 ```
 
-## Terminal UI Controls
-
-`oxmgr ui` is built for fast fleet operations from a terminal:
-
-- Navigate with `j/k` or arrow keys.
-- Open menu with `Esc`, quit with `q`.
-- `n` opens create-process modal directly in UI.
-- Run actions directly on selected service:
-- `s` stop
-- `d` delete (with confirm modal)
-- `r` reload
-- `Shift+R` restart
-- `l` fullscreen logs
-- `p` git pull (with conditional reload/restart on change)
-- `t` preview latest log line
-- `g` / `Space` force refresh
-- `?` toggle help overlay
-- Mouse row selection and wheel scrolling are supported.
-- Selected process gets a full-height right-side detail sidebar (status, health, cpu/ram bars, git/process info).
-- Fullscreen log viewer supports scrolling, stdout/stderr switching, and live reload from disk.
-
-More details: [docs/UI.md](./docs/UI.md).
-
-## Git Pull and Webhook Workflow
-
-Configure each service in `oxfile.toml`:
-
-```toml
-git_repo = "git@github.com:org/repo.git"
-git_ref = "main"
-pull_secret = "replace-with-random-secret"
-```
-
-Then trigger updates:
-
-```bash
-oxmgr pull api
-
-curl -X POST \
-  -H "X-Oxmgr-Secret: replace-with-random-secret" \
-  http://127.0.0.1:51234/pull/api
-```
-
-Behavior:
-
-- unchanged commit: no restart/reload
-- changed commit while running: reload
-- changed commit while desired-running but currently stopped: restart
-- changed commit while desired-stopped: checkout only
-
-Full guide: [docs/PULL_WEBHOOK.md](./docs/PULL_WEBHOOK.md).
-
-## Bundles and Import Security
-
-`oxmgr export` produces compact `.oxpkg` bundles to move service definitions between hosts.
-
-Security defaults for `oxmgr import`:
-
-- remote URL import only allows `https://`
-- URL credentials/fragments are rejected
-- remote payload size is capped
-- strict schema validation is enforced
-- internal checksum is validated
-- optional explicit pinning via `--sha256`
-
-Bundle reference: [docs/BUNDLES.md](./docs/BUNDLES.md).
-
-## CLI Reference
-
-### `oxmgr start <command>`
-
-Start and register a process.
-
-Options:
-
-- `--name <name>`
-- `--restart <always|on-failure|never>` (default: `on-failure`)
-- `--max-restarts <n>` (default: `10`)
-- `--crash-restart-limit <n>` (default: `3`, `0` disables the 5-minute crash-loop cutoff)
-- `--cwd <path>`
-- `--env KEY=VALUE` (repeatable)
-- `--health-cmd <command>`
-- `--health-interval <seconds>` (default: `30`)
-- `--health-timeout <seconds>` (default: `5`)
-- `--health-max-failures <n>` (default: `3`)
-- `--kill-signal <signal>` (for graceful stop, e.g. `SIGINT`)
-- `--stop-timeout <seconds>` (default: `5`)
-- `--restart-delay <seconds>` (default: `0`)
-- `--start-delay <seconds>` (default: `0`)
-- `--watch` (restart on working-directory file changes)
-- `--cluster` (Node.js cluster mode)
-- `--cluster-instances <n>` (optional worker count; default uses all CPUs)
-- `--namespace <name>`
-- `--max-memory-mb <n>`
-- `--max-cpu-percent <n>`
-- `--cgroup-enforce` (Linux only, requires cgroup permissions)
-- `--deny-gpu` (sets common GPU visibility env vars to disable GPU use)
-
-Example:
-
-```bash
-oxmgr start "python app.py" \
-  --name worker \
-  --restart on-failure \
-  --max-restarts 5 \
-  --crash-restart-limit 3 \
-  --health-cmd "curl -fsS http://127.0.0.1:8080/health" \
-  --health-interval 15 \
-  --health-timeout 3 \
-  --health-max-failures 3 \
-  --max-memory-mb 512 \
-  --max-cpu-percent 80 \
-  --cgroup-enforce \
-  --deny-gpu
-```
-
-Cluster mode notes:
-
-- Cluster mode currently supports `node <script> [args...]`.
-- Node runtime flags before script path are not supported in cluster mode.
-- `--cluster-instances` requires `--cluster`.
-
-Crash-loop notes:
-
-- `--crash-restart-limit` counts only daemon-triggered auto restarts after unexpected exits.
-- Manual `restart`, `reload`, `start`, and config-driven operations reset the crash-loop counter.
-- `0` disables the cutoff completely.
-
-### `oxmgr stop <name|id>`
-
-Gracefully stop process.
-
-### `oxmgr restart <name|id>` / `oxmgr rs <name|id>`
-
-Stop and start process using stored definition.
-
-### `oxmgr reload <name|id>`
-
-Start a replacement instance, then terminate the old one (best effort no-downtime reload).
-
-### `oxmgr pull [name|id]`
-
-Pull latest changes from configured git repository and reload/restart service only when commit changed.
-
-### `oxmgr delete <name|id>` / `oxmgr rm <name|id>`
-
-Remove process definition (stops it first if running).
-
-### `oxmgr list` / `oxmgr ls` / `oxmgr ps`
-
-Show all managed processes with runtime metrics.
-
-Columns include: `ID NAME STATUS MODE PID UPTIME RESTARTS CPU% RAM(MB) HEALTH`.
-
-### `oxmgr status <name|id>`
-
-Show detailed process metadata, watch/cluster settings, logs, health state, CPU, and RAM.
-
-### `oxmgr ui`
-
-Open interactive terminal dashboard.
-
-Options:
-
-- `--interval-ms <n>` refresh interval in milliseconds (default `800`)
-
-### `oxmgr logs <name|id>` / `oxmgr log <name|id>`
-
-Show process logs.
-
-Options:
-
-- `-f, --follow` stream continuously
-- `--lines <n>` number of lines from each log file (default `100`)
-
-### `oxmgr export <name|id>`
-
-Export one managed service into a compact `.oxpkg` bundle.
-
-Example:
-
-```bash
-oxmgr export api
-oxmgr export 2 --out ./release/api.oxpkg
-```
-
-### `oxmgr import <source>`
-
-Import process definitions from:
-
-- local `ecosystem.config.json`
-- local `oxfile.toml`
-- local `.oxpkg` bundle
-- remote `https://...` `.oxpkg` bundle
-
-Example:
-
-```bash
-oxmgr import ./ecosystem.config.json
-oxmgr import ./ecosystem.config.json --env prod --only api,worker
-oxmgr import ./api.oxpkg
-oxmgr import https://example.com/api.oxpkg --sha256 0123abcd... --only api
-```
-
-Options:
-
-- `--env <name>`: applies profile overrides (`env_<name>` for ecosystem, `[apps.profiles.<name>]` for oxfile)
-- `--only <names>`: comma-separated app names filter
-- `--sha256 <hex>`: optional remote checksum pin (recommended for URL imports)
-- remote URL import requires `curl` available in `PATH`
-
-### Pull Webhook API
-
-Oxmgr daemon exposes an HTTP webhook endpoint:
-
-- `POST /pull/<name|id>`
-- send secret via `X-Oxmgr-Secret` header (or `Authorization: Bearer <secret>`)
-- configure daemon API bind address with `OXMGR_API_ADDR` (defaults to localhost high port)
-- per-service secret is configured in `oxfile.toml` via `pull_secret`
-
-### `oxmgr apply <path>`
-
-Idempotently reconcile desired config with daemon state.
-
-- unchanged and already running apps are not touched
-- changed apps are recreated
-- matching but stopped/crashed apps are restarted
-- optional `--prune` removes managed apps missing from config
-
-Example:
-
-```bash
-oxmgr apply ./oxfile.toml --env prod --only api,worker
-oxmgr apply ./ecosystem.config.json --prune
-```
-
-Options:
-
-- `--env <name>`: profile selector (`env_<name>` or `[apps.profiles.<name>]`)
-- `--only <names>`: comma-separated app filter
-- `--prune`: delete apps not present in desired config
-
-### `oxmgr convert <ecosystem.json> --out oxfile.toml`
-
-Convert ecosystem config into Oxmgr-native TOML format.
-
-Example:
-
-```bash
-oxmgr convert ecosystem.config.json --out oxfile.toml --env prod
-```
-
-### `oxmgr validate <oxfile.toml>`
-
-Validate native oxfile config without talking to daemon.
-
-Checks include:
-
-- TOML parse + profile resolution
-- command syntax sanity
-- cluster mode command validity (`node <script> ...` when enabled)
-- duplicate app names
-- `depends_on` references
-- duplicate expanded names (`instances` expansion)
-
-Example:
-
-```bash
-oxmgr validate ./oxfile.toml
-oxmgr validate ./oxfile.toml --env prod --only api,worker
-```
-
-Options:
-
-- `--env <name>` profile selector
-- `--only <names>` comma-separated app filter
-
-### `oxmgr deploy ...`
-
-PM2-style deployment syntax:
-
-```bash
-oxmgr deploy <config_file> <environment> <command>
-```
-
-Default config auto-discovery syntax:
-
-```bash
-oxmgr deploy <environment> <command>
-```
-
-Supported commands:
-
-- `setup`
-- `update`
-- `revert [n]`
-- `current|curr`
-- `previous|prev`
-- `list`
-- `exec|run "<cmd>"`
-- `<ref>` (deploy explicit git ref/tag/branch)
-
-Flags:
-
-- `--config <path>`
-- `--force` (for `update`/`<ref>`)
-
-Full lifecycle hooks and multi-host examples: [docs/DEPLOY.md](./docs/DEPLOY.md)
-
-### `oxmgr doctor`
-
-Run local environment diagnostics.
-
-Checks include:
-
-- base/log directories existence + writability
-- daemon address resolution
-- state file readability and JSON shape
-- daemon IPC reachability (`ping`) and process listing (if daemon is running)
-
-Exit code is non-zero only when at least one check fails.
-
-### `oxmgr startup [--system <auto|systemd|launchd|task-scheduler>]`
-
-Print boot autostart setup instructions for daemon.
-
-### `oxmgr daemon run`
-
-Run daemon in foreground mode. Normally unnecessary; CLI auto-start handles it.
-
-### `oxmgr daemon stop`
-
-Request graceful daemon shutdown.
-
-### `oxmgr service <install|uninstall|status> [--system <auto|systemd|launchd|task-scheduler>]`
-
-Manage Oxmgr as an OS service directly.
-
-```bash
-oxmgr service install --system auto
-oxmgr service status --system auto
-oxmgr service uninstall --system auto
-```
-
-## Runtime Environment Variables
-
-- `OXMGR_HOME`: override Oxmgr data directory (state/logs)
-- `OXMGR_DAEMON_ADDR`: override daemon bind/connect address (default `127.0.0.1:<derived-port>`)
-- `OXMGR_API_ADDR`: override webhook HTTP API bind address (default `127.0.0.1:<derived-port>`)
-- `OXMGR_LOG_MAX_SIZE_MB`: log rotation size threshold in MB (default `20`)
-- `OXMGR_LOG_MAX_FILES`: number of rotated files kept per log (default `5`)
-- `OXMGR_LOG_MAX_DAYS`: maximum rotated log age in days (default `14`)
-
-## Ecosystem Config (`ecosystem.config.json`)
-
-Oxmgr supports PM2-like config files with an `apps` array.
-
-Supported fields per app:
-
-- `name`
-- `cmd` (full command line) OR `script` + `args`
-- `cwd`
-- `env`
-- `autorestart`
-- `restart_policy`
-- `max_restarts`
-- `crash_restart_limit`
-- `health_cmd`, `health_interval`, `health_timeout`, `health_max_failures`
-- or nested `health: { cmd, interval, timeout, max_failures }`
-- `restart_delay`
-- `delay_start` / `start_delay`
-- `start_order` / `priority`
-- `kill_signal` / `pm2_kill_signal`
-- `stop_timeout` / `kill_timeout`
-- `max_memory_restart` (e.g. `"256M"`), `max_memory_mb`, `max_cpu_percent`
-- `exec_mode` (`cluster` / `cluster_mode`) for PM2-style cluster import
-- `cluster_mode`, `cluster_instances`
-- `namespace`
-- `instances`, `instance_var`
-- `env_<profile>` object overrides (used via `oxmgr import --env <profile>`)
-
-Cluster import note:
-
-- `exec_mode: "cluster"` maps to Oxmgr cluster mode.
-- in that mode, ecosystem `instances` is interpreted as cluster worker count.
-
-Deployment note:
-
-- top-level `deploy` environments are used by `oxmgr deploy ...`
-
-Example:
-
-```json
-{
-  "apps": [
-    {
-      "name": "api",
-      "cmd": "node server.js",
-      "cwd": "/srv/api",
-      "env": { "NODE_ENV": "production" },
-      "restart_policy": "always",
-      "max_restarts": 20,
-      "crash_restart_limit": 3,
-      "health_cmd": "curl -fsS http://127.0.0.1:3000/health",
-      "health_interval": 15,
-      "health_timeout": 3,
-      "health_max_failures": 3,
-      "max_memory_restart": "512M",
-      "max_cpu_percent": 80
-    },
-    {
-      "name": "worker",
-      "script": "python",
-      "args": ["worker.py"],
-      "autorestart": true,
-      "max_restarts": 10,
-      "crash_restart_limit": 5
-    },
-    {
-      "name": "api-cluster",
-      "cmd": "node api.js",
-      "exec_mode": "cluster",
-      "instances": 2,
-      "priority": 10,
-      "restart_delay": 5,
-      "delay_start": 3,
-      "pm2_kill_signal": "SIGINT",
-      "kill_timeout": 8,
-      "max_memory_restart": "256M",
-      "env_prod": {
-        "NODE_ENV": "production",
-        "instances": 6,
-        "priority": 1,
-        "max_memory_restart": "1024M"
-      }
-    }
-  ]
-}
-```
-
-## Oxfile Format (`oxfile.toml`)
-
-`oxfile.toml` is Oxmgr-native config with extra features (profiles and dependency ordering).
-
-If you are deciding between PM2 ecosystem JSON and native TOML, see:
-[docs/OXFILE_VS_PM2.md](./docs/OXFILE_VS_PM2.md).
-
-Example:
+Use a config file for repeatable setups:
 
 ```toml
 version = 1
 
-[defaults]
-restart_policy = "on_failure"
-max_restarts = 10
-crash_restart_limit = 3
-stop_timeout_secs = 5
-max_memory_mb = 256
-
-[[apps]]
-name = "db"
-command = "docker compose up db"
-start_order = 0
-
 [[apps]]
 name = "api"
 command = "node server.js"
-depends_on = ["db"]
-cluster_mode = true
-cluster_instances = 4
-restart_delay_secs = 2
-start_delay_secs = 1
-stop_signal = "SIGINT"
-stop_timeout_secs = 8
-namespace = "backend"
-max_cpu_percent = 80
-
-[apps.env]
-BASE = "1"
-
-[apps.profiles.prod]
-cluster_instances = 8
-start_order = 1
-max_memory_mb = 768
-
-[apps.profiles.prod.env]
-NODE_ENV = "production"
+restart_policy = "on_failure"
+max_restarts = 10
+stop_timeout_secs = 5
 ```
-
-Supported oxfile features include:
-
-- global `[defaults]`
-- per-app `depends_on` (startup ordering)
-- per-profile overrides in `[apps.profiles.<name>]`
-- `instances` and `instance_var`
-- `cluster_mode` and `cluster_instances`
-- restart/stop delay and signal settings
-- crash-loop cutoff (`crash_restart_limit`, default `3` auto restarts in `5` minutes)
-- namespace and health checks
-- resource limits (`max_memory_mb`, `max_cpu_percent`)
-
-## How Daemon Works
-
-- Single-user localhost endpoint: `127.0.0.1:<derived-port>`
-- CLI sends JSON IPC requests
-- Daemon owns lifecycle, restart logic, health checks, and metrics refresh
-- Child exits are handled asynchronously
-- State is persisted after lifecycle changes
-- On daemon restart, desired-running processes are restored
-
-## Logging
-
-Per process logs:
-
-- `~/.local/share/oxmgr/logs/<name>.out.log`
-- `~/.local/share/oxmgr/logs/<name>.err.log`
-
-Use `oxmgr logs <name>` or `oxmgr logs <name> -f`.
-
-## Auto-Start On Boot
-
-Use:
 
 ```bash
-oxmgr startup --system systemd
-# or
-oxmgr startup --system launchd
-# or
-oxmgr startup --system task-scheduler
+oxmgr validate ./oxfile.toml
+oxmgr apply ./oxfile.toml
 ```
 
-This prints ready-to-use service definitions and activation commands.
+## PM2 Migration
 
-## Release Automation
+Oxmgr supports PM2-style `ecosystem.config.json`, which makes it easier to move existing PM2 setups without rewriting everything on day one.
 
-Tagging `vX.Y.Z` triggers automated release pipeline in [`.github/workflows/release.yml`](./.github/workflows/release.yml):
+Useful links:
 
-- builds binaries for Linux/macOS/Windows
-- creates `.deb` package
-- publishes GitHub release assets + checksums
-- publishes npm package (when `NPM_TOKEN` exists)
-- updates Homebrew tap formula (when Homebrew secrets exist)
-- publishes Chocolatey package (when `CHOCO_API_KEY` exists)
-- publishes APT repository content to `gh-pages/apt`
+- [Oxfile vs PM2 Ecosystem](./docs/OXFILE_VS_PM2.md)
+- [Oxfile Specification](./docs/OXFILE.md)
 
-Required release secrets are documented in [`docs/RELEASE.md`](./docs/RELEASE.md).
+## Documentation
 
-## Automated Tests
-
-Current automated tests cover:
-
-- restart policy behavior (`always`, `on-failure`, `never`)
-- crash-loop cutoff scheduling and manual restart reset behavior
-- `ecosystem.config.json` parsing (`cmd`, `script+args`, health config)
-- ecosystem/oxfile resource limit parsing and serialization
-- idempotent `apply` planning behavior (noop/recreate/restart/prune)
-- storage roundtrip and corrupted state recovery
-- secure import URL validation and checksum pinning logic
-- `.oxpkg` bundle integrity + schema validation guards
-- pull workflow summary behavior (unchanged vs updated checkout)
-- webhook auth and API request handling (`POST /pull/<name|id>`)
-- terminal UI helper logic (layout, truncation, menu hitboxes)
-
-Run:
-
-```bash
-cargo test
-```
-
-CI runs the same checks on Linux/macOS/Windows via `.github/workflows/ci.yml`.
-
-## Architecture
-
-```text
-src/
-  main.rs            CLI entrypoint + command dispatch
-  cli.rs             clap command model
-  daemon.rs          daemon loop, IPC listener, auto-start helper
-  oxfile.rs          oxfile.toml parser + converter writer
-  process_manager.rs lifecycle + restart/reload + health + metrics
-  process.rs         domain models/status/restart/health enums
-  ipc.rs             request/response protocol
-  ecosystem.rs       ecosystem.config.json import parser
-  storage.rs         durable state load/save
-  logging.rs         log handling and tail helpers
-  config.rs          paths and filesystem layout
-  errors.rs          domain errors
-```
+- [Documentation Index](./docs/README.md)
+- [Installation Guide](./docs/install.md)
+- [User Guide](./docs/USAGE.md)
+- [CLI Reference](./docs/CLI.md)
+- [Terminal UI Guide](./docs/UI.md)
+- [Pull and Webhook Guide](./docs/PULL_WEBHOOK.md)
+- [Deployment Guide](./docs/DEPLOY.md)
+- [Service Bundles](./docs/BUNDLES.md)
+- [Examples](./docs/examples)
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, local checks, E2E test instructions, documentation expectations, and PR guidelines.
+Issues, PRs, and documentation improvements are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup, checks, and testing expectations.
+
+## Community
+
+Oxmgr is created and maintained by **Vladimír Urík**.
+
+The project is developed under the open-source patronage of [Empellio](https://empellio.com).
 
 ## License
 
-Suggested license: **MIT**.
-
-## Author
-
-Author and lead developer: **Vladimír Urík**
-
-This project is created under the open-source patronage of [Empellio.com](https://empellio.com).
+[MIT](./LICENSE)
