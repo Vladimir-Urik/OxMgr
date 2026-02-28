@@ -40,7 +40,7 @@ npm install -g oxmgr
 ### Homebrew
 
 ```bash
-brew tap Vladimir-Urik/OxMgr
+brew tap empellio/homebrew-tap
 brew install oxmgr
 ```
 
