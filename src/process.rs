@@ -1,16 +1,25 @@
+//! Core process-domain types shared across the CLI, daemon, storage, and
+//! configuration layers.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Default number of daemon-triggered restarts allowed inside the crash-loop
+/// window before Oxmgr stops retrying automatically.
 pub const DEFAULT_CRASH_RESTART_LIMIT: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Automatic restart behaviour applied after a managed process exits.
 pub enum RestartPolicy {
+    /// Restart after every exit, including clean exits.
     Always,
+    /// Restart only when the process exits unsuccessfully.
     OnFailure,
+    /// Never restart automatically.
     Never,
 }
 
@@ -26,6 +35,7 @@ impl std::fmt::Display for RestartPolicy {
 }
 
 impl RestartPolicy {
+    /// Returns whether this policy permits a restart for the given exit result.
     pub fn should_restart(&self, exited_successfully: bool) -> bool {
         match self {
             RestartPolicy::Always => true,
@@ -37,11 +47,17 @@ impl RestartPolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Persisted runtime status reported for a managed process.
 pub enum ProcessStatus {
+    /// The process is currently running.
     Running,
+    /// The process is not running and is not scheduled to restart immediately.
     Stopped,
+    /// The process exited unexpectedly and has not yet been recovered.
     Crashed,
+    /// The daemon is in the middle of restarting the process.
     Restarting,
+    /// The daemon could not start or manage the process successfully.
     Errored,
 }
 
@@ -60,18 +76,25 @@ impl std::fmt::Display for ProcessStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// Desired steady-state requested by the user or configuration.
 pub enum DesiredState {
+    /// The process should be running whenever policy permits it.
     Running,
+    /// The process should remain stopped until explicitly started again.
     Stopped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
+/// Result of the most recent health-check evaluation.
 pub enum HealthStatus {
+    /// No health verdict is available yet.
     #[default]
     Unknown,
+    /// The last completed health check succeeded.
     Healthy,
+    /// The last completed health check failed or timed out.
     Unhealthy,
 }
 
@@ -87,6 +110,7 @@ impl std::fmt::Display for HealthStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// External command used by the daemon to determine whether a process is healthy.
 pub struct HealthCheck {
     pub command: String,
     pub interval_secs: u64,
@@ -95,6 +119,7 @@ pub struct HealthCheck {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+/// Optional runtime limits and isolation flags associated with a process.
 pub struct ResourceLimits {
     #[serde(default)]
     pub max_memory_mb: Option<u64>,
@@ -107,6 +132,8 @@ pub struct ResourceLimits {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// User-supplied process definition before the daemon assigns runtime identity
+/// and concrete log files.
 pub struct StartProcessSpec {
     pub command: String,
     pub name: Option<String>,
@@ -142,6 +169,11 @@ pub struct StartProcessSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Full runtime record maintained by the daemon for each managed process.
+///
+/// This structure combines the original process specification with generated
+/// identifiers, runtime metrics, log locations, and bookkeeping required for
+/// restart and health-check logic.
 pub struct ManagedProcess {
     pub id: u64,
     pub name: String,
@@ -221,6 +253,7 @@ pub struct ManagedProcess {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Event sent back to the process manager when a child process exits.
 pub struct ProcessExitEvent {
     pub name: String,
     pub pid: u32,
@@ -230,10 +263,13 @@ pub struct ProcessExitEvent {
 }
 
 impl ManagedProcess {
+    /// Returns a compact label suitable for user-facing messages.
     pub fn target_label(&self) -> String {
         format!("{} ({})", self.name, self.id)
     }
 
+    /// Computes a stable fingerprint of the process configuration fields that
+    /// affect runtime behaviour.
     pub fn config_fingerprint(&self) -> String {
         process_config_fingerprint(ProcessConfigRef {
             command: &self.command,
@@ -259,10 +295,13 @@ impl ManagedProcess {
         })
     }
 
+    /// Recomputes and stores the current configuration fingerprint.
     pub fn refresh_config_fingerprint(&mut self) {
         self.config_fingerprint = self.config_fingerprint();
     }
 
+    /// Returns a clone suitable for IPC transport, with sensitive values such
+    /// as environment variables and webhook secrets removed.
     pub fn redacted_for_transport(&self) -> Self {
         let mut clone = self.clone();
         if clone.config_fingerprint.is_empty() {
@@ -277,6 +316,8 @@ impl ManagedProcess {
 }
 
 impl StartProcessSpec {
+    /// Computes the same stable configuration fingerprint that the daemon stores
+    /// on `ManagedProcess`.
     pub fn config_fingerprint(&self) -> String {
         let (command, args) = split_command_for_fingerprint(&self.command);
         process_config_fingerprint(ProcessConfigRef {
@@ -402,6 +443,8 @@ fn split_command_for_fingerprint(command_line: &str) -> (String, Vec<String>) {
     }
 }
 
+/// Returns the default crash-loop threshold used when older persisted state
+/// does not include an explicit value.
 pub fn default_crash_restart_limit() -> u32 {
     DEFAULT_CRASH_RESTART_LIMIT
 }

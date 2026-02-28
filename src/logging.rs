@@ -1,3 +1,6 @@
+//! Log-path calculation, rotation, and tail-reading helpers for managed
+//! processes.
+
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
@@ -8,18 +11,21 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Concrete stdout and stderr log file paths for a managed process.
 pub struct ProcessLogs {
     pub stdout: PathBuf,
     pub stderr: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy)]
+/// Rotation settings applied before a process log is opened for writing.
 pub struct LogRotationPolicy {
     pub max_size_bytes: u64,
     pub max_files: u32,
     pub max_age_days: u64,
 }
 
+/// Returns the canonical stdout and stderr log paths for the given process name.
 pub fn process_logs(log_dir: &Path, name: &str) -> ProcessLogs {
     ProcessLogs {
         stdout: log_dir.join(format!("{name}.out.log")),
@@ -27,12 +33,16 @@ pub fn process_logs(log_dir: &Path, name: &str) -> ProcessLogs {
     }
 }
 
+/// Returns the last modification time of a log file, falling back to the Unix
+/// epoch when metadata is unavailable.
 pub fn log_modified_at(path: &Path) -> SystemTime {
     fs::metadata(path)
         .and_then(|meta| meta.modified())
         .unwrap_or(UNIX_EPOCH)
 }
 
+/// Opens stdout and stderr log writers, performing rotation and retention
+/// cleanup first.
 pub fn open_log_writers(logs: &ProcessLogs, policy: LogRotationPolicy) -> Result<(File, File)> {
     if let Some(parent) = logs.stdout.parent() {
         ensure_private_dir(parent)?;
@@ -203,6 +213,8 @@ fn rotated_path(path: &Path, index: u32) -> PathBuf {
     PathBuf::from(format!("{}.{}", path.display(), index))
 }
 
+/// Reads up to the last `max_lines` lines from a log file without loading the
+/// entire file into memory when avoidable.
 pub fn read_last_lines(path: &Path, max_lines: usize) -> Result<Vec<String>> {
     if max_lines == 0 || !path.exists() {
         return Ok(Vec::new());

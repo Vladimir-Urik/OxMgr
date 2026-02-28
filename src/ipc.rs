@@ -1,3 +1,5 @@
+//! Line-delimited JSON IPC protocol shared by the CLI and the local daemon.
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -8,21 +10,34 @@ use crate::process::{ManagedProcess, StartProcessSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+/// Requests accepted by the local Oxmgr daemon.
 pub enum IpcRequest {
+    /// Verify that the daemon is reachable.
     Ping,
+    /// Ask the daemon to perform a graceful shutdown.
     Shutdown,
+    /// Start a new managed process from the provided specification.
     Start { spec: Box<StartProcessSpec> },
+    /// Stop a process by name or numeric identifier.
     Stop { target: String },
+    /// Restart a process by name or numeric identifier.
     Restart { target: String },
+    /// Reload a process by name or numeric identifier.
     Reload { target: String },
+    /// Pull Git updates for one process or for every eligible process.
     Pull { target: Option<String> },
+    /// Delete a process by name or numeric identifier.
     Delete { target: String },
+    /// List all managed processes.
     List,
+    /// Return detailed status for one process.
     Status { target: String },
+    /// Return log paths for one process.
     Logs { target: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Standard response envelope returned by daemon IPC handlers.
 pub struct IpcResponse {
     pub ok: bool,
     pub message: String,
@@ -35,6 +50,7 @@ pub struct IpcResponse {
 }
 
 impl IpcResponse {
+    /// Creates a successful response with the provided human-readable message.
     pub fn ok(message: impl Into<String>) -> Self {
         Self {
             ok: true,
@@ -45,6 +61,7 @@ impl IpcResponse {
         }
     }
 
+    /// Creates an error response with the provided human-readable message.
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             ok: false,
@@ -56,6 +73,8 @@ impl IpcResponse {
     }
 }
 
+/// Opens a connection to the daemon, sends one request, and waits for a single
+/// response frame.
 pub async fn send_request(daemon_addr: &str, request: &IpcRequest) -> Result<IpcResponse> {
     let mut stream = TcpStream::connect(daemon_addr)
         .await
@@ -64,6 +83,7 @@ pub async fn send_request(daemon_addr: &str, request: &IpcRequest) -> Result<Ipc
     read_json_line(&mut stream).await
 }
 
+/// Reads one newline-delimited JSON value from the provided asynchronous stream.
 pub async fn read_json_line<T, S>(stream: &mut S) -> Result<T>
 where
     T: for<'de> Deserialize<'de>,
@@ -84,6 +104,8 @@ where
         .context("failed to decode daemon response/request payload")
 }
 
+/// Serialises one value as JSON, appends a newline delimiter, and flushes the
+/// stream.
 pub async fn write_json_line<T, S>(stream: &mut S, value: &T) -> Result<()>
 where
     T: Serialize,

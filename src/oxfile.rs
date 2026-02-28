@@ -1,3 +1,6 @@
+//! Parsing and rendering of `oxfile.toml`, Oxmgr's native declarative process
+//! configuration format.
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -216,6 +219,8 @@ struct OxAppOut {
     deny_gpu: Option<bool>,
 }
 
+/// Loads an `oxfile.toml`, applies defaults and optional profile overrides,
+/// and converts the result into canonical process specifications.
 pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<EcosystemProcessSpec>> {
     let payload = fs::read_to_string(path)
         .with_context(|| format!("failed to read oxfile at {}", path.display()))?;
@@ -544,6 +549,8 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// Writes canonical process specifications back into an `oxfile.toml`
+/// representation understood by Oxmgr version 1.
 pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<()> {
     let mut apps = Vec::with_capacity(specs.len());
     for spec in specs {

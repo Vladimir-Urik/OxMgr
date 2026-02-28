@@ -1,3 +1,5 @@
+//! Terminal styling helpers shared by list, status, and TUI rendering code.
+
 use std::io::{self, IsTerminal};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,28 +32,34 @@ fn paint(value: &str, code: &str) -> String {
     }
 }
 
+/// Styles a general UI label.
 pub fn label(value: &str) -> String {
     paint(value, "1;36")
 }
 
+/// Styles a table header cell.
 pub fn table_header(value: &str) -> String {
     paint(value, "1;36")
 }
 
+/// Styles a table border or separator fragment.
 pub fn table_border(value: &str) -> String {
     paint(value, "2;34")
 }
 
+/// Renders a coloured process-status value for terminal output.
 pub fn status_value(status: &ProcessStatus) -> String {
     let value = status.to_string();
     style_status_text(&value)
 }
 
+/// Renders a coloured health-status value for terminal output.
 pub fn health_value(health: &HealthStatus) -> String {
     let value = health.to_string();
     style_health_text(&value)
 }
 
+/// Applies status-specific colouring to a pre-padded table cell.
 pub fn style_status_cell(padded: &str, raw_status: &str) -> String {
     match raw_status {
         "running" => paint(padded, "1;32"),
@@ -62,6 +70,7 @@ pub fn style_status_cell(padded: &str, raw_status: &str) -> String {
     }
 }
 
+/// Applies health-specific colouring to a pre-padded table cell.
 pub fn style_health_cell(padded: &str, raw_health: &str) -> String {
     match raw_health {
         "healthy" => paint(padded, "1;32"),
@@ -71,6 +80,8 @@ pub fn style_health_cell(padded: &str, raw_health: &str) -> String {
     }
 }
 
+/// Formats the current uptime for a running process in a compact, human-readable
+/// form.
 pub fn format_process_uptime(status: &ProcessStatus, started_at: Option<u64>) -> String {
     if !matches!(status, ProcessStatus::Running | ProcessStatus::Restarting) {
         return "-".to_string();

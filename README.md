@@ -117,6 +117,7 @@ Useful links:
 ## Documentation
 
 - [Documentation Index](./docs/README.md)
+- [Architecture Overview](./docs/ARCHITECTURE.md)
 - [Installation Guide](./docs/install.md)
 - [User Guide](./docs/USAGE.md)
 - [CLI Reference](./docs/CLI.md)

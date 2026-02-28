@@ -1,3 +1,5 @@
+//! Encoding and decoding of Oxmgr service bundles (`.oxpkg`).
+
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -76,6 +78,7 @@ struct BundleService {
     pull_secret_hash: Option<String>,
 }
 
+/// Returns a filesystem-friendly default file name for a process bundle.
 pub fn default_bundle_file_name(process_name: &str) -> String {
     let mut clean: String = process_name
         .chars()
@@ -93,14 +96,17 @@ pub fn default_bundle_file_name(process_name: &str) -> String {
     format!("{clean}.oxpkg")
 }
 
+/// Returns whether the byte slice starts with the Oxmgr bundle magic header.
 pub fn looks_like_bundle(bytes: &[u8]) -> bool {
     bytes.len() >= MAGIC.len() && &bytes[..MAGIC.len()] == MAGIC
 }
 
+/// Returns the maximum accepted size of a compressed bundle payload.
 pub fn max_bundle_bytes() -> usize {
     MAX_BUNDLE_BYTES
 }
 
+/// Encodes one or more managed processes into a compressed, checksummed bundle.
 pub fn encode_bundle(processes: &[ManagedProcess]) -> Result<Vec<u8>> {
     if processes.is_empty() {
         anyhow::bail!("cannot export an empty process selection");
@@ -164,6 +170,8 @@ pub fn encode_bundle(processes: &[ManagedProcess]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// Decodes a compressed bundle into startable process specifications after
+/// validating its size, checksum, and logical contents.
 pub fn decode_bundle(bytes: &[u8]) -> Result<Vec<StartProcessSpec>> {
     if bytes.len() < HEADER_LEN {
         anyhow::bail!("invalid bundle: payload too small");
@@ -256,6 +264,8 @@ pub fn decode_bundle(bytes: &[u8]) -> Result<Vec<StartProcessSpec>> {
     Ok(result)
 }
 
+/// Reconstructs a shell-ready command line from a program and its argument
+/// vector.
 pub fn command_line_from_parts(program: &str, args: &[String]) -> String {
     let mut parts = Vec::with_capacity(args.len() + 1);
     parts.push(shell_words::quote(program).to_string());

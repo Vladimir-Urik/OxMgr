@@ -1,3 +1,5 @@
+//! Foreground daemon loop, local IPC handling, and webhook API handling.
+
 use std::env;
 use std::process::Stdio;
 use std::str;
@@ -35,6 +37,11 @@ enum ManagerCommand {
     },
 }
 
+/// Runs the Oxmgr daemon in the foreground.
+///
+/// The daemon owns process lifecycle management, serves the local IPC socket
+/// used by the CLI, and exposes the lightweight HTTP webhook API used for
+/// authenticated pull triggers.
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
     let listener = bind_listener(&config.daemon_addr).await?;
@@ -141,6 +148,8 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     Ok(())
 }
 
+/// Ensures that the local daemon is running, spawning a detached foreground
+/// instance when necessary and waiting briefly for it to become reachable.
 pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
     if daemon_socket_available(&config.daemon_addr).await {
         return Ok(());

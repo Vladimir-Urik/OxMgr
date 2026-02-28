@@ -1,3 +1,5 @@
+//! Import support for PM2-compatible `ecosystem.config.json` files.
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,6 +12,8 @@ use sha2::{Digest, Sha256};
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
 #[derive(Debug, Clone)]
+/// Canonical process specification produced after importing external process
+/// definitions such as PM2 ecosystem files or Oxfiles.
 pub struct EcosystemProcessSpec {
     pub command: String,
     pub name: Option<String>,
@@ -126,6 +130,8 @@ struct ResolvedSettings {
     instance_var: Option<String>,
 }
 
+/// Loads a PM2-style ecosystem file and normalises it into Oxmgr process
+/// specifications.
 pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<EcosystemProcessSpec>> {
     let payload = fs::read_to_string(path)
         .with_context(|| format!("failed to read ecosystem file {}", path.display()))?;

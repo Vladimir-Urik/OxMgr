@@ -1,3 +1,6 @@
+//! CLI argument definitions and helpers for translating user input into
+//! runtime data structures.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -53,13 +56,16 @@ Examples
     help_template = HELP_TEMPLATE,
     after_help = HELP_AFTER
 )]
+/// Top-level parser for the `oxmgr` command-line interface.
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
+/// User-facing commands supported by the `oxmgr` binary.
 pub enum Commands {
+    /// Start and register a new managed process.
     Start {
         command: String,
         #[arg(long)]
@@ -107,30 +113,28 @@ pub enum Commands {
         #[arg(long = "deny-gpu", default_value_t = false)]
         deny_gpu: bool,
     },
-    Stop {
-        target: String,
-    },
+    /// Stop a managed process by name or numeric identifier.
+    Stop { target: String },
     #[command(visible_alias = "rs")]
-    Restart {
-        target: String,
-    },
-    Reload {
-        target: String,
-    },
-    Pull {
-        target: Option<String>,
-    },
+    /// Restart a managed process by name or numeric identifier.
+    Restart { target: String },
+    /// Reload a managed process with minimal downtime when possible.
+    Reload { target: String },
+    /// Pull updates from the configured Git repository and apply them when changed.
+    Pull { target: Option<String> },
     #[command(visible_alias = "rm")]
-    Delete {
-        target: String,
-    },
+    /// Delete a managed process and its persisted metadata.
+    Delete { target: String },
     #[command(visible_aliases = ["ls", "ps"])]
+    /// List all managed processes and their current runtime status.
     List,
+    /// Open the interactive terminal user interface.
     Ui {
         #[arg(long, default_value_t = 800)]
         interval_ms: u64,
     },
     #[command(visible_alias = "log")]
+    /// Print recent logs for a managed process.
     Logs {
         target: String,
         #[arg(short = 'f', long)]
@@ -138,9 +142,9 @@ pub enum Commands {
         #[arg(long, default_value_t = 100)]
         lines: usize,
     },
-    Status {
-        target: String,
-    },
+    /// Show a detailed status view for one managed process.
+    Status { target: String },
+    /// Import process definitions from an oxfile, PM2 ecosystem file, or bundle.
     Import {
         source: String,
         #[arg(long)]
@@ -150,11 +154,13 @@ pub enum Commands {
         #[arg(long)]
         sha256: Option<String>,
     },
+    /// Export one managed process into an `.oxpkg` bundle.
     Export {
         target: String,
         #[arg(long, short = 'o')]
         out: Option<PathBuf>,
     },
+    /// Apply an oxfile declaratively against the local daemon state.
     Apply {
         path: PathBuf,
         #[arg(long)]
@@ -164,6 +170,7 @@ pub enum Commands {
         #[arg(long)]
         prune: bool,
     },
+    /// Convert a PM2 ecosystem file into an oxfile.
     Convert {
         input: PathBuf,
         #[arg(long, short = 'o', default_value = "oxfile.toml")]
@@ -171,6 +178,7 @@ pub enum Commands {
         #[arg(long)]
         env: Option<String>,
     },
+    /// Validate an oxfile without mutating daemon state.
     Validate {
         path: PathBuf,
         #[arg(long)]
@@ -178,6 +186,7 @@ pub enum Commands {
         #[arg(long, value_delimiter = ',')]
         only: Vec<String>,
     },
+    /// Execute PM2-style deployment commands from a deploy configuration.
     Deploy {
         #[arg(long, short = 'c')]
         config: Option<PathBuf>,
@@ -186,17 +195,21 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Run local environment and installation diagnostics.
     Doctor,
+    /// Print startup integration instructions for the current platform.
     Startup {
         #[arg(long, value_enum, default_value_t = InitSystem::Auto)]
         system: InitSystem,
     },
+    /// Install, remove, or inspect the system service wrapper for the daemon.
     Service {
         #[command(subcommand)]
         command: ServiceCommand,
         #[arg(long, value_enum, default_value_t = InitSystem::Auto)]
         system: InitSystem,
     },
+    /// Run or stop the local daemon process directly.
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
@@ -204,30 +217,46 @@ pub enum Commands {
 }
 
 #[derive(Debug, Subcommand)]
+/// Direct subcommands for controlling the daemon process itself.
 pub enum DaemonCommand {
+    /// Run the daemon in the foreground.
     Run,
+    /// Ask a running daemon to stop gracefully.
     Stop,
 }
 
 #[derive(Debug, Subcommand)]
+/// Operations for integrating the daemon with the host service manager.
 pub enum ServiceCommand {
+    /// Install the service definition for the selected init system.
     Install,
+    /// Remove the service definition for the selected init system.
     Uninstall,
+    /// Inspect whether the service is installed and/or running.
     Status,
 }
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
+/// Restart policies accepted by the CLI.
 pub enum RestartArg {
+    /// Always restart after exit, regardless of exit code.
     Always,
+    /// Restart only after a non-zero or otherwise unsuccessful exit.
     OnFailure,
+    /// Never restart automatically.
     Never,
 }
 
 #[derive(Debug, Copy, Clone, ValueEnum)]
+/// Init systems supported by Oxmgr service-management commands.
 pub enum InitSystem {
+    /// Detect the most suitable init system for the current platform.
     Auto,
+    /// Use `systemd` integration on Linux.
     Systemd,
+    /// Use `launchd` integration on macOS.
     Launchd,
+    /// Use Windows Task Scheduler integration.
     TaskScheduler,
 }
 
@@ -241,10 +270,14 @@ impl From<RestartArg> for RestartPolicy {
     }
 }
 
+/// Converts repeated `KEY=VALUE` pairs into a map, keeping the last value for
+/// duplicate keys.
 pub fn env_pairs_to_map(items: Vec<(String, String)>) -> HashMap<String, String> {
     items.into_iter().collect()
 }
 
+/// Builds a health-check configuration while enforcing minimum non-zero
+/// interval, timeout, and failure thresholds.
 pub fn build_health_check(
     health_cmd: Option<String>,
     health_interval: u64,
@@ -259,6 +292,8 @@ pub fn build_health_check(
     })
 }
 
+/// Builds resource-limit settings and returns `None` when every limit is
+/// effectively disabled.
 pub fn build_resource_limits(
     max_memory_mb: Option<u64>,
     max_cpu_percent: Option<f32>,

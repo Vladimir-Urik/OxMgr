@@ -1,3 +1,5 @@
+//! Persistence helpers for Oxmgr daemon state.
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -10,6 +12,7 @@ use tracing::warn;
 use crate::process::ManagedProcess;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Serializable daemon state stored on disk between launches.
 pub struct PersistedState {
     pub next_id: u64,
     pub processes: Vec<ManagedProcess>,
@@ -24,6 +27,8 @@ impl Default for PersistedState {
     }
 }
 
+/// Loads the persisted daemon state, recovering gracefully from missing, empty,
+/// or corrupted files.
 pub fn load_state(path: &Path) -> Result<PersistedState> {
     if !path.exists() {
         return Ok(PersistedState::default());
@@ -58,6 +63,8 @@ pub fn load_state(path: &Path) -> Result<PersistedState> {
     }
 }
 
+/// Atomically writes the daemon state to disk using a temporary file and then
+/// replacing the previous state file.
 pub fn save_state(path: &Path, state: &PersistedState) -> Result<()> {
     if let Some(parent) = path.parent() {
         ensure_private_dir(parent)?;
