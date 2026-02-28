@@ -1,6 +1,7 @@
 # Oxmgr
 
 [![CI](https://github.com/Vladimir-Urik/OxMgr/actions/workflows/ci.yml/badge.svg)](https://github.com/Vladimir-Urik/OxMgr/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/Vladimir-Urik/OxMgr?include_prereleases)](https://github.com/Vladimir-Urik/OxMgr/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2ea44f.svg)](./LICENSE)
 
 Oxmgr is a lightweight, cross-platform Rust process manager and PM2 alternative.
