@@ -19,7 +19,7 @@ use tracing::{error, info, warn};
 
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
-use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
+use crate::ipc::{read_json_line, send_request, write_json_line, IpcRequest, IpcResponse};
 use crate::logging::ProcessLogs;
 use crate::process::ManagedProcess;
 use crate::process_manager::ProcessManager;
@@ -196,13 +196,14 @@ pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
 }
 
 async fn daemon_socket_available(daemon_addr: &str) -> bool {
-    match timeout(Duration::from_millis(250), TcpStream::connect(daemon_addr)).await {
-        Ok(Ok(stream)) => {
-            drop(stream);
-            true
-        }
-        _ => false,
-    }
+    matches!(
+        timeout(
+            Duration::from_millis(250),
+            send_request(daemon_addr, &IpcRequest::Ping),
+        )
+        .await,
+        Ok(Ok(response)) if response.ok
+    )
 }
 
 async fn bind_listener(daemon_addr: &str) -> Result<TcpListener> {
@@ -594,14 +595,16 @@ mod tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use sha2::{Digest, Sha256};
+    use tokio::net::TcpListener;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::time::Instant as TokioInstant;
 
     use super::{
-        execute_api_request, execute_snapshot_request, extract_api_secret, restart_sleep_deadline,
-        DaemonSnapshot, HttpRequest, DISABLED_RESTART_SLEEP_SECS,
+        daemon_socket_available, execute_api_request, execute_snapshot_request, extract_api_secret,
+        restart_sleep_deadline, DaemonSnapshot, HttpRequest, DISABLED_RESTART_SLEEP_SECS,
     };
     use crate::config::AppConfig;
+    use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
     use crate::process::{RestartPolicy, StartProcessSpec};
     use crate::process_manager::ProcessManager;
 
@@ -747,6 +750,28 @@ mod tests {
             deadline,
             now + Duration::from_secs(DISABLED_RESTART_SLEEP_SECS)
         );
+    }
+
+    #[tokio::test]
+    async fn daemon_socket_available_sends_ping_request() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind local listener");
+        let addr = listener
+            .local_addr()
+            .expect("failed to resolve listener addr");
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept failed");
+            let request: IpcRequest = read_json_line(&mut stream).await.expect("read failed");
+            assert!(matches!(request, IpcRequest::Ping));
+            write_json_line(&mut stream, &IpcResponse::ok("pong"))
+                .await
+                .expect("write failed");
+        });
+
+        assert!(daemon_socket_available(&addr.to_string()).await);
+        server.await.expect("server task failed");
     }
 
     #[tokio::test]
