@@ -4,6 +4,7 @@
 # IDE/editor settings
 /.idea/
 /.vscode/
+__pycache__/
 
 # OS metadata
 .DS_Store
@@ -15,6 +16,8 @@ Thumbs.db
 /apt-repo/
 /tap/
 /choco-build/
+/bench/.cache/
+/bench/results/
 *.deb
 *.nupkg
 SHA256SUMS

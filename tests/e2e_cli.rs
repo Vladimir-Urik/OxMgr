@@ -295,6 +295,24 @@ fn wait_for_pid(env: &TestEnv, target: &str, timeout: Duration) -> Option<u32> {
     }
 }
 
+#[cfg(windows)]
+fn force_kill_pid(pid: u32) {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status()
+        .expect("failed to run taskkill");
+    assert!(status.success(), "taskkill failed for pid {pid}: {status}");
+}
+
+#[cfg(not(windows))]
+fn force_kill_pid(pid: u32) {
+    let status = Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("failed to run kill -9");
+    assert!(status.success(), "kill -9 failed for pid {pid}: {status}");
+}
+
 #[test]
 #[serial]
 fn e2e_process_lifecycle() {
@@ -560,6 +578,64 @@ fn e2e_reload_replaces_pid() {
     );
 
     let _ = env.run(&["delete", "reload-app"]);
+}
+
+#[test]
+#[serial]
+fn e2e_crash_auto_restart_replaces_pid() {
+    if !should_run_e2e("e2e_crash_auto_restart_replaces_pid") {
+        return;
+    }
+
+    let env = TestEnv::new("crash-restart");
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(30),
+        "--name".to_string(),
+        "crash-app".to_string(),
+        "--restart".to_string(),
+        "on-failure".to_string(),
+        "--max-restarts".to_string(),
+        "5".to_string(),
+        "--restart-delay".to_string(),
+        "0".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+
+    let old_pid = wait_for_pid(&env, "crash-app", Duration::from_secs(8))
+        .expect("expected crash-app pid after startup");
+    force_kill_pid(old_pid);
+
+    let mut new_pid = None;
+    let mut last_status = String::new();
+    let restarted = wait_until(Duration::from_secs(8), || {
+        let output = env.run(&["status", "crash-app"]);
+        if !output.status.success() {
+            last_status = format!(
+                "stdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return false;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        last_status = stdout.clone();
+        new_pid = parse_pid_from_status(&stdout);
+        new_pid.is_some() && new_pid != Some(old_pid) && stdout.contains("Status:      running")
+    });
+    assert!(
+        restarted,
+        "expected auto-restart to replace pid after crash (old={old_pid}, new={new_pid:?})\n{last_status}"
+    );
+
+    let _ = env.run(&["delete", "crash-app"]);
 }
 
 #[test]

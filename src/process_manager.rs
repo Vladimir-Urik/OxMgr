@@ -6,16 +6,16 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::time::sleep;
 #[cfg(windows)]
 use tokio::time::timeout as tokio_timeout;
+use tokio::time::{sleep, Instant as TokioInstant};
 use tracing::{error, info, warn};
 
 use crate::cgroup;
@@ -33,7 +33,7 @@ pub struct ProcessManager {
     config: AppConfig,
     processes: HashMap<String, ManagedProcess>,
     watch_fingerprints: HashMap<String, u64>,
-    scheduled_restarts: HashMap<String, u64>,
+    scheduled_restarts: HashMap<String, TokioInstant>,
     next_id: u64,
     exit_tx: UnboundedSender<ProcessExitEvent>,
     system: System,
@@ -681,9 +681,29 @@ impl ProcessManager {
                 .health_check
                 .as_ref()
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
-            self.scheduled_restarts
-                .insert(process.name.clone(), now.saturating_add(restart_delay));
-            self.processes.insert(process.name.clone(), process.clone());
+            let process_name = process.name.clone();
+            self.processes.insert(process_name.clone(), process.clone());
+
+            if restart_delay == 0 {
+                if let Err(err) = self.spawn_existing(&process_name).await {
+                    error!(
+                        "failed to restart process {} immediately after exit: {}",
+                        process_name, err
+                    );
+                    if let Some(process) = self.processes.get_mut(&process_name) {
+                        process.status = ProcessStatus::Errored;
+                        process.desired_state = DesiredState::Stopped;
+                        process.last_health_error = Some(format!("restart failed: {err}"));
+                    }
+                    self.save()?;
+                }
+                return Ok(());
+            }
+
+            self.scheduled_restarts.insert(
+                process_name,
+                TokioInstant::now() + Duration::from_secs(restart_delay),
+            );
             self.save()?;
             return Ok(());
         }
@@ -892,8 +912,8 @@ impl ProcessManager {
 
     /// Executes delayed restarts whose scheduled timestamp has already passed.
     pub async fn run_scheduled_restarts(&mut self) -> Result<()> {
-        let now = now_epoch_secs();
-        let mut due: Vec<(String, u64)> = self
+        let now = TokioInstant::now();
+        let mut due: Vec<(String, TokioInstant)> = self
             .scheduled_restarts
             .iter()
             .filter(|(_, due_at)| **due_at <= now)
@@ -926,6 +946,10 @@ impl ProcessManager {
         }
 
         Ok(())
+    }
+
+    pub(crate) fn next_scheduled_restart_at(&self) -> Option<TokioInstant> {
+        self.scheduled_restarts.values().copied().min()
     }
 
     fn save(&self) -> Result<()> {
@@ -1646,7 +1670,10 @@ fn maybe_reset_backoff_attempt(process: &mut ManagedProcess) {
 }
 
 fn compute_restart_delay_secs(process: &ManagedProcess) -> u64 {
-    let base = process.restart_delay_secs.max(1);
+    let base = process.restart_delay_secs;
+    if base == 0 {
+        return 0;
+    }
     let exponent = process.restart_backoff_attempt.min(8);
     let exp_multiplier = 1_u64 << exponent;
     let cap = process.restart_backoff_cap_secs.max(base);
@@ -1753,7 +1780,7 @@ async fn terminate_pid(pid: u32, signal_name: Option<&str>, timeout: Duration) -
     }
 
     let graceful_wait = graceful_wait_before_force_kill(signal, timeout);
-    let start = Instant::now();
+    let start = StdInstant::now();
     while start.elapsed() < graceful_wait {
         if !process_exists(pid) {
             return Ok(());
@@ -1824,7 +1851,7 @@ async fn terminate_pid(pid: u32, _signal_name: Option<&str>, timeout: Duration) 
         return Ok(());
     }
 
-    let start = Instant::now();
+    let start = StdInstant::now();
     while start.elapsed() < timeout {
         if !process_exists(pid) {
             return Ok(());
@@ -2100,9 +2127,10 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command as StdCommand;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::Instant as TokioInstant;
 
     #[cfg(unix)]
     use super::graceful_wait_before_force_kill;
@@ -2164,19 +2192,14 @@ mod tests {
     }
 
     #[test]
-    fn restart_backoff_has_minimum_delay_when_base_is_zero() {
+    fn zero_restart_delay_disables_hidden_backoff() {
         let mut process = fixture_process();
         process.restart_delay_secs = 0;
-        process.restart_backoff_cap_secs = 5;
-        process.restart_backoff_attempt = 0;
+        process.restart_backoff_cap_secs = 300;
+        process.restart_backoff_attempt = 6;
 
         let delay = compute_restart_delay_secs(&process);
-        assert!(
-            delay >= 1,
-            "delay should be at least one second, got {}",
-            delay
-        );
-        assert!(delay <= 5, "delay should stay under cap, got {}", delay);
+        assert_eq!(delay, 0, "zero restart delay should restart immediately");
     }
 
     #[test]
@@ -2500,7 +2523,7 @@ mod tests {
         manager.processes.insert(process.name.clone(), process);
         manager
             .scheduled_restarts
-            .insert("api".to_string(), now_epoch_secs().saturating_sub(1));
+            .insert("api".to_string(), TokioInstant::now());
 
         manager
             .run_scheduled_restarts()
@@ -2523,10 +2546,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handle_exit_event_with_zero_delay_restarts_immediately() {
+        let mut manager = empty_manager("immediate-crash-restart");
+        let mut process = long_running_fixture_process();
+        process.pid = Some(9100);
+        process.restart_delay_secs = 0;
+        manager.processes.insert(process.name.clone(), process);
+
+        manager
+            .handle_exit_event(ProcessExitEvent {
+                name: "api".to_string(),
+                pid: 9100,
+                exit_code: Some(1),
+                success: false,
+                wait_error: false,
+            })
+            .await
+            .expect("zero-delay crash should restart immediately");
+
+        let process = manager
+            .processes
+            .get("api")
+            .expect("process should exist after immediate restart");
+        assert_eq!(process.status, ProcessStatus::Running);
+        assert_eq!(process.desired_state, DesiredState::Running);
+        assert!(
+            process.pid.is_some(),
+            "expected replacement pid to be recorded"
+        );
+        assert_ne!(process.pid, Some(9100), "replacement pid should differ");
+        assert!(
+            !manager.scheduled_restarts.contains_key("api"),
+            "zero-delay restart should not queue scheduled restart"
+        );
+
+        manager
+            .shutdown_all()
+            .await
+            .expect("shutdown should cleanup immediate restart fixture");
+    }
+
+    #[test]
+    fn next_scheduled_restart_at_returns_earliest_deadline() {
+        let mut manager = empty_manager("next-scheduled-restart");
+        manager.scheduled_restarts.insert(
+            "later".to_string(),
+            TokioInstant::now() + Duration::from_secs(10),
+        );
+        let earlier = TokioInstant::now() + Duration::from_secs(3);
+        manager
+            .scheduled_restarts
+            .insert("earlier".to_string(), earlier);
+
+        let next = manager
+            .next_scheduled_restart_at()
+            .expect("expected earliest scheduled restart");
+        assert_eq!(next, earlier);
+    }
+
+    #[tokio::test]
     async fn crash_loop_limit_stops_fourth_crash_after_three_auto_restarts() {
         let mut manager = empty_manager("crash-loop-limit");
         let mut process = fixture_process();
-        process.restart_delay_secs = 0;
+        process.restart_delay_secs = 1;
         process.crash_restart_limit = 3;
         process.pid = Some(8100);
         manager.processes.insert(process.name.clone(), process);
@@ -2679,6 +2761,25 @@ mod tests {
             .display()
             .to_string();
         process.args = vec!["--help".to_string()];
+        process
+    }
+
+    fn long_running_fixture_process() -> ManagedProcess {
+        let mut process = fixture_process();
+        #[cfg(windows)]
+        {
+            process.command = "powershell".to_string();
+            process.args = vec![
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "Start-Sleep -Seconds 5".to_string(),
+            ];
+        }
+        #[cfg(not(windows))]
+        {
+            process.command = "sh".to_string();
+            process.args = vec!["-c".to_string(), "sleep 5".to_string()];
+        }
         process
     }
 

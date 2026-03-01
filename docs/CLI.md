@@ -63,6 +63,7 @@ Cluster mode notes:
 - `--cluster-instances` requires `--cluster`.
 - `--crash-restart-limit` counts only daemon-triggered auto restarts after unexpected exits.
 - Manual `start`, `restart`, and `reload` reset the crash-loop counter.
+- `--restart-delay 0` keeps unexpected-exit restarts immediate; no extra hidden delay is added.
 
 ## Lifecycle
 

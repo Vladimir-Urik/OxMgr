@@ -1,6 +1,7 @@
 //! Foreground daemon loop, local IPC handling, and webhook API handling.
 
 use std::env;
+use std::pin::Pin;
 use std::process::Stdio;
 use std::str;
 use std::sync::Arc;
@@ -11,7 +12,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot, RwLock};
-use tokio::time::{sleep, timeout, Duration, MissedTickBehavior};
+use tokio::time::{
+    sleep, sleep_until, timeout, Duration, Instant as TokioInstant, MissedTickBehavior, Sleep,
+};
 use tracing::{error, info, warn};
 
 use crate::config::AppConfig;
@@ -25,6 +28,8 @@ use crate::process_manager::ProcessManager;
 struct DaemonSnapshot {
     processes: Arc<RwLock<Vec<ManagedProcess>>>,
 }
+
+const DISABLED_RESTART_SLEEP_SECS: u64 = 24 * 60 * 60;
 
 enum ManagerCommand {
     Ipc {
@@ -55,8 +60,10 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     let snapshot = DaemonSnapshot::default();
     snapshot.publish(&manager).await;
 
-    let mut restart_tick = tokio::time::interval(Duration::from_millis(250));
-    restart_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut restart_sleep = Box::pin(sleep_until(restart_sleep_deadline(
+        manager.next_scheduled_restart_at(),
+        TokioInstant::now(),
+    )));
     let mut maintenance = tokio::time::interval(Duration::from_secs(2));
     maintenance.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -108,24 +115,28 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                     }
                 }
                 snapshot.publish(&manager).await;
+                reset_restart_sleep(restart_sleep.as_mut(), &manager);
             }
             Some(event) = exit_rx.recv() => {
                 if let Err(err) = manager.handle_exit_event(event).await {
                     error!("failed to process exit event: {err}");
                 }
                 snapshot.publish(&manager).await;
+                reset_restart_sleep(restart_sleep.as_mut(), &manager);
             }
-            _ = restart_tick.tick() => {
+            _ = restart_sleep.as_mut() => {
                 if let Err(err) = manager.run_scheduled_restarts().await {
                     error!("scheduled restart task failed: {err}");
                 }
                 snapshot.publish(&manager).await;
+                reset_restart_sleep(restart_sleep.as_mut(), &manager);
             }
             _ = maintenance.tick() => {
                 if let Err(err) = manager.run_periodic_tasks().await {
                     error!("periodic manager task failed: {err}");
                 }
                 snapshot.publish(&manager).await;
+                reset_restart_sleep(restart_sleep.as_mut(), &manager);
             }
             Some(_) = shutdown_rx.recv() => {
                 info!("shutdown requested via IPC; stopping managed processes");
@@ -146,6 +157,15 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn reset_restart_sleep(restart_sleep: Pin<&mut Sleep>, manager: &ProcessManager) {
+    let deadline = restart_sleep_deadline(manager.next_scheduled_restart_at(), TokioInstant::now());
+    restart_sleep.reset(deadline);
+}
+
+fn restart_sleep_deadline(next_due_at: Option<TokioInstant>, now: TokioInstant) -> TokioInstant {
+    next_due_at.unwrap_or_else(|| now + Duration::from_secs(DISABLED_RESTART_SLEEP_SECS))
 }
 
 /// Ensures that the local daemon is running, spawning a detached foreground
@@ -571,14 +591,15 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command as StdCommand;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use sha2::{Digest, Sha256};
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::Instant as TokioInstant;
 
     use super::{
-        execute_api_request, execute_snapshot_request, extract_api_secret, DaemonSnapshot,
-        HttpRequest,
+        execute_api_request, execute_snapshot_request, extract_api_secret, restart_sleep_deadline,
+        DaemonSnapshot, HttpRequest, DISABLED_RESTART_SLEEP_SECS,
     };
     use crate::config::AppConfig;
     use crate::process::{RestartPolicy, StartProcessSpec};
@@ -709,6 +730,23 @@ mod tests {
             headers: HashMap::from([("authorization".to_string(), "Bearer token123".to_string())]),
         };
         assert_eq!(extract_api_secret(&request).as_deref(), Some("token123"));
+    }
+
+    #[test]
+    fn restart_sleep_deadline_uses_due_instant_when_available() {
+        let now = TokioInstant::now();
+        let due = now + Duration::from_secs(7);
+        assert_eq!(restart_sleep_deadline(Some(due), now), due);
+    }
+
+    #[test]
+    fn restart_sleep_deadline_uses_far_future_when_no_restart_is_scheduled() {
+        let now = TokioInstant::now();
+        let deadline = restart_sleep_deadline(None, now);
+        assert_eq!(
+            deadline,
+            now + Duration::from_secs(DISABLED_RESTART_SLEEP_SECS)
+        );
     }
 
     #[tokio::test]

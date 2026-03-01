@@ -23,6 +23,7 @@ Crash-loop behavior:
 - By default Oxmgr stops auto-restarting a service after `3` auto restarts inside `5` minutes.
 - Manual `start`, `restart`, and `reload` reset that counter.
 - Set `--crash-restart-limit 0` to disable the cutoff.
+- Leave `--restart-delay` at `0` to restart immediately after an unexpected exit.
 
 ## 2) Inspect and Monitor
 

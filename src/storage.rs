@@ -1,7 +1,7 @@
 //! Persistence helpers for Oxmgr daemon state.
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -70,10 +70,9 @@ pub fn save_state(path: &Path, state: &PersistedState) -> Result<()> {
         ensure_private_dir(parent)?;
     }
 
-    let payload = serde_json::to_vec_pretty(state)?;
     let tmp_path = tmp_state_path(path);
 
-    write_private_file(&tmp_path, &payload)?;
+    write_private_json_file(&tmp_path, state)?;
     replace_state_file(&tmp_path, path)?;
     set_private_file_permissions(path)?;
 
@@ -130,7 +129,7 @@ fn ensure_private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_private_file(path: &Path, payload: &[u8]) -> Result<()> {
+fn write_private_json_file(path: &Path, state: &PersistedState) -> Result<()> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -139,12 +138,14 @@ fn write_private_file(path: &Path, payload: &[u8]) -> Result<()> {
         options.mode(0o600);
     }
 
-    let mut file = options
+    let file = options
         .open(path)
         .with_context(|| format!("failed to open {}", path.display()))?;
-    file.write_all(payload)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    file.flush()
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, state)
+        .with_context(|| format!("failed to serialize {}", path.display()))?;
+    writer
+        .flush()
         .with_context(|| format!("failed to flush {}", path.display()))?;
     Ok(())
 }
