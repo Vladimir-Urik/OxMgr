@@ -12,31 +12,31 @@
     "status": "available",
     "total_downloads": 5
   },
-  "generated_at": "2026-03-01T07:03:53+00:00",
+  "generated_at": "2026-03-02T07:15:51+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 58,
+        "download_count": 68,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
       {
-        "download_count": 7,
+        "download_count": 8,
         "key": "mac_intel_tarball",
         "label": "macOS Intel tar.gz"
       },
       {
-        "download_count": 5,
+        "download_count": 6,
         "key": "mac_arm_tarball",
         "label": "macOS Apple Silicon tar.gz"
       },
       {
-        "download_count": 36,
+        "download_count": 38,
         "key": "windows_zip",
         "label": "Windows zip"
       },
       {
-        "download_count": 5,
+        "download_count": 6,
         "key": "deb_package",
         "label": "Debian .deb"
       }
@@ -44,56 +44,107 @@
     "latest_release": {
       "assets": [
         {
-          "download_count": 0,
+          "download_count": 1,
           "kind": "mac_arm_tarball",
           "label": "macOS Apple Silicon tar.gz",
-          "name": "oxmgr-v0.1.0-aarch64-apple-darwin.tar.gz",
-          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.0/oxmgr-v0.1.0-aarch64-apple-darwin.tar.gz"
+          "name": "oxmgr-v0.1.1-aarch64-apple-darwin.tar.gz",
+          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-aarch64-apple-darwin.tar.gz"
         },
         {
           "download_count": 1,
           "kind": "mac_intel_tarball",
           "label": "macOS Intel tar.gz",
-          "name": "oxmgr-v0.1.0-x86_64-apple-darwin.tar.gz",
-          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.0/oxmgr-v0.1.0-x86_64-apple-darwin.tar.gz"
+          "name": "oxmgr-v0.1.1-x86_64-apple-darwin.tar.gz",
+          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-apple-darwin.tar.gz"
         },
         {
-          "download_count": 3,
+          "download_count": 2,
           "kind": "windows_zip",
           "label": "Windows zip",
-          "name": "oxmgr-v0.1.0-x86_64-pc-windows-msvc.zip",
-          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.0/oxmgr-v0.1.0-x86_64-pc-windows-msvc.zip"
+          "name": "oxmgr-v0.1.1-x86_64-pc-windows-msvc.zip",
+          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-pc-windows-msvc.zip"
         },
         {
-          "download_count": 5,
+          "download_count": 6,
           "kind": "linux_tarball",
           "label": "Linux tar.gz",
-          "name": "oxmgr-v0.1.0-x86_64-unknown-linux-gnu.tar.gz",
-          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.0/oxmgr-v0.1.0-x86_64-unknown-linux-gnu.tar.gz"
+          "name": "oxmgr-v0.1.1-x86_64-unknown-linux-gnu.tar.gz",
+          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-unknown-linux-gnu.tar.gz"
         },
         {
           "download_count": 1,
           "kind": "deb_package",
           "label": "Debian .deb",
-          "name": "oxmgr_0.1.0_amd64.deb",
-          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.0/oxmgr_0.1.0_amd64.deb"
+          "name": "oxmgr_0.1.1_amd64.deb",
+          "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr_0.1.1_amd64.deb"
         }
       ],
       "counts": {
         "deb_package": 1,
-        "linux_tarball": 5,
-        "mac_arm_tarball": 0,
+        "linux_tarball": 6,
+        "mac_arm_tarball": 1,
         "mac_intel_tarball": 1,
         "other": 0,
-        "windows_zip": 3
+        "windows_zip": 2
       },
-      "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.0",
-      "payload_downloads": 10,
-      "published_at": "2026-02-28T14:36:17Z",
-      "tag_name": "v0.1.0"
+      "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.1",
+      "payload_downloads": 11,
+      "published_at": "2026-03-01T13:36:35Z",
+      "tag_name": "v0.1.1"
     },
-    "release_count": 12,
+    "release_count": 13,
     "releases": [
+      {
+        "assets": [
+          {
+            "download_count": 1,
+            "kind": "mac_arm_tarball",
+            "label": "macOS Apple Silicon tar.gz",
+            "name": "oxmgr-v0.1.1-aarch64-apple-darwin.tar.gz",
+            "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-aarch64-apple-darwin.tar.gz"
+          },
+          {
+            "download_count": 1,
+            "kind": "mac_intel_tarball",
+            "label": "macOS Intel tar.gz",
+            "name": "oxmgr-v0.1.1-x86_64-apple-darwin.tar.gz",
+            "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-apple-darwin.tar.gz"
+          },
+          {
+            "download_count": 2,
+            "kind": "windows_zip",
+            "label": "Windows zip",
+            "name": "oxmgr-v0.1.1-x86_64-pc-windows-msvc.zip",
+            "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-pc-windows-msvc.zip"
+          },
+          {
+            "download_count": 6,
+            "kind": "linux_tarball",
+            "label": "Linux tar.gz",
+            "name": "oxmgr-v0.1.1-x86_64-unknown-linux-gnu.tar.gz",
+            "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-unknown-linux-gnu.tar.gz"
+          },
+          {
+            "download_count": 1,
+            "kind": "deb_package",
+            "label": "Debian .deb",
+            "name": "oxmgr_0.1.1_amd64.deb",
+            "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr_0.1.1_amd64.deb"
+          }
+        ],
+        "counts": {
+          "deb_package": 1,
+          "linux_tarball": 6,
+          "mac_arm_tarball": 1,
+          "mac_intel_tarball": 1,
+          "other": 0,
+          "windows_zip": 2
+        },
+        "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.1",
+        "payload_downloads": 11,
+        "published_at": "2026-03-01T13:36:35Z",
+        "tag_name": "v0.1.1"
+      },
       {
         "assets": [
           {
@@ -424,7 +475,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.0.7/oxmgr-v0.0.7-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 3,
+            "download_count": 4,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.0.7-x86_64-unknown-linux-gnu.tar.gz",
@@ -440,14 +491,14 @@
         ],
         "counts": {
           "deb_package": 0,
-          "linux_tarball": 3,
+          "linux_tarball": 4,
           "mac_arm_tarball": 0,
           "mac_intel_tarball": 0,
           "other": 0,
           "windows_zip": 2
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.7",
-        "payload_downloads": 5,
+        "payload_downloads": 6,
         "published_at": "2026-02-27T20:51:48Z",
         "tag_name": "v0.0.7"
       },
@@ -475,7 +526,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.0.6/oxmgr-v0.0.6-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 6,
+            "download_count": 7,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.0.6-x86_64-unknown-linux-gnu.tar.gz",
@@ -491,14 +542,14 @@
         ],
         "counts": {
           "deb_package": 1,
-          "linux_tarball": 6,
+          "linux_tarball": 7,
           "mac_arm_tarball": 0,
           "mac_intel_tarball": 1,
           "other": 0,
           "windows_zip": 2
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.6",
-        "payload_downloads": 10,
+        "payload_downloads": 11,
         "published_at": "2026-02-27T20:20:27Z",
         "tag_name": "v0.0.6"
       },
@@ -577,7 +628,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.0.4/oxmgr-v0.0.4-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 4,
+            "download_count": 5,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.0.4-x86_64-unknown-linux-gnu.tar.gz",
@@ -593,14 +644,14 @@
         ],
         "counts": {
           "deb_package": 0,
-          "linux_tarball": 4,
+          "linux_tarball": 5,
           "mac_arm_tarball": 0,
           "mac_intel_tarball": 0,
           "other": 0,
           "windows_zip": 5
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.4",
-        "payload_downloads": 9,
+        "payload_downloads": 10,
         "published_at": "2026-02-27T14:33:41Z",
         "tag_name": "v0.0.4"
       },
@@ -628,7 +679,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.0.3/oxmgr-v0.0.3-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 7,
+            "download_count": 8,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.0.3-x86_64-unknown-linux-gnu.tar.gz",
@@ -644,14 +695,14 @@
         ],
         "counts": {
           "deb_package": 1,
-          "linux_tarball": 7,
+          "linux_tarball": 8,
           "mac_arm_tarball": 1,
           "mac_intel_tarball": 1,
           "other": 0,
           "windows_zip": 4
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.3",
-        "payload_downloads": 14,
+        "payload_downloads": 15,
         "published_at": "2026-02-27T14:02:54Z",
         "tag_name": "v0.0.3"
       },
@@ -708,7 +759,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 111
+    "total_payload_downloads": 126
   },
   "homebrew": {
     "formula": "oxmgr",
