@@ -8,7 +8,7 @@ Oxmgr is a lightweight, cross-platform Rust process manager and PM2 alternative.
 
 Use it to run, supervise, reload, and monitor long-running services on Linux, macOS, and Windows. Oxmgr is language-agnostic, so it works with Node.js, Python, Go, Rust binaries, and shell commands.
 
-Latest published benchmark snapshot: [BENCHMARK.md](./BENCHMARK.md)
+Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchmark.json](./benchmark.json)
 
 ## Why Oxmgr
 
@@ -120,6 +120,7 @@ Useful links:
 
 - [Documentation Index](./docs/README.md)
 - [Latest Benchmark Results](./BENCHMARK.md)
+- [Latest Benchmark JSON](./benchmark.json)
 - [Architecture Overview](./docs/ARCHITECTURE.md)
 - [Installation Guide](./docs/install.md)
 - [User Guide](./docs/USAGE.md)

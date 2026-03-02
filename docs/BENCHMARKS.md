@@ -2,7 +2,7 @@
 
 This repository includes an automated `oxmgr` vs `pm2` benchmark harness.
 
-The latest committed benchmark snapshot lives in [`/BENCHMARK.md`](../BENCHMARK.md).
+The latest committed benchmark snapshots live in [`/BENCHMARK.md`](../BENCHMARK.md) and [`/benchmark.json`](../benchmark.json).
 
 It is designed to run both:
 
@@ -67,6 +67,7 @@ By default the script:
 Outputs:
 
 - `report.json`: raw samples plus summary statistics
+- `benchmark.json`: stable machine-readable snapshot of the published benchmark tables
 - `summary.md`: Markdown report suitable for GitHub summary or sharing
 
 ## GitHub Workflow
@@ -78,8 +79,8 @@ It:
 - installs a pinned `pm2`
 - builds `oxmgr`
 - runs the same Python harness as local runs
-- refreshes the tracked latest snapshot in [`/BENCHMARK.md`](../BENCHMARK.md)
-- uploads `report.json` and `summary.md` as workflow artifacts
+- refreshes the tracked latest snapshots in [`/BENCHMARK.md`](../BENCHMARK.md) and [`/benchmark.json`](../benchmark.json)
+- uploads `report.json`, `benchmark.json`, and `summary.md` as workflow artifacts
 - publishes `summary.md` into the GitHub Actions step summary
 
 ## Interpreting Results
