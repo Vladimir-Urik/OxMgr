@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-dir",
-        help="Directory for JSON and Markdown reports. Defaults to bench/results/<timestamp>.",
+        help="Directory for benchmark JSON and Markdown reports. Defaults to bench/results/<timestamp>.",
     )
     parser.add_argument(
         "--process-counts",
@@ -1169,6 +1169,101 @@ def ratio_line(
     return f"{format_float(ratio, 2)}{suffix} higher vs pm2"
 
 
+def select_stats(stats: dict[str, float], *fields: str) -> dict[str, float]:
+    return {field: float(stats[field]) for field in fields if field in stats}
+
+
+def build_benchmark_json(report: dict[str, Any], process_counts: list[int]) -> dict[str, Any]:
+    boot = report["benchmarks"]["boot"]
+    scale = report["benchmarks"]["scale"]
+    restart = report["benchmarks"]["restart"]
+    crash = report["benchmarks"]["crash_recovery"]
+
+    return {
+        "metadata": {
+            "generated_at_utc": report["metadata"]["generated_at_utc"],
+            "host_platform": report["metadata"]["platform"],
+            "node_version": report["metadata"]["node_version"],
+            "pm2_command": report["metadata"]["pm2_command"],
+            "oxmgr_binary": report["metadata"]["oxmgr_binary"],
+            "process_counts": process_counts,
+        },
+        "empty_daemon_boot": {
+            manager: {
+                "boot_ms": select_stats(boot[manager]["boot_ms"], "median", "p95"),
+                "daemon_rss_kb": select_stats(boot[manager]["daemon_rss_kb"], "median"),
+            }
+            for manager in ("oxmgr", "pm2")
+        },
+        "scale": {
+            str(process_count): {
+                manager: {
+                    "start_ms": select_stats(
+                        scale[manager][str(process_count)]["start_ms"], "median"
+                    ),
+                    "settle_ms": select_stats(
+                        scale[manager][str(process_count)]["settle_ms"], "median"
+                    ),
+                    "list_ms": select_stats(
+                        scale[manager][str(process_count)]["list_ms"], "median"
+                    ),
+                    "daemon_rss_kb": select_stats(
+                        scale[manager][str(process_count)]["daemon_rss_kb"], "median"
+                    ),
+                }
+                for manager in ("oxmgr", "pm2")
+            }
+            for process_count in process_counts
+        },
+        "single_app_lifecycle": {
+            "restart_command_ms": {
+                manager: select_stats(restart[manager]["command_ms"], "median", "p95")
+                for manager in ("oxmgr", "pm2")
+            },
+            "restart_pid_visible_ms": {
+                manager: select_stats(restart[manager]["pid_visible_ms"], "median", "p95")
+                for manager in ("oxmgr", "pm2")
+            },
+            "restart_ready_event_emitted_ms": {
+                manager: select_stats(
+                    restart[manager]["ready_event_emitted_ms"], "median", "p95"
+                )
+                for manager in ("oxmgr", "pm2")
+            },
+            "restart_ready_event_visible_ms": {
+                manager: select_stats(
+                    restart[manager]["ready_event_visible_ms"], "median", "p95"
+                )
+                for manager in ("oxmgr", "pm2")
+            },
+            "restart_tcp_ready_ms": {
+                manager: select_stats(restart[manager]["tcp_ready_ms"], "median", "p95")
+                for manager in ("oxmgr", "pm2")
+            },
+            "crash_pid_visible_ms": {
+                manager: select_stats(crash[manager]["pid_visible_ms"], "median", "p95")
+                for manager in ("oxmgr", "pm2")
+            },
+            "crash_ready_event_emitted_ms": {
+                manager: select_stats(
+                    crash[manager]["ready_event_emitted_ms"], "median", "p95"
+                )
+                for manager in ("oxmgr", "pm2")
+            },
+            "crash_ready_event_visible_ms": {
+                manager: select_stats(
+                    crash[manager]["ready_event_visible_ms"], "median", "p95"
+                )
+                for manager in ("oxmgr", "pm2")
+            },
+            "crash_tcp_ready_ms": {
+                manager: select_stats(crash[manager]["tcp_ready_ms"], "median", "p95")
+                for manager in ("oxmgr", "pm2")
+            },
+        },
+    }
+
+
 def build_markdown_report(report: dict[str, Any], process_counts: list[int]) -> str:
     boot = report["benchmarks"]["boot"]
     scale = report["benchmarks"]["scale"]
@@ -1521,11 +1616,16 @@ def main() -> int:
     report_path = output_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
+    benchmark_json_path = output_dir / "benchmark.json"
+    benchmark_json = build_benchmark_json(report, process_counts)
+    benchmark_json_path.write_text(json.dumps(benchmark_json, indent=2), encoding="utf-8")
+
     markdown = build_markdown_report(report, process_counts)
     summary_path = output_dir / "summary.md"
     summary_path.write_text(markdown, encoding="utf-8")
 
     print(f"JSON report: {report_path}")
+    print(f"Benchmark snapshot: {benchmark_json_path}")
     print(f"Markdown summary: {summary_path}")
     return 0
 

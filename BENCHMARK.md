@@ -3,6 +3,8 @@
 > Latest committed benchmark result from the automated `oxmgr` vs `pm2` workflow.
 >
 > Methodology and local repro steps: [docs/BENCHMARKS.md](./docs/BENCHMARKS.md)
+>
+> Machine-readable snapshot: [benchmark.json](./benchmark.json)
 
 # Oxmgr vs PM2 Benchmarks
 

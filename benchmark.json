@@ -1,0 +1,218 @@
+{
+  "metadata": {
+    "generated_at_utc": "2026-03-01T13:17:32.113776+00:00",
+    "host_platform": "linux (Linux 6.14.0-1017-azure)",
+    "node_version": "v20.20.0",
+    "pm2_command": "/opt/hostedtoolcache/node/20.20.0/x64/bin/pm2",
+    "oxmgr_binary": "/home/runner/work/OxMgr/OxMgr/target/release/oxmgr",
+    "process_counts": [
+      1,
+      25,
+      100
+    ]
+  },
+  "empty_daemon_boot": {
+    "oxmgr": {
+      "boot_ms": {
+        "median": 100.8,
+        "p95": 102.4
+      },
+      "daemon_rss_kb": {
+        "median": 5828.0
+      }
+    },
+    "pm2": {
+      "boot_ms": {
+        "median": 395.1,
+        "p95": 398.9
+      },
+      "daemon_rss_kb": {
+        "median": 56956.0
+      }
+    }
+  },
+  "scale": {
+    "1": {
+      "oxmgr": {
+        "start_ms": {
+          "median": 4.0
+        },
+        "settle_ms": {
+          "median": 0.1
+        },
+        "list_ms": {
+          "median": 2.5
+        },
+        "daemon_rss_kb": {
+          "median": 6048.0
+        }
+      },
+      "pm2": {
+        "start_ms": {
+          "median": 197.9
+        },
+        "settle_ms": {
+          "median": 168.5
+        },
+        "list_ms": {
+          "median": 134.8
+        },
+        "daemon_rss_kb": {
+          "median": 62840.0
+        }
+      }
+    },
+    "25": {
+      "oxmgr": {
+        "start_ms": {
+          "median": 167.1
+        },
+        "settle_ms": {
+          "median": 0.5
+        },
+        "list_ms": {
+          "median": 6.6
+        },
+        "daemon_rss_kb": {
+          "median": 6176.0
+        }
+      },
+      "pm2": {
+        "start_ms": {
+          "median": 1542.6
+        },
+        "settle_ms": {
+          "median": 228.3
+        },
+        "list_ms": {
+          "median": 150.4
+        },
+        "daemon_rss_kb": {
+          "median": 107364.0
+        }
+      }
+    },
+    "100": {
+      "oxmgr": {
+        "start_ms": {
+          "median": 818.8
+        },
+        "settle_ms": {
+          "median": 1.6
+        },
+        "list_ms": {
+          "median": 4.9
+        },
+        "daemon_rss_kb": {
+          "median": 7012.0
+        }
+      },
+      "pm2": {
+        "start_ms": {
+          "median": 6037.4
+        },
+        "settle_ms": {
+          "median": 371.4
+        },
+        "list_ms": {
+          "median": 205.4
+        },
+        "daemon_rss_kb": {
+          "median": 144380.0
+        }
+      }
+    }
+  },
+  "single_app_lifecycle": {
+    "restart_command_ms": {
+      "oxmgr": {
+        "median": 206.3,
+        "p95": 206.9
+      },
+      "pm2": {
+        "median": 283.2,
+        "p95": 284.7
+      }
+    },
+    "restart_pid_visible_ms": {
+      "oxmgr": {
+        "median": 206.3,
+        "p95": 207.3
+      },
+      "pm2": {
+        "median": 318.5,
+        "p95": 324.1
+      }
+    },
+    "restart_ready_event_emitted_ms": {
+      "oxmgr": {
+        "median": 229.1,
+        "p95": 229.7
+      },
+      "pm2": {
+        "median": 386.7,
+        "p95": 396.0
+      }
+    },
+    "restart_ready_event_visible_ms": {
+      "oxmgr": {
+        "median": 237.2,
+        "p95": 238.2
+      },
+      "pm2": {
+        "median": 392.9,
+        "p95": 401.1
+      }
+    },
+    "restart_tcp_ready_ms": {
+      "oxmgr": {
+        "median": 238.8,
+        "p95": 239.8
+      },
+      "pm2": {
+        "median": 394.1,
+        "p95": 402.2
+      }
+    },
+    "crash_pid_visible_ms": {
+      "oxmgr": {
+        "median": 4.0,
+        "p95": 16.2
+      },
+      "pm2": {
+        "median": 167.7,
+        "p95": 179.2
+      }
+    },
+    "crash_ready_event_emitted_ms": {
+      "oxmgr": {
+        "median": 27.6,
+        "p95": 28.3
+      },
+      "pm2": {
+        "median": 137.9,
+        "p95": 146.6
+      }
+    },
+    "crash_ready_event_visible_ms": {
+      "oxmgr": {
+        "median": 34.9,
+        "p95": 37.0
+      },
+      "pm2": {
+        "median": 167.9,
+        "p95": 179.3
+      }
+    },
+    "crash_tcp_ready_ms": {
+      "oxmgr": {
+        "median": 36.6,
+        "p95": 38.8
+      },
+      "pm2": {
+        "median": 169.0,
+        "p95": 180.5
+      }
+    }
+  }
+}

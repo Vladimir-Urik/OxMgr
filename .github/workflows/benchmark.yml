@@ -47,7 +47,7 @@ jobs:
             --restart-samples 7 \
             --crash-samples 7
 
-      - name: Refresh BENCHMARK.md
+      - name: Refresh latest benchmark snapshots
         run: |
           set -euo pipefail
           {
@@ -56,9 +56,12 @@ jobs:
             echo '> Latest committed benchmark result from the automated `oxmgr` vs `pm2` workflow.'
             echo '>'
             echo '> Methodology and local repro steps: [docs/BENCHMARKS.md](./docs/BENCHMARKS.md)'
+            echo '>'
+            echo '> Machine-readable snapshot: [benchmark.json](./benchmark.json)'
             echo
             cat bench/results/github/summary.md
           } > BENCHMARK.md
+          cp bench/results/github/benchmark.json benchmark.json
 
       - name: Publish step summary
         run: cat bench/results/github/summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -67,14 +70,14 @@ jobs:
         if: github.ref_type == 'branch'
         run: |
           set -euo pipefail
-          if git diff --quiet -- BENCHMARK.md; then
-            echo "BENCHMARK.md already up to date"
+          if git diff --quiet -- BENCHMARK.md benchmark.json; then
+            echo "Benchmark snapshots already up to date"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add BENCHMARK.md
+          git add BENCHMARK.md benchmark.json
           git commit -m "docs: update latest benchmark"
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
@@ -84,5 +87,7 @@ jobs:
           name: oxmgr-vs-pm2-benchmarks
           path: |
             BENCHMARK.md
+            benchmark.json
             bench/results/github/report.json
+            bench/results/github/benchmark.json
             bench/results/github/summary.md
