@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "generated_at_utc": "2026-03-01T13:17:32.113776+00:00",
+    "generated_at_utc": "2026-03-02T09:36:40.397905+00:00",
     "host_platform": "linux (Linux 6.14.0-1017-azure)",
     "node_version": "v20.20.0",
     "pm2_command": "/opt/hostedtoolcache/node/20.20.0/x64/bin/pm2",
@@ -14,20 +14,20 @@
   "empty_daemon_boot": {
     "oxmgr": {
       "boot_ms": {
-        "median": 100.8,
-        "p95": 102.4
+        "median": 100.70128800001044,
+        "p95": 102.09344669999751
       },
       "daemon_rss_kb": {
-        "median": 5828.0
+        "median": 5892.0
       }
     },
     "pm2": {
       "boot_ms": {
-        "median": 395.1,
-        "p95": 398.9
+        "median": 382.7715719999958,
+        "p95": 390.9588836999973
       },
       "daemon_rss_kb": {
-        "median": 56956.0
+        "median": 56932.0
       }
     }
   },
@@ -35,90 +35,90 @@
     "1": {
       "oxmgr": {
         "start_ms": {
-          "median": 4.0
+          "median": 3.859145000006947
         },
         "settle_ms": {
-          "median": 0.1
+          "median": 0.11697800000831649
         },
         "list_ms": {
-          "median": 2.5
+          "median": 2.5428779999998596
         },
         "daemon_rss_kb": {
-          "median": 6048.0
+          "median": 6116.0
         }
       },
       "pm2": {
         "start_ms": {
-          "median": 197.9
+          "median": 183.98250900000335
         },
         "settle_ms": {
-          "median": 168.5
+          "median": 165.48628199998916
         },
         "list_ms": {
-          "median": 134.8
+          "median": 131.056252999997
         },
         "daemon_rss_kb": {
-          "median": 62840.0
+          "median": 63844.0
         }
       }
     },
     "25": {
       "oxmgr": {
         "start_ms": {
-          "median": 167.1
+          "median": 152.93910300000846
         },
         "settle_ms": {
-          "median": 0.5
+          "median": 0.5267540000062354
         },
         "list_ms": {
-          "median": 6.6
+          "median": 7.322025999997095
         },
         "daemon_rss_kb": {
-          "median": 6176.0
+          "median": 6276.0
         }
       },
       "pm2": {
         "start_ms": {
-          "median": 1542.6
+          "median": 1449.9421419999976
         },
         "settle_ms": {
-          "median": 228.3
+          "median": 224.83753500000603
         },
         "list_ms": {
-          "median": 150.4
+          "median": 142.74570599999947
         },
         "daemon_rss_kb": {
-          "median": 107364.0
+          "median": 108828.0
         }
       }
     },
     "100": {
       "oxmgr": {
         "start_ms": {
-          "median": 818.8
+          "median": 773.2651009999927
         },
         "settle_ms": {
-          "median": 1.6
+          "median": 1.5056120000167539
         },
         "list_ms": {
-          "median": 4.9
+          "median": 3.9091830000188565
         },
         "daemon_rss_kb": {
-          "median": 7012.0
+          "median": 6880.0
         }
       },
       "pm2": {
         "start_ms": {
-          "median": 6037.4
+          "median": 5819.803350000001
         },
         "settle_ms": {
-          "median": 371.4
+          "median": 371.5510909999864
         },
         "list_ms": {
-          "median": 205.4
+          "median": 215.22000800001706
         },
         "daemon_rss_kb": {
-          "median": 144380.0
+          "median": 145532.0
         }
       }
     }
@@ -126,92 +126,92 @@
   "single_app_lifecycle": {
     "restart_command_ms": {
       "oxmgr": {
-        "median": 206.3,
-        "p95": 206.9
+        "median": 205.7091980000223,
+        "p95": 206.94951240000137
       },
       "pm2": {
-        "median": 283.2,
-        "p95": 284.7
+        "median": 275.98205499998585,
+        "p95": 280.8409881999978
       }
     },
     "restart_pid_visible_ms": {
       "oxmgr": {
-        "median": 206.3,
-        "p95": 207.3
+        "median": 205.97944499999699,
+        "p95": 206.96126500000105
       },
       "pm2": {
-        "median": 318.5,
-        "p95": 324.1
+        "median": 306.63638199999355,
+        "p95": 314.1005648000089
       }
     },
     "restart_ready_event_emitted_ms": {
       "oxmgr": {
-        "median": 229.1,
-        "p95": 229.7
+        "median": 228.3564453125,
+        "p95": 229.5919189453125
       },
       "pm2": {
-        "median": 386.7,
-        "p95": 396.0
+        "median": 376.776123046875,
+        "p95": 384.20368652343745
       }
     },
     "restart_ready_event_visible_ms": {
       "oxmgr": {
-        "median": 237.2,
-        "p95": 238.2
+        "median": 236.79239300000177,
+        "p95": 237.8051518999996
       },
       "pm2": {
-        "median": 392.9,
-        "p95": 401.1
+        "median": 380.5454159999897,
+        "p95": 390.9411695000017
       }
     },
     "restart_tcp_ready_ms": {
       "oxmgr": {
-        "median": 238.8,
-        "p95": 239.8
+        "median": 238.3187840000005,
+        "p95": 239.3145319999917
       },
       "pm2": {
-        "median": 394.1,
-        "p95": 402.2
+        "median": 380.8567829999845,
+        "p95": 390.94050400000526
       }
     },
     "crash_pid_visible_ms": {
       "oxmgr": {
-        "median": 4.0,
-        "p95": 16.2
+        "median": 3.7454259999947226,
+        "p95": 4.131502599997816
       },
       "pm2": {
-        "median": 167.7,
-        "p95": 179.2
+        "median": 157.19307300000196,
+        "p95": 168.73280789998262
       }
     },
     "crash_ready_event_emitted_ms": {
       "oxmgr": {
-        "median": 27.6,
-        "p95": 28.3
+        "median": 26.026123046875,
+        "p95": 26.9384521484375
       },
       "pm2": {
-        "median": 137.9,
-        "p95": 146.6
+        "median": 131.004150390625,
+        "p95": 143.7215576171875
       }
     },
     "crash_ready_event_visible_ms": {
       "oxmgr": {
-        "median": 34.9,
-        "p95": 37.0
+        "median": 34.434528999980785,
+        "p95": 35.00097609998534
       },
       "pm2": {
-        "median": 167.9,
-        "p95": 179.3
+        "median": 157.29210800000715,
+        "p95": 168.8242650000035
       }
     },
     "crash_tcp_ready_ms": {
       "oxmgr": {
-        "median": 36.6,
-        "p95": 38.8
+        "median": 36.00649499998099,
+        "p95": 36.569902699991985
       },
       "pm2": {
-        "median": 169.0,
-        "p95": 180.5
+        "median": 158.28848900000025,
+        "p95": 169.84182759999555
       }
     }
   }
