@@ -12,11 +12,11 @@
     "status": "available",
     "total_downloads": 5
   },
-  "generated_at": "2026-03-02T07:15:51+00:00",
+  "generated_at": "2026-03-03T07:09:59+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 68,
+        "download_count": 69,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
@@ -220,7 +220,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.0.12/oxmgr-v0.0.12-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 7,
+            "download_count": 8,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.0.12-x86_64-unknown-linux-gnu.tar.gz",
@@ -236,14 +236,14 @@
         ],
         "counts": {
           "deb_package": 1,
-          "linux_tarball": 7,
+          "linux_tarball": 8,
           "mac_arm_tarball": 1,
           "mac_intel_tarball": 1,
           "other": 0,
           "windows_zip": 4
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.0.12",
-        "payload_downloads": 14,
+        "payload_downloads": 15,
         "published_at": "2026-02-28T13:59:57Z",
         "tag_name": "v0.0.12"
       },
@@ -759,7 +759,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 126
+    "total_payload_downloads": 127
   },
   "homebrew": {
     "formula": "oxmgr",
