@@ -38,7 +38,7 @@ Contains one implementation module per top-level command. These modules translat
 Runs the foreground daemon event loop. The daemon listens on:
 
 - a localhost TCP IPC endpoint for CLI requests
-- a localhost HTTP endpoint for authenticated pull webhooks
+- a localhost HTTP endpoint for authenticated pull webhooks and Prometheus scraping
 
 The daemon serialises state changes through a single manager command channel, which keeps lifecycle transitions predictable.
 

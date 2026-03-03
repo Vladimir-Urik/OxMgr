@@ -11,7 +11,7 @@ Project docs live here.
 - [Terminal UI Guide](./UI.md)
 - [Latest Benchmark Results](../BENCHMARK.md)
 - [Latest Benchmark JSON](../benchmark.json)
-- [Pull and Webhook Guide](./PULL_WEBHOOK.md)
+- [Pull, Webhook, and Metrics Guide](./PULL_WEBHOOK.md)
 - [Deployment Guide](./DEPLOY.md)
 - [Benchmark Guide](./BENCHMARKS.md)
 - [Download Metrics](./DOWNLOAD_METRICS.md)

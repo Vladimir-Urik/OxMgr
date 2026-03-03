@@ -108,6 +108,7 @@ oxmgr logs <name> -f
 
 - `OXMGR_HOME`: custom Oxmgr data directory
 - `OXMGR_DAEMON_ADDR`: custom daemon address (`host:port`)
+- `OXMGR_API_ADDR`: custom daemon HTTP API address (`host:port`)
 - `OXMGR_LOG_MAX_SIZE_MB`: log rotation size threshold
 - `OXMGR_LOG_MAX_FILES`: number of rotated files to retain
 - `OXMGR_LOG_MAX_DAYS`: rotated log retention period

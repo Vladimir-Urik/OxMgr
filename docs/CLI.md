@@ -75,7 +75,7 @@ Cluster mode notes:
 
 `pull` updates from configured git repository and reloads/restarts the service only when commit changed.
 
-Details and webhook flow: [Pull and Webhook Guide](./PULL_WEBHOOK.md).
+Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBHOOK.md).
 
 ## Inspect
 
@@ -160,8 +160,10 @@ Full deployment configuration details: [Deployment Guide](./DEPLOY.md).
 - `oxmgr daemon run`
 - `oxmgr daemon stop`
 
-Webhook endpoint (daemon HTTP API):
+Daemon HTTP API:
 
 - `POST /pull/<name|id>`
+- `GET /metrics`
 - Header: `X-Oxmgr-Secret: <secret>` (or `Authorization: Bearer <secret>`)
 - Daemon bind address: `OXMGR_API_ADDR` (default high localhost port)
+- Metrics response format: Prometheus text exposition

@@ -126,7 +126,7 @@ Useful links:
 - [User Guide](./docs/USAGE.md)
 - [CLI Reference](./docs/CLI.md)
 - [Terminal UI Guide](./docs/UI.md)
-- [Pull and Webhook Guide](./docs/PULL_WEBHOOK.md)
+- [Pull, Webhook, and Metrics Guide](./docs/PULL_WEBHOOK.md)
 - [Deployment Guide](./docs/DEPLOY.md)
 - [Service Bundles](./docs/BUNDLES.md)
 - [Benchmark Guide](./docs/BENCHMARKS.md)

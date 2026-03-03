@@ -209,7 +209,8 @@ Behavior:
 - `oxmgr pull <name>` runs git pull for that service and reloads/restarts only if commit changed.
 - `oxmgr pull` without target processes all services with `git_repo`.
 - Webhook endpoint: `POST /pull/<name|id>` with header `X-Oxmgr-Secret: <pull_secret>`.
-- Daemon webhook bind address can be set with `OXMGR_API_ADDR`.
+- Metrics endpoint: `GET /metrics` on the same daemon HTTP bind address.
+- Daemon HTTP bind address can be set with `OXMGR_API_ADDR`.
 
 ## Dependencies and Start Ordering
 

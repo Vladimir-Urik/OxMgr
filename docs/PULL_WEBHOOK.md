@@ -1,6 +1,6 @@
-# Pull and Webhook Guide
+# Pull, Webhook, and Metrics Guide
 
-Oxmgr can pull git updates per service and apply them with minimal disruption.
+Oxmgr exposes a small daemon HTTP API for git pull automation and Prometheus scraping.
 
 ## Config
 
@@ -41,13 +41,14 @@ Behavior:
 - If commit changed and desired state is running but process is stopped: `restart`.
 - If commit changed and desired state is stopped: checkout updates only.
 
-## Webhook API
+## HTTP API
 
-Endpoint:
+Endpoints:
 
 - `POST /pull/<name|id>`
+- `GET /metrics`
 
-Auth headers:
+Auth for pull webhook:
 
 - `X-Oxmgr-Secret: <secret>`
 - or `Authorization: Bearer <secret>`
@@ -56,7 +57,7 @@ Bind address:
 
 - `OXMGR_API_ADDR` (default: localhost high port)
 
-Example:
+Pull example:
 
 ```bash
 curl -X POST \
@@ -64,9 +65,39 @@ curl -X POST \
   http://127.0.0.1:51234/pull/api
 ```
 
+Metrics example:
+
+```bash
+curl http://127.0.0.1:51234/metrics
+```
+
+The metrics endpoint returns Prometheus text exposition format with gauges and counters for:
+
+- managed process count
+- process metadata (`oxmgr_process_info`)
+- process up/down state
+- restart count
+- CPU percent
+- memory bytes
+- current PID
+- lifecycle status
+- health-check status
+- last-start timestamp
+- last-metrics-refresh timestamp
+
+Prometheus scrape example:
+
+```yaml
+scrape_configs:
+  - job_name: oxmgr
+    static_configs:
+      - targets: ["127.0.0.1:51234"]
+    metrics_path: /metrics
+```
+
 ## Security
 
-- Keep API bound to localhost unless you intentionally expose it.
+- Keep the API bound to localhost unless you intentionally expose it.
 - Use long random secrets and rotate on incident response.
 - Prefer SSH deploy keys with read-only repo access.
-- Combine with CI/CD source IP controls or reverse-proxy auth when exposed.
+- If you expose the endpoint remotely, protect both webhook and metrics traffic with reverse-proxy auth, source IP filtering, or network policy.

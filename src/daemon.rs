@@ -1,6 +1,7 @@
-//! Foreground daemon loop, local IPC handling, and webhook API handling.
+//! Foreground daemon loop, local IPC handling, and HTTP API handling.
 
 use std::env;
+use std::fmt::Write as _;
 use std::pin::Pin;
 use std::process::Stdio;
 use std::str;
@@ -21,7 +22,7 @@ use crate::config::AppConfig;
 use crate::errors::OxmgrError;
 use crate::ipc::{read_json_line, send_request, write_json_line, IpcRequest, IpcResponse};
 use crate::logging::ProcessLogs;
-use crate::process::ManagedProcess;
+use crate::process::{ManagedProcess, ProcessStatus};
 use crate::process_manager::ProcessManager;
 
 #[derive(Clone, Default)]
@@ -30,6 +31,8 @@ struct DaemonSnapshot {
 }
 
 const DISABLED_RESTART_SLEEP_SECS: u64 = 24 * 60 * 60;
+const JSON_CONTENT_TYPE: &str = "application/json";
+const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
 enum ManagerCommand {
     Ipc {
@@ -45,8 +48,8 @@ enum ManagerCommand {
 /// Runs the Oxmgr daemon in the foreground.
 ///
 /// The daemon owns process lifecycle management, serves the local IPC socket
-/// used by the CLI, and exposes the lightweight HTTP webhook API used for
-/// authenticated pull triggers.
+/// used by the CLI, and exposes the lightweight HTTP API used for authenticated
+/// pull triggers and Prometheus scraping.
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
     let listener = bind_listener(&config.daemon_addr).await?;
@@ -92,8 +95,9 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                 match incoming {
                     Ok((stream, _)) => {
                         let command_tx = command_tx.clone();
+                        let snapshot = snapshot.clone();
                         tokio::spawn(async move {
-                            if let Err(err) = handle_api_client(stream, command_tx).await {
+                            if let Err(err) = handle_api_client(stream, snapshot, command_tx).await {
                                 error!("failed to handle webhook API client: {err}");
                             }
                         });
@@ -383,11 +387,32 @@ async fn send_api_command(
 
 async fn handle_api_client(
     mut stream: TcpStream,
+    snapshot: DaemonSnapshot,
     command_tx: mpsc::UnboundedSender<ManagerCommand>,
 ) -> Result<()> {
     let request = read_http_request(&mut stream).await?;
-    let response = send_api_command(&command_tx, request).await?;
-    write_http_response(&mut stream, response.status_code, &response.body).await
+    let response = if let Some(response) = execute_snapshot_api_request(&request, &snapshot).await {
+        response
+    } else {
+        send_api_command(&command_tx, request).await?
+    };
+    write_http_response(&mut stream, &response).await
+}
+
+async fn execute_snapshot_api_request(
+    request: &HttpRequest,
+    snapshot: &DaemonSnapshot,
+) -> Option<HttpResponse> {
+    if request.method == "GET" && request.path == "/metrics" {
+        let processes = snapshot.list_processes().await;
+        return Some(HttpResponse::text(
+            200,
+            PROMETHEUS_CONTENT_TYPE,
+            render_prometheus_metrics(&processes),
+        ));
+    }
+
+    None
 }
 
 async fn execute_api_request(request: HttpRequest, manager: &mut ProcessManager) -> HttpResponse {
@@ -480,25 +505,19 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
     })
 }
 
-async fn write_http_response(
-    stream: &mut TcpStream,
-    status_code: u16,
-    body: &serde_json::Value,
-) -> Result<()> {
-    let reason = match status_code {
-        200 => "OK",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        500 => "Internal Server Error",
-        _ => "OK",
+async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) -> Result<()> {
+    let reason = http_reason_phrase(response.status_code);
+    let body_text = match &response.body {
+        HttpBody::Json(body) => {
+            serde_json::to_string(body).context("failed to encode webhook response")?
+        }
+        HttpBody::Text(body) => body.clone(),
     };
-    let body_text = serde_json::to_string(body).context("failed to encode webhook response")?;
     let response = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        status_code,
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        response.status_code,
         reason,
+        response.content_type,
         body_text.len(),
         body_text
     );
@@ -511,6 +530,18 @@ async fn write_http_response(
         .flush()
         .await
         .context("failed to flush webhook response")
+}
+
+fn http_reason_phrase(status_code: u16) -> &'static str {
+    match status_code {
+        200 => "OK",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        500 => "Internal Server Error",
+        _ => "OK",
+    }
 }
 
 fn extract_api_secret(request: &HttpRequest) -> Option<String> {
@@ -532,28 +563,240 @@ struct HttpRequest {
 
 struct HttpResponse {
     status_code: u16,
-    body: serde_json::Value,
+    content_type: &'static str,
+    body: HttpBody,
+}
+
+enum HttpBody {
+    Json(serde_json::Value),
+    Text(String),
 }
 
 impl HttpResponse {
     fn ok(message: impl Into<String>) -> Self {
-        Self {
-            status_code: 200,
-            body: json!({
+        Self::json(
+            200,
+            json!({
                 "ok": true,
                 "message": message.into()
             }),
-        }
+        )
     }
 
     fn error(status_code: u16, message: impl Into<String>) -> Self {
-        Self {
+        Self::json(
             status_code,
-            body: json!({
+            json!({
                 "ok": false,
                 "message": message.into()
             }),
+        )
+    }
+
+    fn json(status_code: u16, body: serde_json::Value) -> Self {
+        Self {
+            status_code,
+            content_type: JSON_CONTENT_TYPE,
+            body: HttpBody::Json(body),
         }
+    }
+
+    fn text(status_code: u16, content_type: &'static str, body: impl Into<String>) -> Self {
+        Self {
+            status_code,
+            content_type,
+            body: HttpBody::Text(body.into()),
+        }
+    }
+}
+
+fn render_prometheus_metrics(processes: &[ManagedProcess]) -> String {
+    let mut body = String::new();
+
+    body.push_str(
+        "# HELP oxmgr_managed_processes Total number of processes currently managed by oxmgr.\n",
+    );
+    body.push_str("# TYPE oxmgr_managed_processes gauge\n");
+    let _ = writeln!(body, "oxmgr_managed_processes {}", processes.len());
+    body.push('\n');
+
+    body.push_str("# HELP oxmgr_process_info Static metadata about each managed process.\n");
+    body.push_str("# TYPE oxmgr_process_info gauge\n");
+    for process in processes {
+        let labels = process_metric_labels(
+            process,
+            &[
+                ("desired_state", desired_state_label(process)),
+                ("restart_policy", process.restart_policy.to_string()),
+                ("status", process.status.to_string()),
+            ],
+        );
+        let _ = writeln!(body, "oxmgr_process_info{labels} 1");
+    }
+    body.push('\n');
+
+    body.push_str("# HELP oxmgr_process_up Whether the managed process is currently running.\n");
+    body.push_str("# TYPE oxmgr_process_up gauge\n");
+    for process in processes {
+        let value =
+            u8::from(matches!(process.status, ProcessStatus::Running) && process.pid.is_some());
+        let _ = writeln!(
+            body,
+            "oxmgr_process_up{} {}",
+            process_metric_labels(process, &[]),
+            value
+        );
+    }
+    body.push('\n');
+
+    body.push_str(
+        "# HELP oxmgr_process_restart_count Number of restarts recorded for the managed process.\n",
+    );
+    body.push_str("# TYPE oxmgr_process_restart_count counter\n");
+    for process in processes {
+        let _ = writeln!(
+            body,
+            "oxmgr_process_restart_count{} {}",
+            process_metric_labels(process, &[]),
+            process.restart_count
+        );
+    }
+    body.push('\n');
+
+    body.push_str(
+        "# HELP oxmgr_process_cpu_percent Latest CPU usage percentage reported by oxmgr.\n",
+    );
+    body.push_str("# TYPE oxmgr_process_cpu_percent gauge\n");
+    for process in processes {
+        let _ = writeln!(
+            body,
+            "oxmgr_process_cpu_percent{} {}",
+            process_metric_labels(process, &[]),
+            sanitize_prometheus_f32(process.cpu_percent)
+        );
+    }
+    body.push('\n');
+
+    body.push_str(
+        "# HELP oxmgr_process_memory_bytes Latest memory usage in bytes reported by oxmgr.\n",
+    );
+    body.push_str("# TYPE oxmgr_process_memory_bytes gauge\n");
+    for process in processes {
+        let _ = writeln!(
+            body,
+            "oxmgr_process_memory_bytes{} {}",
+            process_metric_labels(process, &[]),
+            process.memory_bytes
+        );
+    }
+    body.push('\n');
+
+    body.push_str("# HELP oxmgr_process_pid Current operating-system PID for the process, or 0 when unavailable.\n");
+    body.push_str("# TYPE oxmgr_process_pid gauge\n");
+    for process in processes {
+        let _ = writeln!(
+            body,
+            "oxmgr_process_pid{} {}",
+            process_metric_labels(process, &[]),
+            process.pid.unwrap_or_default()
+        );
+    }
+    body.push('\n');
+
+    body.push_str("# HELP oxmgr_process_status Current lifecycle status of the managed process.\n");
+    body.push_str("# TYPE oxmgr_process_status gauge\n");
+    for process in processes {
+        let labels = process_metric_labels(process, &[("status", process.status.to_string())]);
+        let _ = writeln!(body, "oxmgr_process_status{labels} 1");
+    }
+    body.push('\n');
+
+    body.push_str(
+        "# HELP oxmgr_process_health_status Current health-check status of the managed process.\n",
+    );
+    body.push_str("# TYPE oxmgr_process_health_status gauge\n");
+    for process in processes {
+        let labels = process_metric_labels(
+            process,
+            &[("health_status", process.health_status.to_string())],
+        );
+        let _ = writeln!(body, "oxmgr_process_health_status{labels} 1");
+    }
+    body.push('\n');
+
+    body.push_str("# HELP oxmgr_process_last_started_at_seconds Unix timestamp of the last successful start, or 0 when unknown.\n");
+    body.push_str("# TYPE oxmgr_process_last_started_at_seconds gauge\n");
+    for process in processes {
+        let _ = writeln!(
+            body,
+            "oxmgr_process_last_started_at_seconds{} {}",
+            process_metric_labels(process, &[]),
+            process.last_started_at.unwrap_or_default()
+        );
+    }
+    body.push('\n');
+
+    body.push_str("# HELP oxmgr_process_last_metrics_at_seconds Unix timestamp of the last resource metrics refresh, or 0 when unknown.\n");
+    body.push_str("# TYPE oxmgr_process_last_metrics_at_seconds gauge\n");
+    for process in processes {
+        let _ = writeln!(
+            body,
+            "oxmgr_process_last_metrics_at_seconds{} {}",
+            process_metric_labels(process, &[]),
+            process.last_metrics_at.unwrap_or_default()
+        );
+    }
+
+    body
+}
+
+fn process_metric_labels(process: &ManagedProcess, extra: &[(&str, String)]) -> String {
+    let mut labels = vec![
+        ("id", process.id.to_string()),
+        ("name", process.name.clone()),
+        ("namespace", process.namespace.clone().unwrap_or_default()),
+    ];
+    labels.extend(extra.iter().map(|(key, value)| (*key, value.clone())));
+
+    let mut rendered = String::from("{");
+    for (index, (key, value)) in labels.iter().enumerate() {
+        if index > 0 {
+            rendered.push(',');
+        }
+        rendered.push_str(key);
+        rendered.push_str("=\"");
+        rendered.push_str(&escape_prometheus_label_value(value));
+        rendered.push('"');
+    }
+    rendered.push('}');
+    rendered
+}
+
+fn desired_state_label(process: &ManagedProcess) -> String {
+    match process.desired_state {
+        crate::process::DesiredState::Running => "running".to_string(),
+        crate::process::DesiredState::Stopped => "stopped".to_string(),
+    }
+}
+
+fn escape_prometheus_label_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn sanitize_prometheus_f32(value: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
     }
 }
 
@@ -592,20 +835,28 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command as StdCommand;
+    use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use sha2::{Digest, Sha256};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::sync::RwLock;
     use tokio::time::Instant as TokioInstant;
 
     use super::{
-        daemon_socket_available, execute_api_request, execute_snapshot_request, extract_api_secret,
-        restart_sleep_deadline, DaemonSnapshot, HttpRequest, DISABLED_RESTART_SLEEP_SECS,
+        daemon_socket_available, escape_prometheus_label_value, execute_api_request,
+        execute_snapshot_api_request, execute_snapshot_request, extract_api_secret,
+        handle_api_client, render_prometheus_metrics, restart_sleep_deadline, DaemonSnapshot,
+        HttpBody, HttpRequest, DISABLED_RESTART_SLEEP_SECS, PROMETHEUS_CONTENT_TYPE,
     };
     use crate::config::AppConfig;
     use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
-    use crate::process::{RestartPolicy, StartProcessSpec};
+    use crate::process::{
+        DesiredState, HealthStatus, ManagedProcess, RestartPolicy, StartProcessSpec,
+        DEFAULT_CRASH_RESTART_LIMIT,
+    };
     use crate::process_manager::ProcessManager;
 
     #[tokio::test]
@@ -619,7 +870,7 @@ mod tests {
 
         let response = execute_api_request(request, &mut manager).await;
         assert_eq!(response.status_code, 405);
-        assert_eq!(response.body["ok"], false);
+        assert_eq!(json_body(&response)["ok"], false);
     }
 
     #[tokio::test]
@@ -635,7 +886,7 @@ mod tests {
 
         let response = execute_api_request(request, &mut manager).await;
         assert_eq!(response.status_code, 401);
-        assert_eq!(response.body["message"], "missing webhook secret");
+        assert_eq!(json_body(&response)["message"], "missing webhook secret");
         let _ = manager.shutdown_all().await;
     }
 
@@ -661,7 +912,7 @@ mod tests {
 
         let response = execute_api_request(request, &mut manager).await;
         assert_eq!(response.status_code, 401);
-        assert_eq!(response.body["message"], "invalid webhook secret");
+        assert_eq!(json_body(&response)["message"], "invalid webhook secret");
         let _ = manager.shutdown_all().await;
     }
 
@@ -691,18 +942,103 @@ mod tests {
 
         let response = execute_api_request(request, &mut manager).await;
         assert_eq!(response.status_code, 200);
-        assert_eq!(response.body["ok"], true);
+        assert_eq!(json_body(&response)["ok"], true);
         assert!(
-            response.body["message"]
+            json_body(&response)["message"]
                 .as_str()
                 .unwrap_or_default()
                 .contains("Pull complete"),
             "unexpected response body: {}",
-            response.body
+            json_body(&response)
         );
 
         let _ = manager.shutdown_all().await;
         let _ = fs::remove_dir_all(git.root);
+    }
+
+    #[tokio::test]
+    async fn execute_snapshot_api_request_serves_prometheus_metrics() {
+        let snapshot = snapshot_with_processes(vec![fixture_metrics_process()]);
+        let request = HttpRequest {
+            method: "GET".to_string(),
+            path: "/metrics".to_string(),
+            headers: HashMap::new(),
+        };
+
+        let response = execute_snapshot_api_request(&request, &snapshot)
+            .await
+            .expect("metrics should be served from snapshot");
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.content_type, PROMETHEUS_CONTENT_TYPE);
+
+        let body = text_body(&response);
+        assert!(body.contains("# TYPE oxmgr_managed_processes gauge"));
+        assert!(body.contains("oxmgr_managed_processes 1"));
+        assert!(body.contains("oxmgr_process_up{id=\"42\",name=\"api\",namespace=\"prod\"} 1"));
+        assert!(body.contains(
+            "oxmgr_process_info{id=\"42\",name=\"api\",namespace=\"prod\",desired_state=\"running\",restart_policy=\"always\",status=\"running\"} 1"
+        ));
+        assert!(body.contains(
+            "oxmgr_process_health_status{id=\"42\",name=\"api\",namespace=\"prod\",health_status=\"healthy\"} 1"
+        ));
+    }
+
+    #[tokio::test]
+    async fn handle_api_client_serves_metrics_over_http() {
+        let snapshot = snapshot_with_processes(vec![fixture_metrics_process()]);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind test metrics listener");
+        let addr = listener
+            .local_addr()
+            .expect("failed to resolve test metrics addr");
+        let (command_tx, _command_rx) = unbounded_channel();
+
+        let server_snapshot = snapshot.clone();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept failed");
+            handle_api_client(stream, server_snapshot, command_tx)
+                .await
+                .expect("failed to handle api client");
+        });
+
+        let mut client = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("failed to connect to metrics listener");
+        client
+            .write_all(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .expect("failed to write metrics request");
+        let mut response = Vec::new();
+        client
+            .read_to_end(&mut response)
+            .await
+            .expect("failed to read metrics response");
+
+        let response = String::from_utf8(response).expect("metrics response should be utf-8");
+        let (headers, body) = response
+            .split_once("\r\n\r\n")
+            .expect("expected HTTP response separator");
+        assert!(headers.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(headers.contains(&format!("Content-Type: {PROMETHEUS_CONTENT_TYPE}\r\n")));
+        assert!(body.contains(
+            "oxmgr_process_memory_bytes{id=\"42\",name=\"api\",namespace=\"prod\"} 4096"
+        ));
+
+        server.await.expect("server task failed");
+    }
+
+    #[test]
+    fn render_prometheus_metrics_escapes_labels_and_sanitizes_nan() {
+        let mut process = fixture_metrics_process();
+        process.name = "api\"svc".to_string();
+        process.namespace = Some("prod\\blue\nline".to_string());
+        process.cpu_percent = f32::NAN;
+
+        let rendered = render_prometheus_metrics(&[process]);
+        assert!(rendered.contains("name=\"api\\\"svc\""));
+        assert!(rendered.contains("namespace=\"prod\\\\blue\\nline\""));
+        assert!(rendered.contains("oxmgr_process_cpu_percent{id=\"42\",name=\"api\\\"svc\",namespace=\"prod\\\\blue\\nline\"} 0"));
     }
 
     #[test]
@@ -733,6 +1069,14 @@ mod tests {
             headers: HashMap::from([("authorization".to_string(), "Bearer token123".to_string())]),
         };
         assert_eq!(extract_api_secret(&request).as_deref(), Some("token123"));
+    }
+
+    #[test]
+    fn escape_prometheus_label_value_handles_special_characters() {
+        assert_eq!(
+            escape_prometheus_label_value("prod\\blue\"green\nline"),
+            "prod\\\\blue\\\"green\\nline"
+        );
     }
 
     #[test]
@@ -1009,5 +1353,75 @@ mod tests {
             .expect("clock failure")
             .as_nanos();
         std::env::temp_dir().join(format!("oxmgr-daemon-{prefix}-{nonce}"))
+    }
+
+    fn json_body(response: &super::HttpResponse) -> &serde_json::Value {
+        match &response.body {
+            HttpBody::Json(body) => body,
+            HttpBody::Text(_) => panic!("expected JSON response body"),
+        }
+    }
+
+    fn text_body(response: &super::HttpResponse) -> &str {
+        match &response.body {
+            HttpBody::Text(body) => body,
+            HttpBody::Json(_) => panic!("expected text response body"),
+        }
+    }
+
+    fn snapshot_with_processes(processes: Vec<ManagedProcess>) -> DaemonSnapshot {
+        DaemonSnapshot {
+            processes: Arc::new(RwLock::new(processes)),
+        }
+    }
+
+    fn fixture_metrics_process() -> ManagedProcess {
+        ManagedProcess {
+            id: 42,
+            name: "api".to_string(),
+            command: "sleep".to_string(),
+            args: vec!["30".to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Always,
+            max_restarts: 5,
+            restart_count: 2,
+            crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
+            auto_restart_history: Vec::new(),
+            namespace: Some("prod".to_string()),
+            git_repo: None,
+            git_ref: None,
+            pull_secret_hash: None,
+            stop_signal: Some("SIGTERM".to_string()),
+            stop_timeout_secs: 5,
+            restart_delay_secs: 1,
+            restart_backoff_cap_secs: 0,
+            restart_backoff_reset_secs: 0,
+            restart_backoff_attempt: 0,
+            start_delay_secs: 0,
+            watch: false,
+            cluster_mode: false,
+            cluster_instances: None,
+            resource_limits: None,
+            cgroup_path: None,
+            pid: Some(4242),
+            status: crate::process::ProcessStatus::Running,
+            desired_state: DesiredState::Running,
+            last_exit_code: None,
+            stdout_log: PathBuf::from("/tmp/api.stdout.log"),
+            stderr_log: PathBuf::from("/tmp/api.stderr.log"),
+            health_check: None,
+            health_status: HealthStatus::Healthy,
+            health_failures: 0,
+            last_health_check: Some(1_700_000_100),
+            next_health_check: Some(1_700_000_120),
+            last_health_error: None,
+            cpu_percent: 12.5,
+            memory_bytes: 4096,
+            last_metrics_at: Some(1_700_000_050),
+            last_started_at: Some(1_700_000_000),
+            last_stopped_at: None,
+            config_fingerprint: "fixture-fingerprint".to_string(),
+        }
     }
 }
