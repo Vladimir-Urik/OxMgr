@@ -39,7 +39,31 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
             format!("{} auto restarts / 5m", process.crash_restart_limit)
         },
     );
-    print_field("Watch", if process.watch { "enabled" } else { "disabled" });
+    let watch_value = if process.watch {
+        if process.watch_paths.is_empty() {
+            "enabled (cwd)".to_string()
+        } else {
+            format!("enabled ({})", process.watch_paths.len())
+        }
+    } else {
+        "disabled".to_string()
+    };
+    print_field("Watch", watch_value);
+    if process.watch {
+        if !process.watch_paths.is_empty() {
+            let paths = process
+                .watch_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            print_field("Watch Paths", paths);
+        }
+        if !process.ignore_watch.is_empty() {
+            print_field("Ignore Watch", process.ignore_watch.join(", "));
+        }
+        print_field("Watch Delay", format!("{}s", process.watch_delay_secs));
+    }
     print_field(
         "Cluster",
         if process.cluster_mode {
@@ -70,6 +94,17 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
         },
     );
     print_field("Health", ui::health_value(&process.health_status));
+    print_field(
+        "Wait Ready",
+        if process.wait_ready {
+            "enabled"
+        } else {
+            "disabled"
+        },
+    );
+    if process.wait_ready {
+        print_field("Ready Timeout", format!("{}s", process.ready_timeout_secs));
+    }
     if let Some(last_error) = process.last_health_error.as_deref() {
         print_field("Health Last", last_error);
     }

@@ -1176,6 +1176,9 @@ mod tests {
             restart_delay_secs: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -1183,6 +1186,8 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: Some(hash_secret("hook-secret")),
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
 
         manager
@@ -1236,6 +1241,9 @@ mod tests {
             restart_delay_secs: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -1243,6 +1251,8 @@ mod tests {
             git_repo,
             git_ref: Some("main".to_string()),
             pull_secret_hash,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
 
         manager
@@ -1400,6 +1410,9 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             resource_limits: None,
@@ -1416,6 +1429,8 @@ mod tests {
             last_health_check: Some(1_700_000_100),
             next_health_check: Some(1_700_000_120),
             last_health_error: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             cpu_percent: 12.5,
             memory_bytes: 4096,
             last_metrics_at: Some(1_700_000_050),

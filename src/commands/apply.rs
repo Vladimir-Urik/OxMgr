@@ -26,6 +26,10 @@ struct DesiredProcessSpec {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    watch: bool,
+    watch_paths: Vec<PathBuf>,
+    ignore_watch: Vec<String>,
+    watch_delay_secs: u64,
     cluster_mode: bool,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
@@ -33,6 +37,8 @@ struct DesiredProcessSpec {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret_hash: Option<String>,
+    wait_ready: bool,
+    ready_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +219,10 @@ fn expand_specs_for_apply(
                 stop_timeout_secs: spec.stop_timeout_secs.max(1),
                 restart_delay_secs: spec.restart_delay_secs,
                 start_delay_secs: spec.start_delay_secs,
+                watch: spec.watch,
+                watch_paths: spec.watch_paths.clone(),
+                ignore_watch: spec.ignore_watch.clone(),
+                watch_delay_secs: spec.watch_delay_secs,
                 cluster_mode: spec.cluster_mode,
                 cluster_instances: spec.cluster_instances,
                 namespace: spec.namespace.clone(),
@@ -220,6 +230,8 @@ fn expand_specs_for_apply(
                 git_repo: spec.git_repo.clone(),
                 git_ref: spec.git_ref.clone(),
                 pull_secret_hash: spec.pull_secret_hash.clone(),
+                wait_ready: spec.wait_ready,
+                ready_timeout_secs: spec.ready_timeout_secs,
             });
         }
     }
@@ -297,12 +309,18 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.stop_timeout_secs == desired.stop_timeout_secs
         && existing.restart_delay_secs == desired.restart_delay_secs
         && existing.start_delay_secs == desired.start_delay_secs
+        && existing.watch == desired.watch
+        && existing.watch_paths == desired.watch_paths
+        && existing.ignore_watch == desired.ignore_watch
+        && existing.watch_delay_secs == desired.watch_delay_secs
         && existing.cluster_mode == desired.cluster_mode
         && existing.cluster_instances == desired.cluster_instances
         && existing.namespace == desired.namespace
         && existing.resource_limits == desired.resource_limits
         && existing.git_repo == desired.git_repo
         && existing.git_ref == desired.git_ref
+        && existing.wait_ready == desired.wait_ready
+        && existing.ready_timeout_secs == desired.ready_timeout_secs
 }
 
 fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
@@ -335,7 +353,10 @@ fn desired_to_start_spec(spec: DesiredProcessSpec) -> StartProcessSpec {
         stop_timeout_secs: spec.stop_timeout_secs.max(1),
         restart_delay_secs: spec.restart_delay_secs,
         start_delay_secs: spec.start_delay_secs,
-        watch: false,
+        watch: spec.watch,
+        watch_paths: spec.watch_paths,
+        ignore_watch: spec.ignore_watch,
+        watch_delay_secs: spec.watch_delay_secs,
         cluster_mode: spec.cluster_mode,
         cluster_instances: spec.cluster_instances,
         namespace: spec.namespace,
@@ -343,6 +364,8 @@ fn desired_to_start_spec(spec: DesiredProcessSpec) -> StartProcessSpec {
         git_repo: spec.git_repo,
         git_ref: spec.git_ref,
         pull_secret_hash: spec.pull_secret_hash,
+        wait_ready: spec.wait_ready,
+        ready_timeout_secs: spec.ready_timeout_secs,
     }
 }
 
@@ -421,6 +444,10 @@ mod tests {
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
             start_delay_secs: 0,
+            watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: Some("default".to_string()),
@@ -428,6 +455,8 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         }
     }
 
@@ -464,7 +493,10 @@ mod tests {
             restart_backoff_reset_secs: 60,
             restart_backoff_attempt: 0,
             start_delay_secs: desired.start_delay_secs,
-            watch: false,
+            watch: desired.watch,
+            watch_paths: desired.watch_paths.clone(),
+            ignore_watch: desired.ignore_watch.clone(),
+            watch_delay_secs: desired.watch_delay_secs,
             cluster_mode: desired.cluster_mode,
             cluster_instances: desired.cluster_instances,
             resource_limits: desired.resource_limits.clone(),
@@ -481,6 +513,8 @@ mod tests {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready: desired.wait_ready,
+            ready_timeout_secs: desired.ready_timeout_secs,
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,

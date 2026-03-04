@@ -1,4 +1,4 @@
-//! Import support for PM2-compatible `ecosystem.config.json` files.
+//! Import support for PM2-compatible ecosystem config files.
 
 use std::collections::HashMap;
 use std::fs;
@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::js_config::extract_js_object_literal;
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,10 @@ pub struct EcosystemProcessSpec {
     pub stop_timeout_secs: u64,
     pub restart_delay_secs: u64,
     pub start_delay_secs: u64,
+    pub watch: bool,
+    pub watch_paths: Vec<PathBuf>,
+    pub ignore_watch: Vec<String>,
+    pub watch_delay_secs: u64,
     pub cluster_mode: bool,
     pub cluster_instances: Option<u32>,
     pub namespace: Option<String>,
@@ -38,6 +43,8 @@ pub struct EcosystemProcessSpec {
     pub depends_on: Vec<String>,
     pub instances: u32,
     pub instance_var: Option<String>,
+    pub wait_ready: bool,
+    pub ready_timeout_secs: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +67,9 @@ struct EcosystemApp {
     restart_delay: Option<u64>,
     delay_start: Option<u64>,
     start_delay: Option<u64>,
+    watch: Option<EcosystemWatch>,
+    ignore_watch: Option<EcosystemStringList>,
+    watch_delay: Option<u64>,
     exec_mode: Option<String>,
     cluster_mode: Option<bool>,
     cluster_instances: Option<u32>,
@@ -86,6 +96,8 @@ struct EcosystemApp {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
+    wait_ready: Option<bool>,
+    listen_timeout: Option<u64>,
     #[serde(flatten)]
     extra: HashMap<String, Value>,
 }
@@ -93,6 +105,21 @@ struct EcosystemApp {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum EcosystemArgs {
+    Single(String),
+    Many(Vec<String>),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum EcosystemWatch {
+    Bool(bool),
+    Single(String),
+    Many(Vec<String>),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum EcosystemStringList {
     Single(String),
     Many(Vec<String>),
 }
@@ -117,6 +144,10 @@ struct ResolvedSettings {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    watch: bool,
+    watch_paths: Vec<PathBuf>,
+    ignore_watch: Vec<String>,
+    watch_delay_secs: u64,
     cluster_mode: bool,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
@@ -128,6 +159,8 @@ struct ResolvedSettings {
     depends_on: Vec<String>,
     instances: u32,
     instance_var: Option<String>,
+    wait_ready: bool,
+    ready_timeout_secs: u64,
 }
 
 /// Loads a PM2-style ecosystem file and normalises it into Oxmgr process
@@ -135,8 +168,7 @@ struct ResolvedSettings {
 pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<EcosystemProcessSpec>> {
     let payload = fs::read_to_string(path)
         .with_context(|| format!("failed to read ecosystem file {}", path.display()))?;
-    let file: EcosystemFile =
-        serde_json::from_str(&payload).context("failed to parse ecosystem config JSON")?;
+    let file = load_ecosystem_file(path, &payload)?;
 
     let mut specs = Vec::with_capacity(file.apps.len());
     for (idx, app) in file.apps.into_iter().enumerate() {
@@ -144,6 +176,25 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
     }
 
     Ok(specs)
+}
+
+fn load_ecosystem_file(path: &Path, payload: &str) -> Result<EcosystemFile> {
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+
+    match ext.as_deref() {
+        Some("js") | Some("cjs") | Some("mjs") => {
+            let object = extract_js_object_literal(payload, "ecosystem config")?;
+            json5::from_str::<EcosystemFile>(&object)
+                .with_context(|| format!("failed to parse JS ecosystem config {}", path.display()))
+        }
+        Some("json") | Some("json5") | None => json5::from_str::<EcosystemFile>(payload)
+            .with_context(|| format!("failed to parse ecosystem config {}", path.display())),
+        _ => json5::from_str::<EcosystemFile>(payload)
+            .with_context(|| format!("failed to parse ecosystem config {}", path.display())),
+    }
 }
 
 impl EcosystemApp {
@@ -167,6 +218,7 @@ impl EcosystemApp {
         } else {
             self.instances.unwrap_or(1).max(1)
         };
+        let (watch, watch_paths) = watch_from(self.watch);
 
         let mut settings = ResolvedSettings {
             restart_policy: restart_policy_from(self.restart_policy, self.autorestart),
@@ -185,6 +237,10 @@ impl EcosystemApp {
             stop_timeout_secs: self.kill_timeout.or(self.stop_timeout).unwrap_or(5).max(1),
             restart_delay_secs: self.restart_delay.unwrap_or(0),
             start_delay_secs: self.start_delay.or(self.delay_start).unwrap_or(0),
+            watch,
+            watch_paths,
+            ignore_watch: string_list_from(self.ignore_watch),
+            watch_delay_secs: millis_to_secs_ceil(self.watch_delay.unwrap_or(0)),
             cluster_mode,
             cluster_instances,
             namespace: self.namespace,
@@ -202,6 +258,8 @@ impl EcosystemApp {
             depends_on: self.depends_on.unwrap_or_default(),
             instances,
             instance_var: self.instance_var,
+            wait_ready: self.wait_ready.unwrap_or(false),
+            ready_timeout_secs: millis_to_secs_ceil(self.listen_timeout.unwrap_or(30_000)).max(1),
         };
 
         if let Some(profile_name) = profile {
@@ -225,6 +283,10 @@ impl EcosystemApp {
             stop_timeout_secs: settings.stop_timeout_secs,
             restart_delay_secs: settings.restart_delay_secs,
             start_delay_secs: settings.start_delay_secs,
+            watch: settings.watch,
+            watch_paths: settings.watch_paths,
+            ignore_watch: settings.ignore_watch,
+            watch_delay_secs: settings.watch_delay_secs,
             cluster_mode: settings.cluster_mode,
             cluster_instances: settings.cluster_instances,
             namespace: settings.namespace,
@@ -236,6 +298,8 @@ impl EcosystemApp {
             depends_on: settings.depends_on,
             instances: settings.instances,
             instance_var: settings.instance_var,
+            wait_ready: settings.wait_ready,
+            ready_timeout_secs: settings.ready_timeout_secs,
         })
     }
 
@@ -267,6 +331,60 @@ impl EcosystemApp {
 
 fn normalize_cluster_instances(value: Option<u32>) -> Option<u32> {
     value.map(|instances| instances.max(1))
+}
+
+fn watch_from(value: Option<EcosystemWatch>) -> (bool, Vec<PathBuf>) {
+    match value {
+        Some(EcosystemWatch::Bool(enabled)) => (enabled, Vec::new()),
+        Some(EcosystemWatch::Single(path)) => {
+            let trimmed = path.trim();
+            if trimmed.is_empty() {
+                (false, Vec::new())
+            } else {
+                (true, vec![PathBuf::from(trimmed)])
+            }
+        }
+        Some(EcosystemWatch::Many(paths)) => {
+            let paths: Vec<PathBuf> = paths
+                .into_iter()
+                .filter_map(|path| {
+                    let trimmed = path.trim();
+                    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+                })
+                .collect();
+            (!paths.is_empty(), paths)
+        }
+        None => (false, Vec::new()),
+    }
+}
+
+fn string_list_from(value: Option<EcosystemStringList>) -> Vec<String> {
+    match value {
+        Some(EcosystemStringList::Single(item)) => {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                vec![trimmed.to_string()]
+            }
+        }
+        Some(EcosystemStringList::Many(items)) => items
+            .into_iter()
+            .filter_map(|item| {
+                let trimmed = item.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+fn millis_to_secs_ceil(value: u64) -> u64 {
+    if value == 0 {
+        0
+    } else {
+        value.saturating_add(999) / 1000
+    }
 }
 
 fn restart_policy_from(policy: Option<RestartPolicy>, autorestart: Option<bool>) -> RestartPolicy {
@@ -353,6 +471,19 @@ fn apply_profile_overrides(
             "delay_start" | "start_delay" => {
                 if let Some(parsed) = value.as_u64() {
                     settings.start_delay_secs = parsed;
+                }
+            }
+            "watch" => {
+                let (watch, watch_paths) = watch_from(parse_watch_value(value)?);
+                settings.watch = watch;
+                settings.watch_paths = watch_paths;
+            }
+            "ignore_watch" => {
+                settings.ignore_watch = parse_string_list_value(value);
+            }
+            "watch_delay" => {
+                if let Some(parsed) = value.as_u64() {
+                    settings.watch_delay_secs = millis_to_secs_ceil(parsed);
                 }
             }
             "priority" | "start_order" => {
@@ -514,6 +645,22 @@ fn apply_profile_overrides(
                     settings.health_check = Some(check);
                 }
             }
+            "wait_ready" => {
+                let Some(parsed) = value.as_bool() else {
+                    anyhow::bail!("wait_ready override must be true/false");
+                };
+                settings.wait_ready = parsed;
+            }
+            "listen_timeout" | "ready_timeout_secs" => {
+                let Some(parsed) = value.as_u64() else {
+                    anyhow::bail!("{key} override must be a positive integer");
+                };
+                settings.ready_timeout_secs = if key == "listen_timeout" {
+                    millis_to_secs_ceil(parsed).max(1)
+                } else {
+                    parsed.max(1)
+                };
+            }
             _ => {
                 if is_likely_env_key(key) {
                     if let Some(value) = value_to_string(value) {
@@ -532,6 +679,47 @@ fn merge_env_object(values: &Map<String, Value>, env: &mut HashMap<String, Strin
         if let Some(value) = value_to_string(value) {
             env.insert(key.clone(), value);
         }
+    }
+}
+
+fn parse_watch_value(value: &Value) -> Result<Option<EcosystemWatch>> {
+    match value {
+        Value::Bool(enabled) => Ok(Some(EcosystemWatch::Bool(*enabled))),
+        Value::String(path) => Ok(Some(EcosystemWatch::Single(path.clone()))),
+        Value::Array(items) => {
+            let mut paths = Vec::new();
+            for item in items {
+                let Some(path) = item.as_str() else {
+                    anyhow::bail!("watch override list must contain only strings");
+                };
+                paths.push(path.to_string());
+            }
+            Ok(Some(EcosystemWatch::Many(paths)))
+        }
+        Value::Null => Ok(None),
+        _ => anyhow::bail!("watch override must be true/false or a string/list of strings"),
+    }
+}
+
+fn parse_string_list_value(value: &Value) -> Vec<String> {
+    match value {
+        Value::String(item) => {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                vec![trimmed.to_string()]
+            }
+        }
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| item.as_str())
+            .filter_map(|item| {
+                let trimmed = item.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -816,6 +1004,89 @@ mod tests {
     }
 
     #[test]
+    fn load_parses_js_ecosystem_with_watch_and_readiness_fields() {
+        let file_path = temp_file_with_extension("ecosystem-js", "js");
+        let payload = r#"
+module.exports = {
+  apps: [
+    {
+      name: "api",
+      cmd: "node server.js",
+      cwd: "/srv/api",
+      watch: ["src", "config"],
+      ignore_watch: ["node_modules", "\\.git"],
+      watch_delay: 1500,
+      health_cmd: "curl -fsS http://127.0.0.1:3000/health",
+      wait_ready: true,
+      listen_timeout: 9000
+    }
+  ]
+};
+"#;
+        fs::write(&file_path, payload).expect("failed to write JS ecosystem fixture");
+
+        let specs = load_with_profile(&file_path, None).expect("failed to parse JS ecosystem");
+        let app = &specs[0];
+        assert!(app.watch);
+        assert_eq!(
+            app.watch_paths,
+            vec![PathBuf::from("src"), PathBuf::from("config")]
+        );
+        assert_eq!(app.ignore_watch, vec!["node_modules", "\\.git"]);
+        assert_eq!(app.watch_delay_secs, 2);
+        assert!(app.wait_ready);
+        assert_eq!(app.ready_timeout_secs, 9);
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn load_applies_profile_watch_and_readiness_overrides() {
+        let file_path = temp_file("ecosystem-watch-ready-profile");
+        let payload = r#"
+{
+  "apps": [
+    {
+      "name": "api",
+      "cmd": "node server.js",
+      "cwd": "/srv/api",
+      "watch": ["src"],
+      "ignore_watch": ["node_modules"],
+      "watch_delay": 500,
+      "health_cmd": "curl -fsS http://127.0.0.1:3000/health",
+      "wait_ready": false,
+      "listen_timeout": 3000,
+      "env_prod": {
+        "watch": ["dist", "config"],
+        "ignore_watch": ["\\.tmp$"],
+        "watch_delay": 2100,
+        "wait_ready": true,
+        "listen_timeout": 8500
+      }
+    }
+  ]
+}
+"#;
+        fs::write(&file_path, payload).expect("failed to write ecosystem fixture");
+
+        let specs = load_with_profile(&file_path, Some("prod"))
+            .expect("failed to parse ecosystem config with env profile");
+        assert_eq!(specs.len(), 1);
+        let app = &specs[0];
+        assert!(app.watch);
+        assert_eq!(
+            app.watch_paths,
+            vec![PathBuf::from("dist"), PathBuf::from("config")]
+        );
+        assert_eq!(app.ignore_watch, vec!["\\.tmp$"]);
+        assert_eq!(app.watch_delay_secs, 3);
+        assert!(app.wait_ready);
+        assert_eq!(app.ready_timeout_secs, 9);
+
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
     fn load_applies_env_profile_overrides_and_order() {
         let file_path = temp_file("ecosystem-env-profile");
         let payload = r#"
@@ -966,5 +1237,13 @@ mod tests {
             .expect("clock failure")
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{nonce}.json"))
+    }
+
+    fn temp_file_with_extension(prefix: &str, extension: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{nonce}.{extension}"))
     }
 }

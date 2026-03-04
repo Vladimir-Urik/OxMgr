@@ -17,7 +17,7 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 - Low overhead: Rust daemon with persistent local state
 - Practical operations: restart policies, health checks, logs, and CPU/RAM metrics
 - Config-first workflows with idempotent `oxmgr apply`
-- PM2 ecosystem compatibility via `ecosystem.config.json`
+- PM2 ecosystem compatibility via `ecosystem.config.{js,cjs,mjs,json}`
 - Interactive terminal UI for day-to-day operations
 
 ## Core Features
@@ -26,8 +26,9 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 - Named services and namespaces
 - Restart policies: `always`, `on-failure`, and `never`
 - Health checks with automatic restart on repeated failures
+- Config-driven file watch with ignore patterns and restart debounce
 - Log tailing, log rotation, and per-process stdout/stderr logs
-- Best-effort zero-downtime reloads
+- Readiness-aware reloads using health checks
 - Git pull and webhook-driven update workflow
 - Import and export bundles with `.oxpkg`
 - Service installation for `systemd`, `launchd`, and Windows Task Scheduler
@@ -109,7 +110,7 @@ oxmgr apply ./oxfile.toml
 
 ## PM2 Migration
 
-Oxmgr supports PM2-style `ecosystem.config.json`, which makes it easier to move existing PM2 setups without rewriting everything on day one.
+Oxmgr supports PM2-style `ecosystem.config.{js,cjs,mjs,json}`, including config-driven watch settings and readiness-aware reload fields, which makes it easier to move existing PM2 setups without rewriting everything on day one.
 
 Useful links:
 

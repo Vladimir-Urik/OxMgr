@@ -31,6 +31,47 @@ impl From<RestartPolicyValue> for RestartPolicy {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum WatchValue {
+    Bool(bool),
+    Single(String),
+    Many(Vec<String>),
+}
+
+impl WatchValue {
+    fn resolve(&self) -> (bool, Vec<PathBuf>) {
+        match self {
+            Self::Bool(enabled) => (*enabled, Vec::new()),
+            Self::Single(path) => {
+                let trimmed = path.trim();
+                if trimmed.is_empty() {
+                    (false, Vec::new())
+                } else {
+                    (true, vec![PathBuf::from(trimmed)])
+                }
+            }
+            Self::Many(paths) => {
+                let paths: Vec<PathBuf> = paths
+                    .iter()
+                    .filter_map(|path| {
+                        let trimmed = path.trim();
+                        (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+                    })
+                    .collect();
+                (!paths.is_empty(), paths)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum WatchValueOut {
+    Bool(bool),
+    Many(Vec<String>),
+}
+
 #[derive(Debug, Deserialize)]
 struct Oxfile {
     version: Option<u32>,
@@ -49,6 +90,9 @@ struct OxDefaults {
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
     start_delay_secs: Option<u64>,
+    watch: Option<WatchValue>,
+    ignore_watch: Option<Vec<String>>,
+    watch_delay_secs: Option<u64>,
     cluster_mode: Option<bool>,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
@@ -67,6 +111,8 @@ struct OxDefaults {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret: Option<String>,
+    wait_ready: Option<bool>,
+    ready_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +128,9 @@ struct OxApp {
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
     start_delay_secs: Option<u64>,
+    watch: Option<WatchValue>,
+    ignore_watch: Option<Vec<String>>,
+    watch_delay_secs: Option<u64>,
     cluster_mode: Option<bool>,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
@@ -100,6 +149,8 @@ struct OxApp {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret: Option<String>,
+    wait_ready: Option<bool>,
+    ready_timeout_secs: Option<u64>,
     profiles: Option<HashMap<String, OxProfile>>,
     disabled: Option<bool>,
 }
@@ -115,6 +166,9 @@ struct OxProfile {
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
     start_delay_secs: Option<u64>,
+    watch: Option<WatchValue>,
+    ignore_watch: Option<Vec<String>>,
+    watch_delay_secs: Option<u64>,
     cluster_mode: Option<bool>,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
@@ -133,6 +187,8 @@ struct OxProfile {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret: Option<String>,
+    wait_ready: Option<bool>,
+    ready_timeout_secs: Option<u64>,
     disabled: Option<bool>,
 }
 
@@ -147,6 +203,10 @@ struct Resolved {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    watch: bool,
+    watch_paths: Vec<PathBuf>,
+    ignore_watch: Vec<String>,
+    watch_delay_secs: u64,
     cluster_mode: bool,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
@@ -159,6 +219,8 @@ struct Resolved {
     instance_var: Option<String>,
     health_check: Option<HealthCheck>,
     resource_limits: Option<ResourceLimits>,
+    wait_ready: bool,
+    ready_timeout_secs: u64,
     disabled: bool,
 }
 
@@ -185,6 +247,12 @@ struct OxAppOut {
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
     start_delay_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    watch: Option<WatchValueOut>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    ignore_watch: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    watch_delay_secs: Option<u64>,
     #[serde(skip_serializing_if = "is_false", default)]
     cluster_mode: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -217,6 +285,10 @@ struct OxAppOut {
     cgroup_enforce: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deny_gpu: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wait_ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ready_timeout_secs: Option<u64>,
 }
 
 /// Loads an `oxfile.toml`, applies defaults and optional profile overrides,
@@ -253,6 +325,10 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             stop_timeout_secs: resolved.stop_timeout_secs,
             restart_delay_secs: resolved.restart_delay_secs,
             start_delay_secs: resolved.start_delay_secs,
+            watch: resolved.watch,
+            watch_paths: resolved.watch_paths,
+            ignore_watch: resolved.ignore_watch,
+            watch_delay_secs: resolved.watch_delay_secs,
             cluster_mode: resolved.cluster_mode,
             cluster_instances: resolved.cluster_instances,
             namespace: resolved.namespace,
@@ -264,6 +340,8 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             depends_on: resolved.depends_on,
             instances: resolved.instances,
             instance_var: resolved.instance_var,
+            wait_ready: resolved.wait_ready,
+            ready_timeout_secs: resolved.ready_timeout_secs,
         });
     }
 
@@ -276,6 +354,9 @@ fn resolve_app(
     profile: Option<&str>,
     default_order: i32,
 ) -> Result<Resolved> {
+    let default_watch = defaults.watch.as_ref().map(WatchValue::resolve);
+    let app_watch = app.watch.as_ref().map(WatchValue::resolve);
+
     let mut resolved = Resolved {
         cwd: app.cwd.clone().or_else(|| defaults.cwd.clone()),
         env: defaults.env.clone().unwrap_or_default(),
@@ -306,6 +387,25 @@ fn resolve_app(
         start_delay_secs: app
             .start_delay_secs
             .or(defaults.start_delay_secs)
+            .unwrap_or(0),
+        watch: app_watch
+            .as_ref()
+            .map(|(enabled, _)| *enabled)
+            .or_else(|| default_watch.as_ref().map(|(enabled, _)| *enabled))
+            .unwrap_or(false),
+        watch_paths: app_watch
+            .as_ref()
+            .map(|(_, paths)| paths.clone())
+            .or_else(|| default_watch.as_ref().map(|(_, paths)| paths.clone()))
+            .unwrap_or_default(),
+        ignore_watch: app
+            .ignore_watch
+            .clone()
+            .or_else(|| defaults.ignore_watch.clone())
+            .unwrap_or_default(),
+        watch_delay_secs: app
+            .watch_delay_secs
+            .or(defaults.watch_delay_secs)
             .unwrap_or(0),
         cluster_mode: app.cluster_mode.or(defaults.cluster_mode).unwrap_or(false),
         cluster_instances: normalize_cluster_instances(
@@ -350,6 +450,12 @@ fn resolve_app(
                 .unwrap_or(false),
             deny_gpu: app.deny_gpu.or(defaults.deny_gpu).unwrap_or(false),
         }),
+        wait_ready: app.wait_ready.or(defaults.wait_ready).unwrap_or(false),
+        ready_timeout_secs: app
+            .ready_timeout_secs
+            .or(defaults.ready_timeout_secs)
+            .unwrap_or(30)
+            .max(1),
         disabled: app.disabled.unwrap_or(false),
     };
 
@@ -369,6 +475,12 @@ fn resolve_app(
 
     if !resolved.cluster_mode {
         resolved.cluster_instances = None;
+    }
+    resolved.ignore_watch = normalize_string_list(resolved.ignore_watch);
+    if !resolved.watch {
+        resolved.watch_paths.clear();
+        resolved.ignore_watch.clear();
+        resolved.watch_delay_secs = 0;
     }
 
     Ok(resolved)
@@ -406,6 +518,17 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     }
     if let Some(start_delay_secs) = profile.start_delay_secs {
         resolved.start_delay_secs = start_delay_secs;
+    }
+    if let Some(watch) = &profile.watch {
+        let (enabled, paths) = watch.resolve();
+        resolved.watch = enabled;
+        resolved.watch_paths = paths;
+    }
+    if let Some(ignore_watch) = &profile.ignore_watch {
+        resolved.ignore_watch = ignore_watch.clone();
+    }
+    if let Some(watch_delay_secs) = profile.watch_delay_secs {
+        resolved.watch_delay_secs = watch_delay_secs;
     }
     if let Some(cluster_mode) = profile.cluster_mode {
         resolved.cluster_mode = cluster_mode;
@@ -490,6 +613,12 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
         limits.deny_gpu = deny_gpu;
         resolved.resource_limits = normalize_resource_limits(limits);
     }
+    if let Some(wait_ready) = profile.wait_ready {
+        resolved.wait_ready = wait_ready;
+    }
+    if let Some(ready_timeout_secs) = profile.ready_timeout_secs {
+        resolved.ready_timeout_secs = ready_timeout_secs.max(1);
+    }
     Ok(())
 }
 
@@ -509,6 +638,16 @@ fn health_from_parts(
 
 fn normalize_cluster_instances(value: Option<u32>) -> Option<u32> {
     value.and_then(|instances| (instances > 0).then_some(instances))
+}
+
+fn normalize_string_list(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .filter_map(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect()
 }
 
 fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimits> {
@@ -549,6 +688,22 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn render_watch_output(enabled: bool, paths: &[PathBuf]) -> Option<WatchValueOut> {
+    if !enabled {
+        return None;
+    }
+    if paths.is_empty() {
+        Some(WatchValueOut::Bool(true))
+    } else {
+        Some(WatchValueOut::Many(
+            paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+        ))
+    }
+}
+
 /// Writes canonical process specifications back into an `oxfile.toml`
 /// representation understood by Oxmgr version 1.
 pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<()> {
@@ -566,6 +721,9 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             stop_timeout_secs: spec.stop_timeout_secs,
             restart_delay_secs: spec.restart_delay_secs,
             start_delay_secs: spec.start_delay_secs,
+            watch: render_watch_output(spec.watch, &spec.watch_paths),
+            ignore_watch: spec.ignore_watch.clone(),
+            watch_delay_secs: (spec.watch_delay_secs > 0).then_some(spec.watch_delay_secs),
             cluster_mode: spec.cluster_mode,
             cluster_instances: spec.cluster_instances,
             namespace: spec.namespace.clone(),
@@ -601,6 +759,8 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
                 .resource_limits
                 .as_ref()
                 .and_then(|limits| limits.deny_gpu.then_some(true)),
+            wait_ready: spec.wait_ready.then_some(true),
+            ready_timeout_secs: spec.wait_ready.then_some(spec.ready_timeout_secs),
         });
     }
 
@@ -718,6 +878,10 @@ NODE_ENV = "production"
             stop_timeout_secs: 5,
             restart_delay_secs: 1,
             start_delay_secs: 2,
+            watch: true,
+            watch_paths: vec![PathBuf::from("src"), PathBuf::from("config")],
+            ignore_watch: vec!["node_modules".to_string()],
+            watch_delay_secs: 3,
             cluster_mode: true,
             cluster_instances: Some(2),
             namespace: Some("core".to_string()),
@@ -728,6 +892,8 @@ NODE_ENV = "production"
             depends_on: vec!["db".to_string()],
             instances: 1,
             instance_var: Some("INSTANCE_ID".to_string()),
+            wait_ready: true,
+            ready_timeout_secs: 45,
         }];
 
         write_from_specs(&path, &specs).expect("failed to write oxfile");
@@ -740,6 +906,11 @@ NODE_ENV = "production"
         assert!(rendered.contains("cluster_mode = true"));
         assert!(rendered.contains("cluster_instances = 2"));
         assert!(rendered.contains("crash_restart_limit = 4"));
+        assert!(rendered.contains("watch = ["));
+        assert!(rendered.contains("\"src\""));
+        assert!(rendered.contains("\"config\""));
+        assert!(rendered.contains("ignore_watch = [\"node_modules\"]"));
+        assert!(rendered.contains("wait_ready = true"));
 
         let _ = fs::remove_file(path);
     }

@@ -153,6 +153,12 @@ pub struct StartProcessSpec {
     #[serde(default)]
     pub watch: bool,
     #[serde(default)]
+    pub watch_paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub ignore_watch: Vec<String>,
+    #[serde(default)]
+    pub watch_delay_secs: u64,
+    #[serde(default)]
     pub cluster_mode: bool,
     #[serde(default)]
     pub cluster_instances: Option<u32>,
@@ -166,6 +172,10 @@ pub struct StartProcessSpec {
     pub git_ref: Option<String>,
     #[serde(default)]
     pub pull_secret_hash: Option<String>,
+    #[serde(default)]
+    pub wait_ready: bool,
+    #[serde(default = "default_ready_timeout_secs")]
+    pub ready_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +223,12 @@ pub struct ManagedProcess {
     #[serde(default)]
     pub watch: bool,
     #[serde(default)]
+    pub watch_paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub ignore_watch: Vec<String>,
+    #[serde(default)]
+    pub watch_delay_secs: u64,
+    #[serde(default)]
     pub cluster_mode: bool,
     #[serde(default)]
     pub cluster_instances: Option<u32>,
@@ -238,6 +254,10 @@ pub struct ManagedProcess {
     pub next_health_check: Option<u64>,
     #[serde(default)]
     pub last_health_error: Option<String>,
+    #[serde(default)]
+    pub wait_ready: bool,
+    #[serde(default = "default_ready_timeout_secs")]
+    pub ready_timeout_secs: u64,
     #[serde(default)]
     pub cpu_percent: f32,
     #[serde(default)]
@@ -285,6 +305,9 @@ impl ManagedProcess {
             restart_delay_secs: self.restart_delay_secs,
             start_delay_secs: self.start_delay_secs,
             watch: self.watch,
+            watch_paths: &self.watch_paths,
+            ignore_watch: &self.ignore_watch,
+            watch_delay_secs: self.watch_delay_secs,
             cluster_mode: self.cluster_mode,
             cluster_instances: self.cluster_instances,
             namespace: self.namespace.as_deref(),
@@ -292,6 +315,8 @@ impl ManagedProcess {
             git_repo: self.git_repo.as_deref(),
             git_ref: self.git_ref.as_deref(),
             pull_secret_hash: self.pull_secret_hash.as_deref(),
+            wait_ready: self.wait_ready,
+            ready_timeout_secs: self.ready_timeout_secs,
         })
     }
 
@@ -334,6 +359,9 @@ impl StartProcessSpec {
             restart_delay_secs: self.restart_delay_secs,
             start_delay_secs: self.start_delay_secs,
             watch: self.watch,
+            watch_paths: &self.watch_paths,
+            ignore_watch: &self.ignore_watch,
+            watch_delay_secs: self.watch_delay_secs,
             cluster_mode: self.cluster_mode,
             cluster_instances: self.cluster_instances,
             namespace: self.namespace.as_deref(),
@@ -341,6 +369,8 @@ impl StartProcessSpec {
             git_repo: self.git_repo.as_deref(),
             git_ref: self.git_ref.as_deref(),
             pull_secret_hash: self.pull_secret_hash.as_deref(),
+            wait_ready: self.wait_ready,
+            ready_timeout_secs: self.ready_timeout_secs,
         })
     }
 }
@@ -359,6 +389,9 @@ struct ProcessConfigRef<'a> {
     restart_delay_secs: u64,
     start_delay_secs: u64,
     watch: bool,
+    watch_paths: &'a [PathBuf],
+    ignore_watch: &'a [String],
+    watch_delay_secs: u64,
     cluster_mode: bool,
     cluster_instances: Option<u32>,
     namespace: Option<&'a str>,
@@ -366,6 +399,8 @@ struct ProcessConfigRef<'a> {
     git_repo: Option<&'a str>,
     git_ref: Option<&'a str>,
     pull_secret_hash: Option<&'a str>,
+    wait_ready: bool,
+    ready_timeout_secs: u64,
 }
 
 fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
@@ -388,20 +423,43 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
     payload.push_str(&config.restart_policy.to_string());
     payload.push('\n');
     payload.push_str(&format!(
-        "max_restarts={}\ncrash_restart_limit={}\nstop_timeout_secs={}\nrestart_delay_secs={}\nstart_delay_secs={}\nwatch={}\ncluster_mode={}\ncluster_instances={:?}\nnamespace={:?}\ngit_repo={:?}\ngit_ref={:?}\npull_secret_hash={:?}\n",
+        "max_restarts={}\ncrash_restart_limit={}\nstop_timeout_secs={}\nrestart_delay_secs={}\nstart_delay_secs={}\nwatch={}\nwatch_delay_secs={}\ncluster_mode={}\ncluster_instances={:?}\nnamespace={:?}\ngit_repo={:?}\ngit_ref={:?}\npull_secret_hash={:?}\nwait_ready={}\nready_timeout_secs={}\n",
         config.max_restarts,
         config.crash_restart_limit,
         config.stop_timeout_secs,
         config.restart_delay_secs,
         config.start_delay_secs,
         config.watch,
+        config.watch_delay_secs,
         config.cluster_mode,
         config.cluster_instances,
         config.namespace,
         config.git_repo,
         config.git_ref,
-        config.pull_secret_hash
+        config.pull_secret_hash,
+        config.wait_ready,
+        config.ready_timeout_secs
     ));
+    payload.push_str("watch_paths=");
+    let mut watch_paths: Vec<String> = config
+        .watch_paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    watch_paths.sort();
+    for path in watch_paths {
+        payload.push_str(&path);
+        payload.push('\u{1d}');
+    }
+    payload.push('\n');
+    payload.push_str("ignore_watch=");
+    let mut ignore_watch = config.ignore_watch.to_vec();
+    ignore_watch.sort();
+    for pattern in ignore_watch {
+        payload.push_str(&pattern);
+        payload.push('\u{1d}');
+    }
+    payload.push('\n');
     payload.push_str("stop_signal=");
     if let Some(signal) = config.stop_signal {
         payload.push_str(signal);
@@ -453,15 +511,19 @@ fn default_stop_timeout_secs() -> u64 {
     5
 }
 
+pub fn default_ready_timeout_secs() -> u64 {
+    30
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
     use super::{
-        default_crash_restart_limit, default_stop_timeout_secs, DesiredState, HealthCheck,
-        HealthStatus, ManagedProcess, ProcessStatus, ResourceLimits, RestartPolicy,
-        StartProcessSpec, DEFAULT_CRASH_RESTART_LIMIT,
+        default_crash_restart_limit, default_ready_timeout_secs, default_stop_timeout_secs,
+        DesiredState, HealthCheck, HealthStatus, ManagedProcess, ProcessStatus, ResourceLimits,
+        RestartPolicy, StartProcessSpec, DEFAULT_CRASH_RESTART_LIMIT,
     };
 
     #[test]
@@ -553,6 +615,9 @@ mod tests {
             restart_delay_secs: 4,
             start_delay_secs: 2,
             watch: true,
+            watch_paths: vec![PathBuf::from("src")],
+            ignore_watch: vec!["node_modules".to_string()],
+            watch_delay_secs: 2,
             cluster_mode: true,
             cluster_instances: Some(2),
             namespace: Some("prod".to_string()),
@@ -560,6 +625,8 @@ mod tests {
             git_repo: Some("https://example.com/repo.git".to_string()),
             git_ref: Some("main".to_string()),
             pull_secret_hash: Some("abc123".to_string()),
+            wait_ready: true,
+            ready_timeout_secs: 45,
         };
 
         let mut process = fixture_process();
@@ -577,6 +644,9 @@ mod tests {
         process.restart_delay_secs = spec.restart_delay_secs;
         process.start_delay_secs = spec.start_delay_secs;
         process.watch = spec.watch;
+        process.watch_paths = spec.watch_paths.clone();
+        process.ignore_watch = spec.ignore_watch.clone();
+        process.watch_delay_secs = spec.watch_delay_secs;
         process.cluster_mode = spec.cluster_mode;
         process.cluster_instances = spec.cluster_instances;
         process.namespace = spec.namespace.clone();
@@ -584,6 +654,8 @@ mod tests {
         process.git_repo = spec.git_repo.clone();
         process.git_ref = spec.git_ref.clone();
         process.pull_secret_hash = spec.pull_secret_hash.clone();
+        process.wait_ready = spec.wait_ready;
+        process.ready_timeout_secs = spec.ready_timeout_secs;
 
         assert_eq!(spec.config_fingerprint(), process.config_fingerprint());
     }
@@ -710,6 +782,9 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             resource_limits: None,
@@ -726,6 +801,8 @@ mod tests {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready: false,
+            ready_timeout_secs: default_ready_timeout_secs(),
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,
@@ -750,6 +827,9 @@ mod tests {
             restart_delay_secs: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -757,6 +837,8 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            wait_ready: false,
+            ready_timeout_secs: default_ready_timeout_secs(),
         }
     }
 }

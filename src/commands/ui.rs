@@ -1084,6 +1084,9 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         restart_delay_secs: 0,
         start_delay_secs: 0,
         watch: false,
+        watch_paths: Vec::new(),
+        ignore_watch: Vec::new(),
+        watch_delay_secs: 0,
         cluster_mode: false,
         cluster_instances: None,
         namespace: None,
@@ -1091,6 +1094,8 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         git_repo: None,
         git_ref: None,
         pull_secret_hash: None,
+        wait_ready: false,
+        ready_timeout_secs: crate::process::default_ready_timeout_secs(),
     };
 
     match send_request(
@@ -2664,6 +2669,9 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             resource_limits: None,
@@ -2680,6 +2688,8 @@ mod tests {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,
