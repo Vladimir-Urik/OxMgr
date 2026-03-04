@@ -395,33 +395,80 @@ fn e2e_validate_oxfile() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Oxfile validation: OK"),
+        stdout.contains("Config validation: OK") && stdout.contains("Format: oxfile.toml"),
         "unexpected validate output: {stdout}"
     );
 }
 
 #[test]
 #[serial]
-fn e2e_validate_rejects_non_toml_input() {
-    if !should_run_e2e("e2e_validate_rejects_non_toml_input") {
+fn e2e_validate_accepts_ecosystem_json_input() {
+    if !should_run_e2e("e2e_validate_accepts_ecosystem_json_input") {
         return;
     }
 
-    let env = TestEnv::new("validate-non-toml");
-    let ecosystem_path = env.write_file("ecosystem.config.json", r#"{"apps":[]}"#);
+    let env = TestEnv::new("validate-ecosystem-json");
+    let ecosystem_path = env.write_file(
+        "ecosystem.config.json",
+        r#"{"apps":[{"name":"api","script":"server.js"}]}"#,
+    );
     let output = env.run_vec(vec!["validate".to_string(), path_string(&ecosystem_path)]);
 
     assert!(
-        !output.status.success(),
-        "validate unexpectedly succeeded for non-toml input"
+        output.status.success(),
+        "validate failed for ecosystem input: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("validate expects oxfile.toml input")
-            || stdout.contains("validate expects oxfile.toml input"),
-        "unexpected validate failure output\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        stdout.contains("Config validation: OK") && stdout.contains("Format: ecosystem config"),
+        "unexpected validate output\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_validate_accepts_ecosystem_js_input() {
+    if !should_run_e2e("e2e_validate_accepts_ecosystem_js_input") {
+        return;
+    }
+
+    let env = TestEnv::new("validate-ecosystem-js");
+    let ecosystem_path = env.write_file(
+        "ecosystem.config.js",
+        r#"
+module.exports = {
+  apps: [
+    {
+      name: "api",
+      cmd: "node server.js",
+      cwd: "/srv/api",
+      watch: ["src"],
+      ignore_watch: ["node_modules"],
+      watch_delay: 1000,
+      health_cmd: "curl -fsS http://127.0.0.1:3000/health",
+      wait_ready: true,
+      listen_timeout: 5000
+    }
+  ]
+};
+"#,
+    );
+    let output = env.run_vec(vec!["validate".to_string(), path_string(&ecosystem_path)]);
+
+    assert!(
+        output.status.success(),
+        "validate failed for ecosystem js input: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Config validation: OK") && stdout.contains("Format: ecosystem config"),
+        "unexpected validate output\nstdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -1049,9 +1096,10 @@ fn e2e_validate_profile_and_only_reports_expanded_processes() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Oxfile validation: OK")
+        stdout.contains("Config validation: OK")
             && stdout.contains("Profile: prod")
             && stdout.contains("Apps: 1")
+            && stdout.contains("Format: oxfile.toml")
             && stdout.contains("Expanded Processes: 4"),
         "unexpected validate profile/only output:\n{stdout}"
     );

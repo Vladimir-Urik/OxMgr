@@ -22,7 +22,7 @@ Lifecycle operations:
 
 Configuration workflow:
 
-- `oxmgr validate <oxfile.toml>`
+- `oxmgr validate <config>`
 - `oxmgr apply <oxfile.toml>`
 - `oxmgr import <source>`
 - `oxmgr export <name|id>`
@@ -40,10 +40,15 @@ Common options:
 - `--cwd <path>`
 - `--env KEY=VALUE` (repeatable)
 - `--watch` (watch working directory and restart on file changes)
+- `--watch-path <path>` (repeatable; watch explicit paths instead of only `cwd`)
+- `--ignore-watch <regex>` (repeatable; ignore matching paths during watch scans)
+- `--watch-delay <seconds>` (restart debounce for file-watch changes)
 - `--health-cmd <command>`
 - `--health-interval <seconds>` (default: `30`)
 - `--health-timeout <seconds>` (default: `5`)
 - `--health-max-failures <n>` (default: `3`)
+- `--wait-ready` (gate start/reload on health check readiness)
+- `--ready-timeout <seconds>` (default: `30`; requires `--wait-ready`)
 - `--kill-signal <signal>`
 - `--stop-timeout <seconds>` (default: `5`)
 - `--restart-delay <seconds>` (default: `0`)
@@ -64,6 +69,8 @@ Cluster mode notes:
 - `--crash-restart-limit` counts only daemon-triggered auto restarts after unexpected exits.
 - Manual `start`, `restart`, and `reload` reset the crash-loop counter.
 - `--restart-delay 0` keeps unexpected-exit restarts immediate; no extra hidden delay is added.
+- `--watch-path`, `--ignore-watch`, and `--watch-delay` require `--watch`.
+- `--wait-ready` requires `--health-cmd`.
 
 ## Lifecycle
 
@@ -112,11 +119,11 @@ Full UI behavior and panel layout: [Terminal UI Guide](./UI.md).
 - `oxmgr export <name|id> [--out <file>]`
 - `oxmgr apply <path> [--env <profile>] [--only a,b] [--prune]`
 - `oxmgr convert <ecosystem.json> --out <oxfile.toml> [--env <profile>]`
-- `oxmgr validate <oxfile.toml> [--env <profile>] [--only a,b]`
+- `oxmgr validate <config> [--env <profile>] [--only a,b]`
 
 Import source notes:
 
-- Local `ecosystem.config.json` and `oxfile.toml` are supported.
+- Local `ecosystem.config.{js,cjs,mjs,json}` and `oxfile.toml` are supported.
 - Local `.oxpkg` bundles are supported.
 - Remote source must be `https://...` and currently supports `.oxpkg` bundles only.
 - `--sha256` enables checksum pinning for remote imports.

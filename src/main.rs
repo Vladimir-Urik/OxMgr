@@ -13,6 +13,7 @@ mod daemon;
 mod ecosystem;
 mod errors;
 mod ipc;
+mod js_config;
 mod logging;
 mod oxfile;
 mod process;

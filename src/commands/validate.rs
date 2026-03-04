@@ -2,9 +2,11 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use regex::RegexSet;
 
 use crate::ecosystem::EcosystemProcessSpec;
-use crate::oxfile;
+
+use super::import::load_import_specs;
 
 #[derive(Debug, Clone)]
 struct OxfileValidationReport {
@@ -18,18 +20,7 @@ pub(crate) fn run(path: &Path, env: Option<&str>, only: &[String]) -> Result<()>
 }
 
 fn validate_oxfile_command(path: &Path, env: Option<&str>, only: &[String]) -> Result<()> {
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase());
-    if extension.as_deref() != Some("toml") {
-        anyhow::bail!(
-            "validate expects oxfile.toml input (got: {})",
-            path.display()
-        );
-    }
-
-    let mut specs = oxfile::load_with_profile(path, env)?;
+    let mut specs = load_import_specs(path, env)?;
     if !only.is_empty() {
         specs.retain(|spec| {
             spec.name
@@ -53,8 +44,9 @@ fn validate_oxfile_command(path: &Path, env: Option<&str>, only: &[String]) -> R
 
     let report = validate_resolved_specs(&specs)?;
 
-    println!("Oxfile validation: OK");
+    println!("Config validation: OK");
     println!("Path: {}", path.display());
+    println!("Format: {}", config_format_label(path));
     println!("Profile: {}", env.unwrap_or("default"));
     println!("Apps: {}", report.app_count);
     println!("Expanded Processes: {}", report.expanded_process_count);
@@ -82,6 +74,8 @@ fn validate_resolved_specs(specs: &[EcosystemProcessSpec]) -> Result<OxfileValid
             anyhow::bail!("app command cannot be empty");
         }
         validate_cluster_settings(spec, &tokens)?;
+        validate_watch_settings(spec)?;
+        validate_readiness_settings(spec)?;
 
         if let Some(check) = &spec.health_check {
             let health_tokens = shell_words::split(&check.command)
@@ -144,6 +138,55 @@ fn validate_resolved_specs(specs: &[EcosystemProcessSpec]) -> Result<OxfileValid
     })
 }
 
+fn validate_watch_settings(spec: &EcosystemProcessSpec) -> Result<()> {
+    if !spec.watch {
+        if !spec.watch_paths.is_empty()
+            || !spec.ignore_watch.is_empty()
+            || spec.watch_delay_secs > 0
+        {
+            anyhow::bail!(
+                "app {:?} configures watch paths/ignore/delay but watch is disabled",
+                spec.name
+            );
+        }
+        return Ok(());
+    }
+
+    if spec.watch_paths.is_empty() && spec.cwd.is_none() {
+        anyhow::bail!(
+            "app {:?} enables watch but does not set cwd or explicit watch paths",
+            spec.name
+        );
+    }
+
+    if spec.cwd.is_none() && spec.watch_paths.iter().any(|path| !path.is_absolute()) {
+        anyhow::bail!(
+            "app {:?} uses relative watch paths but does not set cwd",
+            spec.name
+        );
+    }
+
+    if !spec.ignore_watch.is_empty() {
+        RegexSet::new(&spec.ignore_watch)
+            .with_context(|| format!("invalid ignore_watch regex for app {:?}", spec.name))?;
+    }
+
+    Ok(())
+}
+
+fn validate_readiness_settings(spec: &EcosystemProcessSpec) -> Result<()> {
+    if spec.wait_ready && spec.health_check.is_none() {
+        anyhow::bail!(
+            "app {:?} enables wait_ready but does not define a health check",
+            spec.name
+        );
+    }
+    if spec.ready_timeout_secs == 0 {
+        anyhow::bail!("app {:?} has ready_timeout_secs = 0", spec.name);
+    }
+    Ok(())
+}
+
 fn validate_cluster_settings(spec: &EcosystemProcessSpec, command_tokens: &[String]) -> Result<()> {
     if !spec.cluster_mode {
         if spec.cluster_instances.is_some() {
@@ -190,14 +233,25 @@ fn is_node_command_token(token: &str) -> bool {
     )
 }
 
+fn config_format_label(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("toml") => "oxfile.toml",
+        Some("js") | Some("cjs") | Some("mjs") | Some("json") | Some("json5") => "ecosystem config",
+        _ => "config",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{validate_oxfile_command, validate_resolved_specs};
     use crate::ecosystem::EcosystemProcessSpec;
     use crate::process::{HealthCheck, RestartPolicy};
     use std::collections::HashMap;
-    use std::path::Path;
-
     #[test]
     fn validate_resolved_specs_accepts_valid_definitions() {
         let specs = vec![
@@ -274,6 +328,98 @@ mod tests {
         let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
         assert!(
             error.to_string().contains("invalid health command syntax"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_wait_ready_without_health_check() {
+        let mut spec = fixture_spec("api", "node server.js", vec![], 1);
+        spec.health_check = None;
+        spec.wait_ready = true;
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error.to_string().contains("wait_ready"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_watch_without_cwd_or_paths() {
+        let mut spec = fixture_spec("api", "node server.js", vec![], 1);
+        spec.watch = true;
+        spec.watch_paths.clear();
+        spec.cwd = None;
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("does not set cwd or explicit watch paths"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_relative_watch_paths_without_cwd() {
+        let mut spec = fixture_spec("api", "node server.js", vec![], 1);
+        spec.watch = true;
+        spec.cwd = None;
+        spec.watch_paths = vec![std::path::PathBuf::from("src")];
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("uses relative watch paths but does not set cwd"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_watch_tuning_when_watch_disabled() {
+        let mut spec = fixture_spec("api", "node server.js", vec![], 1);
+        spec.watch = false;
+        spec.ignore_watch = vec!["node_modules".to_string()];
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("configures watch paths/ignore/delay but watch is disabled"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_invalid_ignore_watch_regex() {
+        let mut spec = fixture_spec("api", "node server.js", vec![], 1);
+        spec.watch = true;
+        spec.cwd = Some(std::env::temp_dir());
+        spec.ignore_watch = vec!["(".to_string()];
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error.to_string().contains("invalid ignore_watch regex"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[test]
+    fn validate_resolved_specs_rejects_zero_ready_timeout() {
+        let mut spec = fixture_spec("api", "node server.js", vec![], 1);
+        spec.ready_timeout_secs = 0;
+
+        let error = validate_resolved_specs(&[spec]).expect_err("validation should fail");
+        assert!(
+            error.to_string().contains("ready_timeout_secs = 0"),
             "unexpected error: {}",
             error
         );
@@ -387,6 +533,10 @@ mod tests {
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
             start_delay_secs: 0,
+            watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -398,6 +548,8 @@ mod tests {
             depends_on: Vec::new(),
             instances: 1,
             instance_var: None,
+            wait_ready: false,
+            ready_timeout_secs: 30,
         };
         let named = fixture_spec("api", "node server.js", vec![], 1);
 
@@ -408,16 +560,51 @@ mod tests {
     }
 
     #[test]
-    fn validate_command_rejects_non_toml_path() {
-        let error = validate_oxfile_command(Path::new("ecosystem.config.json"), None, &[])
-            .expect_err("validate should reject non-toml path");
-        assert!(
-            error
-                .to_string()
-                .contains("validate expects oxfile.toml input"),
-            "unexpected error: {}",
-            error
-        );
+    fn validate_command_accepts_ecosystem_json_path() {
+        let path = temp_file("validate-ecosystem", "json");
+        std::fs::write(
+            &path,
+            r#"{
+  "apps": [
+    { "name": "api", "script": "server.js" }
+  ]
+}"#,
+        )
+        .expect("failed to write ecosystem fixture");
+
+        validate_oxfile_command(&path, None, &[]).expect("validate should accept ecosystem json");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn validate_command_accepts_ecosystem_js_path() {
+        let path = temp_file("validate-ecosystem-js", "js");
+        std::fs::write(
+            &path,
+            r#"
+module.exports = {
+  apps: [
+    {
+      name: "api",
+      cmd: "node server.js",
+      cwd: "/srv/api",
+      watch: ["src"],
+      ignore_watch: ["node_modules"],
+      watch_delay: 1000,
+      health_cmd: "curl -fsS http://127.0.0.1:3000/health",
+      wait_ready: true,
+      listen_timeout: 5000
+    }
+  ]
+};
+"#,
+        )
+        .expect("failed to write ecosystem fixture");
+
+        validate_oxfile_command(&path, None, &[]).expect("validate should accept ecosystem js");
+
+        let _ = std::fs::remove_file(path);
     }
 
     fn fixture_spec(
@@ -444,6 +631,10 @@ mod tests {
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
             start_delay_secs: 0,
+            watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -455,6 +646,18 @@ mod tests {
             depends_on,
             instances,
             instance_var: Some("INSTANCE_ID".to_string()),
+            wait_ready: false,
+            ready_timeout_secs: 30,
         }
+    }
+
+    fn temp_file(prefix: &str, extension: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock failure")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{nonce}.{extension}"))
     }
 }

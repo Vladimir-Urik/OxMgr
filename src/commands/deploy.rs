@@ -380,7 +380,7 @@ fn load_deploy_file(path: &Path) -> Result<DeployFile> {
         Some("json") => json5::from_str::<DeployFile>(&payload)
             .with_context(|| format!("failed to parse JSON deploy config {}", path.display())),
         Some("js") | Some("cjs") | Some("mjs") => {
-            let object = extract_js_object_literal(&payload)?;
+            let object = extract_js_object_literal(&payload, "deploy config")?;
             json5::from_str::<DeployFile>(&object)
                 .with_context(|| format!("failed to parse JS deploy config {}", path.display()))
         }
@@ -397,25 +397,6 @@ fn load_deploy_file(path: &Path) -> Result<DeployFile> {
             )
         }
     }
-}
-
-fn extract_js_object_literal(payload: &str) -> Result<String> {
-    let trimmed = payload.trim();
-    if trimmed.starts_with('{') {
-        return Ok(trimmed.to_string());
-    }
-
-    let Some(start) = trimmed.find('{') else {
-        anyhow::bail!("failed to locate JS object in deploy config");
-    };
-    let Some(end) = trimmed.rfind('}') else {
-        anyhow::bail!("failed to locate JS object end in deploy config");
-    };
-    if end < start {
-        anyhow::bail!("invalid JS object boundaries in deploy config");
-    }
-
-    Ok(trimmed[start..=end].to_string())
 }
 
 fn build_setup_script(target: &DeployTarget) -> Result<String> {
@@ -797,7 +778,8 @@ module.exports = {
   }
 };
 "#;
-        let object = extract_js_object_literal(source).expect("expected object extraction");
+        let object =
+            extract_js_object_literal(source, "deploy config").expect("expected object extraction");
         assert!(object.contains("deploy"));
         assert!(object.starts_with('{'));
         assert!(object.ends_with('}'));
@@ -839,3 +821,4 @@ module.exports = {
         std::env::temp_dir().join(format!("{prefix}-{nonce}.{extension}"))
     }
 }
+use crate::js_config::extract_js_object_literal;

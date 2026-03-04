@@ -98,6 +98,12 @@ pub enum Commands {
         start_delay: u64,
         #[arg(long, default_value_t = false)]
         watch: bool,
+        #[arg(long = "watch-path")]
+        watch_path: Vec<PathBuf>,
+        #[arg(long = "ignore-watch")]
+        ignore_watch: Vec<String>,
+        #[arg(long = "watch-delay", default_value_t = 0)]
+        watch_delay: u64,
         #[arg(long, default_value_t = false)]
         cluster: bool,
         #[arg(long = "cluster-instances")]
@@ -112,6 +118,10 @@ pub enum Commands {
         cgroup_enforce: bool,
         #[arg(long = "deny-gpu", default_value_t = false)]
         deny_gpu: bool,
+        #[arg(long = "wait-ready", default_value_t = false)]
+        wait_ready: bool,
+        #[arg(long = "ready-timeout", default_value_t = 30)]
+        ready_timeout: u64,
     },
     /// Stop a managed process by name or numeric identifier.
     Stop { target: String },
@@ -327,6 +337,7 @@ fn parse_env_var(value: &str) -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use std::path::PathBuf;
 
     use super::{
         build_health_check, build_resource_limits, env_pairs_to_map, parse_env_var, Cli, Commands,
@@ -450,6 +461,57 @@ mod tests {
                     ]
                 );
                 assert!(matches!(restart, RestartArg::Never));
+            }
+            _ => panic!("expected start subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_start_command_parses_watch_and_readiness_flags() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "start",
+            "node server.js",
+            "--name",
+            "api",
+            "--watch",
+            "--watch-path",
+            "src",
+            "--watch-path",
+            "config",
+            "--ignore-watch",
+            "node_modules",
+            "--watch-delay",
+            "2",
+            "--health-cmd",
+            "curl -fsS http://127.0.0.1:3000/health",
+            "--wait-ready",
+            "--ready-timeout",
+            "9",
+        ])
+        .expect("expected CLI parsing success");
+
+        match cli.command {
+            Commands::Start {
+                name,
+                watch,
+                watch_path,
+                ignore_watch,
+                watch_delay,
+                wait_ready,
+                ready_timeout,
+                ..
+            } => {
+                assert_eq!(name.as_deref(), Some("api"));
+                assert!(watch);
+                assert_eq!(
+                    watch_path,
+                    vec![PathBuf::from("src"), PathBuf::from("config")]
+                );
+                assert_eq!(ignore_watch, vec!["node_modules".to_string()]);
+                assert_eq!(watch_delay, 2);
+                assert!(wait_ready);
+                assert_eq!(ready_timeout, 9);
             }
             _ => panic!("expected start subcommand"),
         }

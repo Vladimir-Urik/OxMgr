@@ -320,7 +320,10 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
                 stop_timeout_secs: spec.stop_timeout_secs.max(1),
                 restart_delay_secs: spec.restart_delay_secs,
                 start_delay_secs: spec.start_delay_secs,
-                watch: false,
+                watch: spec.watch,
+                watch_paths: spec.watch_paths.clone(),
+                ignore_watch: spec.ignore_watch.clone(),
+                watch_delay_secs: spec.watch_delay_secs,
                 cluster_mode: spec.cluster_mode,
                 cluster_instances: spec.cluster_instances,
                 namespace: spec.namespace.clone(),
@@ -328,6 +331,8 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
                 git_repo: spec.git_repo.clone(),
                 git_ref: spec.git_ref.clone(),
                 pull_secret_hash: spec.pull_secret_hash.clone(),
+                wait_ready: spec.wait_ready,
+                ready_timeout_secs: spec.ready_timeout_secs,
             });
         }
     }
@@ -545,6 +550,9 @@ mod tests {
             restart_delay_secs: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -552,6 +560,8 @@ mod tests {
             git_repo: Some("git@github.com:org/api.git".to_string()),
             git_ref: Some("main".to_string()),
             pull_secret_hash: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
         let encoded = encode_bundle(&[crate::process::ManagedProcess {
             id: 1,
@@ -577,6 +587,9 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             resource_limits: None,
@@ -593,6 +606,8 @@ mod tests {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,

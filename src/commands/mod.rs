@@ -32,10 +32,25 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
     if let Commands::Start {
         cluster,
         cluster_instances,
+        watch,
+        watch_path,
+        ignore_watch,
+        watch_delay,
+        wait_ready,
+        ready_timeout,
         ..
     } = &command
     {
-        start::validate_flags(*cluster, *cluster_instances)?;
+        start::validate_flags(
+            *cluster,
+            *cluster_instances,
+            *watch,
+            watch_path,
+            ignore_watch,
+            *watch_delay,
+            *wait_ready,
+            *ready_timeout,
+        )?;
     }
 
     let needs_daemon = !matches!(
@@ -73,6 +88,9 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             restart_delay,
             start_delay,
             watch,
+            watch_path,
+            ignore_watch,
+            watch_delay,
             cluster,
             cluster_instances,
             namespace,
@@ -80,6 +98,8 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             max_cpu_percent,
             cgroup_enforce,
             deny_gpu,
+            wait_ready,
+            ready_timeout,
         } => {
             start::run(
                 config,
@@ -100,6 +120,9 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
                     restart_delay,
                     start_delay,
                     watch,
+                    watch_path,
+                    ignore_watch,
+                    watch_delay,
                     cluster,
                     cluster_instances,
                     namespace,
@@ -107,6 +130,8 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
                     max_cpu_percent,
                     cgroup_enforce,
                     deny_gpu,
+                    wait_ready,
+                    ready_timeout,
                 },
             )
             .await

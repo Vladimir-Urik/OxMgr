@@ -6,9 +6,9 @@ It is designed for deterministic, idempotent process management via `oxmgr apply
 
 Focused comparison with migration guidance: [Oxfile vs PM2 Ecosystem](./OXFILE_VS_PM2.md).
 
-## Why Oxfile Is Better Than Ecosystem JSON
+## Why Oxfile Is Better Than Ecosystem Config
 
-Compared to `ecosystem.config.json` style files, `oxfile.toml` gives Oxmgr-specific advantages:
+Compared to `ecosystem.config.{js,cjs,mjs,json}` style files, `oxfile.toml` gives Oxmgr-specific advantages:
 
 1. Deterministic, idempotent workflows
 - Built for `oxmgr apply`, where unchanged apps are left untouched.
@@ -51,11 +51,12 @@ oxmgr apply ./oxfile.toml --prune
 
 ## Validation Command
 
-Use `validate` to test oxfile config in CI or pre-deploy scripts:
+Use `validate` to test Oxmgr config in CI or pre-deploy scripts:
 
 ```bash
 oxmgr validate ./oxfile.toml
 oxmgr validate ./oxfile.toml --env prod --only api,worker
+oxmgr validate ./ecosystem.config.js --env prod
 ```
 
 Validation checks:
@@ -67,6 +68,8 @@ Validation checks:
 - duplicate app names
 - unknown `depends_on` references
 - duplicate expanded names from `instances`
+- watch configuration sanity (`watch`, watch paths, ignore regexes, debounce)
+- readiness settings (`wait_ready` requires health checks and positive timeout)
 
 ## File Structure
 
@@ -127,6 +130,11 @@ Details:
 - `health_interval_secs`: integer
 - `health_timeout_secs`: integer
 - `health_max_failures`: integer
+- `watch`: bool, string path, or array of paths
+- `ignore_watch`: array of regex patterns
+- `watch_delay_secs`: integer
+- `wait_ready`: bool
+- `ready_timeout_secs`: integer
 - `max_memory_mb`: integer
 - `max_cpu_percent`: float
 - `cgroup_enforce`: bool (Linux only; applies hard limits via cgroup v2)
@@ -177,6 +185,35 @@ Behavior:
 - command executed periodically
 - failure increments failure counter
 - after `health_max_failures`, process is restarted
+
+## File Watch
+
+```toml
+watch = ["src", "package.json"]
+ignore_watch = ["target/", "\\.log$"]
+watch_delay_secs = 2
+```
+
+Behavior:
+
+- `watch = true` watches `cwd`
+- `watch = "path"` or `watch = ["a", "b"]` watches explicit paths
+- `ignore_watch` skips matching logical paths using regex patterns
+- `watch_delay_secs` debounces restart after a detected change
+
+## Readiness-Aware Reload
+
+```toml
+health_cmd = "curl -fsS http://127.0.0.1:3000/health"
+wait_ready = true
+ready_timeout_secs = 30
+```
+
+Behavior:
+
+- replacement process must pass `health_cmd` before reload cuts over
+- if readiness fails or times out, the old process stays running
+- `wait_ready` requires a health check command
 
 ## Resource Limits
 
@@ -258,10 +295,10 @@ Current command requirement:
 
 ## Conversion and Migration
 
-Convert existing ecosystem JSON:
+Convert existing ecosystem config:
 
 ```bash
-oxmgr convert ecosystem.config.json --out oxfile.toml --env prod
+oxmgr convert ecosystem.config.js --out oxfile.toml --env prod
 ```
 
 Then use:

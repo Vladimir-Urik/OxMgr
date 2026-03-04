@@ -63,6 +63,12 @@ struct BundleService {
     #[serde(default)]
     watch: bool,
     #[serde(default)]
+    watch_paths: Vec<PathBuf>,
+    #[serde(default)]
+    ignore_watch: Vec<String>,
+    #[serde(default)]
+    watch_delay_secs: u64,
+    #[serde(default)]
     cluster_mode: bool,
     #[serde(default)]
     cluster_instances: Option<u32>,
@@ -76,6 +82,10 @@ struct BundleService {
     git_ref: Option<String>,
     #[serde(default)]
     pull_secret_hash: Option<String>,
+    #[serde(default)]
+    wait_ready: bool,
+    #[serde(default = "crate::process::default_ready_timeout_secs")]
+    ready_timeout_secs: u64,
 }
 
 /// Returns a filesystem-friendly default file name for a process bundle.
@@ -292,6 +302,9 @@ impl BundleService {
             restart_delay_secs: process.restart_delay_secs,
             start_delay_secs: process.start_delay_secs,
             watch: process.watch,
+            watch_paths: process.watch_paths.clone(),
+            ignore_watch: process.ignore_watch.clone(),
+            watch_delay_secs: process.watch_delay_secs,
             cluster_mode: process.cluster_mode,
             cluster_instances: process.cluster_instances.map(|value| value.max(1)),
             namespace: process.namespace.clone(),
@@ -299,6 +312,8 @@ impl BundleService {
             git_repo: process.git_repo.clone(),
             git_ref: process.git_ref.clone(),
             pull_secret_hash: process.pull_secret_hash.clone(),
+            wait_ready: process.wait_ready,
+            ready_timeout_secs: process.ready_timeout_secs,
         }
     }
 
@@ -317,6 +332,9 @@ impl BundleService {
             restart_delay_secs: self.restart_delay_secs,
             start_delay_secs: self.start_delay_secs,
             watch: self.watch,
+            watch_paths: self.watch_paths,
+            ignore_watch: self.ignore_watch,
+            watch_delay_secs: self.watch_delay_secs,
             cluster_mode: self.cluster_mode,
             cluster_instances: if self.cluster_mode {
                 self.cluster_instances.map(|value| value.max(1))
@@ -328,6 +346,8 @@ impl BundleService {
             git_repo: self.git_repo,
             git_ref: self.git_ref,
             pull_secret_hash: self.pull_secret_hash,
+            wait_ready: self.wait_ready,
+            ready_timeout_secs: self.ready_timeout_secs.max(1),
         }
     }
 }
@@ -545,6 +565,9 @@ mod tests {
             restart_delay_secs: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -552,6 +575,8 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
 
         let err = super::validate_service(&payload).expect_err("expected validation error");
@@ -578,6 +603,9 @@ mod tests {
             restart_delay_secs: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             namespace: None,
@@ -585,6 +613,8 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: Some("abc123".to_string()),
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
 
         let err = super::validate_service(&payload).expect_err("expected hash validation error");
@@ -622,6 +652,9 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             watch: true,
+            watch_paths: vec![PathBuf::from("src")],
+            ignore_watch: vec!["node_modules".to_string()],
+            watch_delay_secs: 2,
             cluster_mode: false,
             cluster_instances: None,
             resource_limits: None,
@@ -638,6 +671,8 @@ mod tests {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready: true,
+            ready_timeout_secs: 45,
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,

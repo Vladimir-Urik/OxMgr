@@ -9,6 +9,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+use regex::RegexSet;
 use sha2::{Digest, Sha256};
 use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::process::Command;
@@ -33,6 +34,7 @@ pub struct ProcessManager {
     config: AppConfig,
     processes: HashMap<String, ManagedProcess>,
     watch_fingerprints: HashMap<String, u64>,
+    pending_watch_restarts: HashMap<String, PendingWatchRestart>,
     scheduled_restarts: HashMap<String, TokioInstant>,
     next_id: u64,
     exit_tx: UnboundedSender<ProcessExitEvent>,
@@ -40,6 +42,12 @@ pub struct ProcessManager {
 }
 
 const CRASH_RESTART_WINDOW_SECS: u64 = 5 * 60;
+
+#[derive(Debug, Clone, Copy)]
+struct PendingWatchRestart {
+    due_at: TokioInstant,
+    fingerprint: u64,
+}
 
 impl ProcessManager {
     /// Rebuilds the manager from persisted state and prepares runtime-only
@@ -56,6 +64,9 @@ impl ProcessManager {
             }
             if process.restart_backoff_reset_secs == 0 {
                 process.restart_backoff_reset_secs = 60;
+            }
+            if process.ready_timeout_secs == 0 {
+                process.ready_timeout_secs = crate::process::default_ready_timeout_secs();
             }
             process.health_status = HealthStatus::Unknown;
             process.health_failures = 0;
@@ -75,6 +86,7 @@ impl ProcessManager {
             config,
             processes,
             watch_fingerprints: HashMap::new(),
+            pending_watch_restarts: HashMap::new(),
             scheduled_restarts: HashMap::new(),
             next_id,
             exit_tx,
@@ -130,6 +142,7 @@ impl ProcessManager {
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
         }
         self.watch_fingerprints.clear();
+        self.pending_watch_restarts.clear();
         self.scheduled_restarts.clear();
         self.save()?;
 
@@ -148,6 +161,7 @@ impl ProcessManager {
     /// Runs the daemon's periodic maintenance tasks.
     pub async fn run_periodic_tasks(&mut self) -> Result<()> {
         self.run_scheduled_restarts().await?;
+        self.run_due_watch_restarts().await?;
         self.refresh_resource_metrics();
         self.run_resource_limit_checks().await?;
         self.run_watch_checks().await?;
@@ -170,6 +184,9 @@ impl ProcessManager {
             restart_delay_secs,
             start_delay_secs,
             watch,
+            watch_paths,
+            ignore_watch,
+            watch_delay_secs,
             cluster_mode,
             cluster_instances,
             namespace,
@@ -177,6 +194,8 @@ impl ProcessManager {
             git_repo,
             git_ref,
             pull_secret_hash,
+            wait_ready,
+            ready_timeout_secs,
         } = spec;
 
         let (command, args) = parse_command_line(&command_line)?;
@@ -220,6 +239,9 @@ impl ProcessManager {
             restart_backoff_attempt: 0,
             start_delay_secs,
             watch,
+            watch_paths,
+            ignore_watch,
+            watch_delay_secs,
             cluster_mode,
             cluster_instances: normalize_cluster_instances(cluster_instances),
             resource_limits,
@@ -236,6 +258,8 @@ impl ProcessManager {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready,
+            ready_timeout_secs: ready_timeout_secs.max(1),
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,
@@ -249,7 +273,7 @@ impl ProcessManager {
             sleep(Duration::from_secs(process.start_delay_secs)).await;
         }
 
-        let pid = self.spawn_child(&mut process).await?;
+        let pid = self.spawn_child_with_readiness(&mut process).await?;
         process.pid = Some(pid);
         process.status = ProcessStatus::Running;
         process.next_health_check = process
@@ -296,6 +320,7 @@ impl ProcessManager {
         reset_auto_restart_state(&mut process);
 
         self.watch_fingerprints.remove(&name);
+        self.pending_watch_restarts.remove(&name);
         self.scheduled_restarts.remove(&name);
         self.processes.insert(name, process.clone());
         self.save()?;
@@ -341,6 +366,7 @@ impl ProcessManager {
             process.status = ProcessStatus::Restarting;
             process.pid = None;
             self.watch_fingerprints.remove(&name);
+            self.pending_watch_restarts.remove(&name);
             cleanup_process_cgroup(process);
             process.health_status = HealthStatus::Unknown;
             process.health_failures = 0;
@@ -351,7 +377,19 @@ impl ProcessManager {
         }
 
         self.scheduled_restarts.remove(&name);
-        self.spawn_existing(&name).await
+        self.pending_watch_restarts.remove(&name);
+        match self.spawn_existing(&name).await {
+            Ok(process) => Ok(process),
+            Err(err) => {
+                if let Some(process) = self.processes.get_mut(&name) {
+                    process.status = ProcessStatus::Errored;
+                    process.desired_state = DesiredState::Stopped;
+                    process.last_health_error = Some(format!("restart failed: {err}"));
+                }
+                self.save()?;
+                Err(err)
+            }
+        }
     }
 
     /// Reloads a managed process, preferring replacement semantics over a full
@@ -373,7 +411,7 @@ impl ProcessManager {
         let old_cgroup = existing.cgroup_path.clone();
 
         let mut replacement = existing.clone();
-        let new_pid = self.spawn_child(&mut replacement).await?;
+        let new_pid = self.spawn_child_with_readiness(&mut replacement).await?;
         replacement.pid = Some(new_pid);
         replacement.status = ProcessStatus::Running;
         replacement.desired_state = DesiredState::Running;
@@ -387,6 +425,7 @@ impl ProcessManager {
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
 
         self.scheduled_restarts.remove(&name);
+        self.pending_watch_restarts.remove(&name);
         self.processes.insert(name.clone(), replacement.clone());
         self.update_watch_fingerprint(&replacement);
         self.save()?;
@@ -517,6 +556,7 @@ impl ProcessManager {
             .remove(&name)
             .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
         self.watch_fingerprints.remove(&name);
+        self.pending_watch_restarts.remove(&name);
         self.scheduled_restarts.remove(&name);
         self.save()?;
         Ok(removed)
@@ -628,6 +668,7 @@ impl ProcessManager {
 
         process.pid = None;
         self.watch_fingerprints.remove(&process.name);
+        self.pending_watch_restarts.remove(&process.name);
         self.scheduled_restarts.remove(&process.name);
         cleanup_process_cgroup(&mut process);
         process.cpu_percent = 0.0;
@@ -747,6 +788,7 @@ impl ProcessManager {
                 process.memory_bytes = 0;
                 reset_auto_restart_state(&mut process);
                 self.watch_fingerprints.remove(&name);
+                self.pending_watch_restarts.remove(&name);
                 self.scheduled_restarts.remove(&name);
                 self.processes.insert(name, process);
             }
@@ -761,7 +803,7 @@ impl ProcessManager {
             .cloned()
             .ok_or_else(|| OxmgrError::ProcessNotFound(name.to_string()))?;
 
-        let pid = self.spawn_child(&mut process).await?;
+        let pid = self.spawn_child_with_readiness(&mut process).await?;
         process.pid = Some(pid);
         process.status = ProcessStatus::Running;
         process.desired_state = DesiredState::Running;
@@ -772,10 +814,56 @@ impl ProcessManager {
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
 
         self.scheduled_restarts.remove(name);
+        self.pending_watch_restarts.remove(name);
         self.processes.insert(name.to_string(), process.clone());
         self.update_watch_fingerprint(&process);
         self.save()?;
         Ok(process)
+    }
+
+    async fn spawn_child_with_readiness(&self, process: &mut ManagedProcess) -> Result<u32> {
+        let pid = self.spawn_child(process).await?;
+        if !process.wait_ready {
+            return Ok(pid);
+        }
+
+        let Some(check) = process.health_check.clone() else {
+            let timeout = Duration::from_secs(process.stop_timeout_secs.max(1));
+            let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
+            anyhow::bail!(
+                "wait_ready requires a health check for process {}",
+                process.name
+            );
+        };
+
+        let mut snapshot = process.clone();
+        snapshot.pid = Some(pid);
+        let deadline = StdInstant::now() + Duration::from_secs(process.ready_timeout_secs.max(1));
+        let detail = loop {
+            if !process_exists(pid) {
+                anyhow::bail!("process {} exited before becoming ready", process.name);
+            }
+
+            match execute_health_check(&snapshot, &check).await {
+                Ok(()) => return Ok(pid),
+                Err(err) => {
+                    if StdInstant::now() >= deadline {
+                        break err.to_string();
+                    }
+                }
+            }
+
+            sleep(Duration::from_millis(250)).await;
+        };
+
+        let timeout = Duration::from_secs(process.stop_timeout_secs.max(1));
+        let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
+        anyhow::bail!(
+            "process {} did not become ready within {}s: {}",
+            process.name,
+            process.ready_timeout_secs.max(1),
+            detail
+        );
     }
 
     async fn spawn_child(&self, process: &mut ManagedProcess) -> Result<u32> {
@@ -885,27 +973,23 @@ impl ProcessManager {
     fn update_watch_fingerprint(&mut self, process: &ManagedProcess) {
         if !process.watch || process.status != ProcessStatus::Running {
             self.watch_fingerprints.remove(&process.name);
+            self.pending_watch_restarts.remove(&process.name);
             return;
         }
 
-        let Some(cwd) = process.cwd.as_ref() else {
-            self.watch_fingerprints.remove(&process.name);
-            return;
-        };
-
-        match watch_fingerprint_for_dir(cwd) {
+        match watch_fingerprint_for_process(process) {
             Ok(fingerprint) => {
                 self.watch_fingerprints
                     .insert(process.name.clone(), fingerprint);
+                self.pending_watch_restarts.remove(&process.name);
             }
             Err(err) => {
                 warn!(
-                    "failed to initialize watch fingerprint for process {} in {}: {}",
-                    process.name,
-                    cwd.display(),
-                    err
+                    "failed to initialize watch fingerprint for process {}: {}",
+                    process.name, err
                 );
                 self.watch_fingerprints.remove(&process.name);
+                self.pending_watch_restarts.remove(&process.name);
             }
         }
     }
@@ -948,8 +1032,73 @@ impl ProcessManager {
         Ok(())
     }
 
+    async fn run_due_watch_restarts(&mut self) -> Result<()> {
+        let now = TokioInstant::now();
+        let mut due: Vec<(String, PendingWatchRestart)> = self
+            .pending_watch_restarts
+            .iter()
+            .filter(|(_, state)| state.due_at <= now)
+            .map(|(name, state)| (name.clone(), *state))
+            .collect();
+        due.sort_by(|left, right| {
+            left.1
+                .due_at
+                .cmp(&right.1.due_at)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+
+        for (name, pending) in due {
+            self.pending_watch_restarts.remove(&name);
+
+            let Some(snapshot) = self.processes.get(&name).cloned() else {
+                continue;
+            };
+            if !snapshot.watch
+                || snapshot.status != ProcessStatus::Running
+                || snapshot.pid.is_none()
+            {
+                continue;
+            }
+
+            warn!(
+                "watch delay elapsed for process {}; triggering restart",
+                name
+            );
+
+            match self.restart_process_internal(&name, false).await {
+                Ok(_) => {
+                    if let Some(process) = self.processes.get_mut(&name) {
+                        process.restart_count = snapshot.restart_count.saturating_add(1);
+                        process.last_health_error = Some("watch-triggered restart".to_string());
+                    }
+                    self.watch_fingerprints
+                        .insert(name.clone(), pending.fingerprint);
+                    self.save()?;
+                }
+                Err(err) => {
+                    error!("watch restart failed for process {}: {}", name, err);
+                    if let Some(process) = self.processes.get_mut(&name) {
+                        process.status = ProcessStatus::Errored;
+                        process.last_health_error = Some(format!("watch restart failed: {err}"));
+                    }
+                    self.save()?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn next_scheduled_restart_at(&self) -> Option<TokioInstant> {
-        self.scheduled_restarts.values().copied().min()
+        self.scheduled_restarts
+            .values()
+            .copied()
+            .chain(
+                self.pending_watch_restarts
+                    .values()
+                    .map(|state| state.due_at),
+            )
+            .min()
     }
 
     fn save(&self) -> Result<()> {
@@ -1159,10 +1308,7 @@ impl ProcessManager {
             .processes
             .values()
             .filter(|process| {
-                process.watch
-                    && process.status == ProcessStatus::Running
-                    && process.pid.is_some()
-                    && process.cwd.is_some()
+                process.watch && process.status == ProcessStatus::Running && process.pid.is_some()
             })
             .map(|process| process.name.clone())
             .collect();
@@ -1171,19 +1317,11 @@ impl ProcessManager {
             let Some(snapshot) = self.processes.get(&name).cloned() else {
                 continue;
             };
-            let Some(cwd) = snapshot.cwd.as_ref() else {
-                continue;
-            };
 
-            let current_fingerprint = match watch_fingerprint_for_dir(cwd) {
+            let current_fingerprint = match watch_fingerprint_for_process(&snapshot) {
                 Ok(value) => value,
                 Err(err) => {
-                    warn!(
-                        "watch scan failed for process {} in {}: {}",
-                        name,
-                        cwd.display(),
-                        err
-                    );
+                    warn!("watch scan failed for process {}: {}", name, err);
                     continue;
                 }
             };
@@ -1195,6 +1333,19 @@ impl ProcessManager {
             };
 
             if previous_fingerprint == current_fingerprint {
+                self.pending_watch_restarts.remove(&name);
+                continue;
+            }
+
+            if snapshot.watch_delay_secs > 0 {
+                let due_at = TokioInstant::now() + Duration::from_secs(snapshot.watch_delay_secs);
+                self.pending_watch_restarts.insert(
+                    name.clone(),
+                    PendingWatchRestart {
+                        due_at,
+                        fingerprint: current_fingerprint,
+                    },
+                );
                 continue;
             }
 
@@ -1211,6 +1362,7 @@ impl ProcessManager {
                     }
                     self.watch_fingerprints
                         .insert(name.clone(), current_fingerprint);
+                    self.pending_watch_restarts.remove(&name);
                     self.save()?;
                 }
                 Err(err) => {
@@ -1219,6 +1371,7 @@ impl ProcessManager {
                         process.status = ProcessStatus::Errored;
                         process.last_health_error = Some(format!("watch restart failed: {err}"));
                     }
+                    self.pending_watch_restarts.remove(&name);
                     self.save()?;
                 }
             }
@@ -1502,66 +1655,156 @@ fn sanitize_name(input: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn watch_fingerprint_for_dir(root: &Path) -> Result<u64> {
-    if !root.exists() {
-        anyhow::bail!("watch path does not exist: {}", root.display());
-    }
+    watch_fingerprint_for_roots(&[root.to_path_buf()], root, &[])
+}
 
+fn watch_fingerprint_for_process(process: &ManagedProcess) -> Result<u64> {
+    let cwd = process
+        .cwd
+        .as_ref()
+        .with_context(|| format!("watch requires cwd to be set for process {}", process.name))?;
+
+    let roots = if process.watch_paths.is_empty() {
+        vec![cwd.clone()]
+    } else {
+        process
+            .watch_paths
+            .iter()
+            .map(|path| {
+                if path.is_absolute() {
+                    path.clone()
+                } else {
+                    cwd.join(path)
+                }
+            })
+            .collect()
+    };
+
+    watch_fingerprint_for_roots(&roots, cwd, &process.ignore_watch)
+}
+
+fn watch_fingerprint_for_roots(
+    roots: &[PathBuf],
+    cwd: &Path,
+    ignore_watch: &[String],
+) -> Result<u64> {
+    let matcher = compile_watch_ignore_matcher(ignore_watch)?;
     let mut hash = 1469598103934665603_u64;
-    let mut stack = vec![root.to_path_buf()];
+    let mut roots = roots.to_vec();
+    roots.sort();
 
-    while let Some(dir) = stack.pop() {
-        let mut children: Vec<PathBuf> = fs::read_dir(&dir)
-            .with_context(|| format!("failed to read watch directory {}", dir.display()))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .collect();
-        children.sort();
-
-        for child in children {
-            let relative = child
-                .strip_prefix(root)
-                .unwrap_or(child.as_path())
-                .to_string_lossy();
-            hash_bytes(&mut hash, relative.as_bytes());
-
-            let metadata = fs::symlink_metadata(&child)
-                .with_context(|| format!("failed to read metadata for {}", child.display()))?;
-            let file_type_tag = if metadata.file_type().is_dir() {
-                1_u64
-            } else if metadata.file_type().is_symlink() {
-                2_u64
-            } else {
-                3_u64
-            };
-            hash_u64(&mut hash, file_type_tag);
-            hash_u64(&mut hash, metadata.len());
-            hash_u64(
-                &mut hash,
-                metadata
-                    .modified()
-                    .ok()
-                    .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-                    .map(|value| value.as_secs())
-                    .unwrap_or(0),
-            );
-            hash_u64(
-                &mut hash,
-                metadata
-                    .modified()
-                    .ok()
-                    .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-                    .map(|value| value.subsec_nanos() as u64)
-                    .unwrap_or(0),
-            );
-
-            if metadata.file_type().is_dir() {
-                stack.push(child);
-            }
-        }
+    for root in roots {
+        let logical_root = watch_logical_path(cwd, &root);
+        fingerprint_watch_path(&root, &logical_root, &matcher, &mut hash)?;
     }
 
     Ok(hash)
+}
+
+fn compile_watch_ignore_matcher(ignore_watch: &[String]) -> Result<Option<RegexSet>> {
+    if ignore_watch.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(
+        RegexSet::new(ignore_watch).context("invalid ignore_watch pattern")?,
+    ))
+}
+
+fn fingerprint_watch_path(
+    path: &Path,
+    logical_path: &str,
+    matcher: &Option<RegexSet>,
+    hash: &mut u64,
+) -> Result<()> {
+    if !logical_path.is_empty() && should_ignore_watch_path(logical_path, matcher) {
+        return Ok(());
+    }
+    if !path.exists() {
+        anyhow::bail!("watch path does not exist: {}", path.display());
+    }
+
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("failed to read metadata for {}", path.display()))?;
+    if !logical_path.is_empty() {
+        hash_bytes(hash, logical_path.as_bytes());
+    }
+
+    let file_type_tag = if metadata.file_type().is_dir() {
+        1_u64
+    } else if metadata.file_type().is_symlink() {
+        2_u64
+    } else {
+        3_u64
+    };
+    hash_u64(hash, file_type_tag);
+    hash_u64(hash, metadata.len());
+    hash_u64(
+        hash,
+        metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_secs())
+            .unwrap_or(0),
+    );
+    hash_u64(
+        hash,
+        metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.subsec_nanos() as u64)
+            .unwrap_or(0),
+    );
+
+    if !metadata.file_type().is_dir() {
+        return Ok(());
+    }
+
+    let mut children: Vec<PathBuf> = fs::read_dir(path)
+        .with_context(|| format!("failed to read watch directory {}", path.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect();
+    children.sort();
+
+    for child in children {
+        let child_name = child
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        let child_logical = if logical_path.is_empty() {
+            child_name.to_string()
+        } else {
+            format!("{logical_path}/{child_name}")
+        };
+        fingerprint_watch_path(&child, &child_logical, matcher, hash)?;
+    }
+
+    Ok(())
+}
+
+fn should_ignore_watch_path(path: &str, matcher: &Option<RegexSet>) -> bool {
+    matcher
+        .as_ref()
+        .map(|matcher| matcher.is_match(path))
+        .unwrap_or(false)
+}
+
+fn watch_logical_path(cwd: &Path, path: &Path) -> String {
+    normalize_watch_path(
+        path.strip_prefix(cwd)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .as_ref(),
+    )
+}
+
+fn normalize_watch_path(path: &str) -> String {
+    path.replace('\\', "/")
 }
 
 fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
@@ -2136,12 +2379,14 @@ mod tests {
     use super::graceful_wait_before_force_kill;
     use super::{
         args_match_expected, compute_restart_delay_secs, constant_time_eq,
-        maybe_reset_backoff_attempt, now_epoch_secs, program_matches_expected,
-        resolve_spawn_program, sha256_hex, short_commit, watch_fingerprint_for_dir, ProcessManager,
+        maybe_reset_backoff_attempt, now_epoch_secs, process_exists, program_matches_expected,
+        resolve_spawn_program, sha256_hex, short_commit, watch_fingerprint_for_dir,
+        watch_fingerprint_for_roots, ProcessManager,
     };
     use crate::config::AppConfig;
     use crate::process::{
-        DesiredState, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus, RestartPolicy,
+        DesiredState, HealthCheck, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus,
+        RestartPolicy, StartProcessSpec,
     };
 
     #[test]
@@ -2259,6 +2504,39 @@ mod tests {
         let after = watch_fingerprint_for_dir(&dir).expect("failed to compute second fingerprint");
 
         assert_ne!(before, after);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn watch_fingerprint_ignores_matching_paths() {
+        let dir = temp_watch_dir("watch-ignore");
+        fs::create_dir_all(dir.join("src")).expect("failed to create src dir");
+        fs::create_dir_all(dir.join("node_modules")).expect("failed to create node_modules dir");
+        fs::write(dir.join("src/app.js"), "console.log('a');")
+            .expect("failed writing watched file");
+        fs::write(dir.join("node_modules/lib.js"), "console.log('ignored-a');")
+            .expect("failed writing ignored file");
+
+        let before =
+            watch_fingerprint_for_roots(&[dir.clone()], &dir, &["node_modules".to_string()])
+                .expect("failed to compute fingerprint");
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        fs::write(dir.join("node_modules/lib.js"), "console.log('ignored-b');")
+            .expect("failed rewriting ignored file");
+        let after_ignored =
+            watch_fingerprint_for_roots(&[dir.clone()], &dir, &["node_modules".to_string()])
+                .expect("failed to compute fingerprint after ignored change");
+        assert_eq!(before, after_ignored);
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        fs::write(dir.join("src/app.js"), "console.log('b');")
+            .expect("failed rewriting watched file");
+        let after_watched =
+            watch_fingerprint_for_roots(&[dir.clone()], &dir, &["node_modules".to_string()])
+                .expect("failed to compute fingerprint after watched change");
+        assert_ne!(before, after_watched);
+
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -2704,6 +2982,232 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn reload_process_keeps_existing_pid_when_replacement_fails_readiness() {
+        let mut manager = empty_manager("reload-ready-fail");
+        let fixture = long_running_fixture_process();
+        let started = manager
+            .start_process(StartProcessSpec {
+                command: command_line(&fixture.command, &fixture.args),
+                name: Some("api".to_string()),
+                restart_policy: RestartPolicy::Never,
+                max_restarts: 1,
+                crash_restart_limit: 3,
+                cwd: None,
+                env: HashMap::new(),
+                health_check: None,
+                stop_signal: fixture.stop_signal.clone(),
+                stop_timeout_secs: fixture.stop_timeout_secs,
+                restart_delay_secs: 0,
+                start_delay_secs: 0,
+                watch: false,
+                watch_paths: Vec::new(),
+                ignore_watch: Vec::new(),
+                watch_delay_secs: 0,
+                cluster_mode: false,
+                cluster_instances: None,
+                namespace: None,
+                resource_limits: None,
+                git_repo: None,
+                git_ref: None,
+                pull_secret_hash: None,
+                wait_ready: false,
+                ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            })
+            .await
+            .expect("initial process should start");
+
+        let old_pid = started.pid.expect("started process should have pid");
+        let process = manager
+            .processes
+            .get_mut("api")
+            .expect("process should be stored");
+        process.wait_ready = true;
+        process.ready_timeout_secs = 1;
+        process.health_check = Some(HealthCheck {
+            command: failing_readiness_check_command(),
+            interval_secs: 1,
+            timeout_secs: 1,
+            max_failures: 1,
+        });
+        process.refresh_config_fingerprint();
+
+        let err = manager
+            .reload_process("api")
+            .await
+            .expect_err("reload should fail when replacement never becomes ready");
+        assert!(
+            err.to_string().contains("did not become ready within"),
+            "unexpected reload error: {err}"
+        );
+
+        let current = manager
+            .processes
+            .get("api")
+            .expect("old process should remain registered");
+        assert_eq!(current.pid, Some(old_pid));
+        assert!(process_exists(old_pid), "old pid should still be alive");
+
+        manager
+            .shutdown_all()
+            .await
+            .expect("shutdown should cleanup reload fixture");
+    }
+
+    #[tokio::test]
+    async fn reload_process_replaces_pid_when_replacement_becomes_ready() {
+        let mut manager = empty_manager("reload-ready-ok");
+        let fixture = long_running_fixture_process();
+        let started = manager
+            .start_process(StartProcessSpec {
+                command: command_line(&fixture.command, &fixture.args),
+                name: Some("api".to_string()),
+                restart_policy: RestartPolicy::Never,
+                max_restarts: 1,
+                crash_restart_limit: 3,
+                cwd: None,
+                env: HashMap::new(),
+                health_check: Some(HealthCheck {
+                    command: successful_readiness_check_command(),
+                    interval_secs: 1,
+                    timeout_secs: 1,
+                    max_failures: 1,
+                }),
+                stop_signal: fixture.stop_signal.clone(),
+                stop_timeout_secs: 1,
+                restart_delay_secs: 0,
+                start_delay_secs: 0,
+                watch: false,
+                watch_paths: Vec::new(),
+                ignore_watch: Vec::new(),
+                watch_delay_secs: 0,
+                cluster_mode: false,
+                cluster_instances: None,
+                namespace: None,
+                resource_limits: None,
+                git_repo: None,
+                git_ref: None,
+                pull_secret_hash: None,
+                wait_ready: true,
+                ready_timeout_secs: 2,
+            })
+            .await
+            .expect("initial process should start");
+
+        let old_pid = started.pid.expect("started process should have pid");
+        let reloaded = manager
+            .reload_process("api")
+            .await
+            .expect("reload should succeed when replacement becomes ready");
+        let new_pid = reloaded.pid.expect("reloaded process should have pid");
+        assert_ne!(new_pid, old_pid, "reload should swap to a new pid");
+        assert!(process_exists(new_pid), "new pid should be alive");
+        assert!(
+            wait_for_process_exit(old_pid, Duration::from_secs(2)),
+            "old pid should terminate after successful reload"
+        );
+
+        manager
+            .shutdown_all()
+            .await
+            .expect("shutdown should cleanup reload fixture");
+    }
+
+    #[tokio::test]
+    async fn watch_delay_schedules_restart_until_due() {
+        let mut manager = empty_manager("watch-delay");
+        let watch_root = temp_watch_dir("watch-delay-root");
+        let src_dir = watch_root.join("src");
+        fs::create_dir_all(&src_dir).expect("failed to create watch source dir");
+        let watched_file = src_dir.join("app.js");
+        fs::write(&watched_file, "console.log('a');").expect("failed to write watched file");
+
+        let fixture = long_running_fixture_process();
+        let started = manager
+            .start_process(StartProcessSpec {
+                command: command_line(&fixture.command, &fixture.args),
+                name: Some("api".to_string()),
+                restart_policy: RestartPolicy::Never,
+                max_restarts: 1,
+                crash_restart_limit: 3,
+                cwd: Some(watch_root.clone()),
+                env: HashMap::new(),
+                health_check: None,
+                stop_signal: fixture.stop_signal.clone(),
+                stop_timeout_secs: 1,
+                restart_delay_secs: 0,
+                start_delay_secs: 0,
+                watch: true,
+                watch_paths: vec![PathBuf::from("src")],
+                ignore_watch: Vec::new(),
+                watch_delay_secs: 1,
+                cluster_mode: false,
+                cluster_instances: None,
+                namespace: None,
+                resource_limits: None,
+                git_repo: None,
+                git_ref: None,
+                pull_secret_hash: None,
+                wait_ready: false,
+                ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            })
+            .await
+            .expect("initial process should start");
+
+        let old_pid = started.pid.expect("started process should have pid");
+        std::thread::sleep(Duration::from_millis(5));
+        fs::write(&watched_file, "console.log('b');").expect("failed to rewrite watched file");
+
+        manager
+            .run_watch_checks()
+            .await
+            .expect("watch check should schedule delayed restart");
+        assert!(
+            manager.pending_watch_restarts.contains_key("api"),
+            "watch change should schedule delayed restart"
+        );
+        assert_eq!(
+            manager.processes.get("api").and_then(|process| process.pid),
+            Some(old_pid),
+            "process should keep old pid until delay elapses"
+        );
+
+        if let Some(pending) = manager.pending_watch_restarts.get_mut("api") {
+            pending.due_at = TokioInstant::now();
+        } else {
+            panic!("pending watch restart missing");
+        }
+
+        manager
+            .run_due_watch_restarts()
+            .await
+            .expect("due watch restart should be processed");
+
+        let current = manager
+            .processes
+            .get("api")
+            .expect("process should still exist after watch restart");
+        let new_pid = current
+            .pid
+            .expect("watch restart should spawn replacement pid");
+        assert_ne!(new_pid, old_pid, "watch restart should replace the pid");
+        assert_eq!(current.restart_count, 1);
+        assert_eq!(
+            current.last_health_error.as_deref(),
+            Some("watch-triggered restart")
+        );
+        assert!(
+            !manager.pending_watch_restarts.contains_key("api"),
+            "pending watch restart should be cleared once processed"
+        );
+
+        manager
+            .shutdown_all()
+            .await
+            .expect("shutdown should cleanup watch-delay fixture");
+        let _ = fs::remove_dir_all(&watch_root);
+    }
+
     fn fixture_process() -> ManagedProcess {
         ManagedProcess {
             id: 1,
@@ -2729,6 +3233,9 @@ mod tests {
             restart_backoff_attempt: 0,
             start_delay_secs: 0,
             watch: false,
+            watch_paths: Vec::new(),
+            ignore_watch: Vec::new(),
+            watch_delay_secs: 0,
             cluster_mode: false,
             cluster_instances: None,
             resource_limits: None,
@@ -2745,6 +3252,8 @@ mod tests {
             last_health_check: None,
             next_health_check: None,
             last_health_error: None,
+            wait_ready: false,
+            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             cpu_percent: 0.0,
             memory_bytes: 0,
             last_metrics_at: None,
@@ -2909,5 +3418,44 @@ mod tests {
             .expect("clock failure")
             .as_nanos();
         std::env::temp_dir().join(format!("oxmgr-{prefix}-{nonce}"))
+    }
+
+    fn command_line(program: &str, args: &[String]) -> String {
+        let mut parts = vec![shell_words::quote(program).to_string()];
+        for arg in args {
+            parts.push(shell_words::quote(arg).to_string());
+        }
+        parts.join(" ")
+    }
+
+    #[cfg(windows)]
+    fn failing_readiness_check_command() -> String {
+        "powershell -NoProfile -Command \"exit 1\"".to_string()
+    }
+
+    #[cfg(not(windows))]
+    fn failing_readiness_check_command() -> String {
+        "sh -c 'exit 1'".to_string()
+    }
+
+    #[cfg(windows)]
+    fn successful_readiness_check_command() -> String {
+        "powershell -NoProfile -Command \"exit 0\"".to_string()
+    }
+
+    #[cfg(not(windows))]
+    fn successful_readiness_check_command() -> String {
+        "sh -c 'exit 0'".to_string()
+    }
+
+    fn wait_for_process_exit(pid: u32, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if !process_exists(pid) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        !process_exists(pid)
     }
 }
