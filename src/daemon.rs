@@ -529,7 +529,9 @@ async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) ->
     stream
         .flush()
         .await
-        .context("failed to flush webhook response")
+        .context("failed to flush webhook response")?;
+    let _ = stream.shutdown().await;
+    Ok(())
 }
 
 fn http_reason_phrase(status_code: u16) -> &'static str {
