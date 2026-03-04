@@ -5,21 +5,21 @@ Codename: stable
 Architectures: amd64
 Components: main
 Description: Oxmgr APT repository
-Version: 0.1.2
-Date: Wed, 04 Mar 2026 00:14:23 +0000
+Version: 0.1.3
+Date: Wed, 04 Mar 2026 10:26:55 +0000
 MD5Sum:
- 9679bea37f858a28b0c516d5ec00d324              145 Release
- 626f98c25ee45a52f642282f42525d2d              414 main/binary-amd64/Packages
- d61ede48e205c5c03d7535b647f056d3              324 main/binary-amd64/Packages.gz
+ f20b9f6889f509d0702798ef545bd42c              145 Release
+ beea85441aed444d6f3f97f4adc62821              414 main/binary-amd64/Packages
+ 5f814858a8e00cbaee4710857af4ccba              328 main/binary-amd64/Packages.gz
 SHA1:
- d35b85c863801e44b43d033886368c2254aadd25              145 Release
- e4a8f0a20fc6e9ccd746d87e59106947b503344a              414 main/binary-amd64/Packages
- 388d0a9dc9122ec3f68f47b48a10a70cdef671e1              324 main/binary-amd64/Packages.gz
+ 86e1e3a89eaf066411a3af091004ea09d11aee9c              145 Release
+ f5ea4afc3b41586fee1dd4c14d033ae7b242f1e8              414 main/binary-amd64/Packages
+ cdb8fbf40873c3e2766fc3ad4960ad8ee9f5972e              328 main/binary-amd64/Packages.gz
 SHA256:
- f309c34c57b499953adb516c119852e432455c35f3179eca7ba1ad554e514c77              145 Release
- ae20fc4bc2b68988522d0fd9253e8651a98a3fd60b4375baf909e10dece36cb0              414 main/binary-amd64/Packages
- b67ad5b552748756a503ce892498f4215a24a53024ed7d1736dfafaa7e81d937              324 main/binary-amd64/Packages.gz
+ b75107d82367b54a8f3ca3ec1773c57779577b1f40fa8c020f0fb363954864b2              145 Release
+ 6ae0298075abc9dec227544c46f7c760d84ef817fb6b6ccf8f05e00621b786a0              414 main/binary-amd64/Packages
+ 3c23ded43355250784e0f05dc5f94462ce6656c98700976ceb41561a5d742b82              328 main/binary-amd64/Packages.gz
 SHA512:
- 9fb8f5e161be332dd06100090dbf255c3735d2ef15a2eac2a1491c075c309e4a05e6f51c4915bb82f11e4689718ff8f6f519f34e4adf4fa7ae90c9a7014a4704              145 Release
- 9607481fa0931ea87775e2523c5757187f3ed05fb7f09645c7a65ffd1897769cf755eb8363ab344fdfb823b8f42b0df66ebb01a2615b5b513d05a7da18529de8              414 main/binary-amd64/Packages
- 4ef0e8f34d5f9af6ff56e68d5edd5a44a0be952a1f139843479783a2d70bc6e1cb828740b2bec7e257cddb52734c26b316560e997ebb9c7bcbeb898a70be2480              324 main/binary-amd64/Packages.gz
+ 9c037ba7106650df5f15ebf13606557bf555a75b2e78953ef5f041846295b50e5e7fbd97b15fca325d515942e866cc4e5a7a21c2d1f6c89ad53aed14832ffc65              145 Release
+ d09ade145678ba3fa1f21e3ec2c1b60123196ff69559696219a3d4c4aea2aff4e96cade5c14ff67ff97fbb9f383a795505d50c412274fdcc4c6f5009ddcc6bb9              414 main/binary-amd64/Packages
+ 6750a95f56431e114af3fb39bf9015d09ed75c1e202abd3083352647f1e1b43913a2f84453c531bd4e89637ce89c849de6bf783f8d4a4b6dad4ac9128fd9e3ad              328 main/binary-amd64/Packages.gz
