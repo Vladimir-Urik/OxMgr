@@ -3277,17 +3277,21 @@ mod tests {
         let mut process = fixture_process();
         #[cfg(windows)]
         {
+            // Keep the fixture alive long enough for parallel CI runs on slower
+            // Windows runners to complete reload/crash assertions reliably.
             process.command = "powershell".to_string();
             process.args = vec![
                 "-NoProfile".to_string(),
                 "-Command".to_string(),
-                "Start-Sleep -Seconds 5".to_string(),
+                "Start-Sleep -Seconds 30".to_string(),
             ];
         }
         #[cfg(not(windows))]
         {
+            // Keep the fixture alive long enough for parallel CI runs to
+            // finish the assertion phase before the process exits naturally.
             process.command = "sh".to_string();
-            process.args = vec!["-c".to_string(), "sleep 5".to_string()];
+            process.args = vec!["-c".to_string(), "sleep 30".to_string()];
         }
         process
     }
