@@ -54,6 +54,13 @@ brew install oxmgr
 choco install oxmgr -y
 ```
 
+### Scoop
+
+```powershell
+scoop bucket add oxmgr https://github.com/empellio/scoop-bucket
+scoop install oxmgr/oxmgr
+```
+
 ### APT (Debian/Ubuntu)
 
 ```bash

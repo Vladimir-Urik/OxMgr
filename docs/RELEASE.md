@@ -28,6 +28,7 @@ Release publish jobs execute only for the canonical repository:
 - Publish npm package (`oxmgr`) when `NPM_TOKEN` is set
 - Update Homebrew tap formula when Homebrew secrets are set
 - Publish Chocolatey package when `CHOCO_API_KEY` is set
+- Update Scoop bucket manifest when Scoop secrets are set
 - Publish APT repository index to `gh-pages/apt` (optionally signed `Release.gpg` / `InRelease`)
 
 ## Required repository settings
@@ -49,6 +50,11 @@ Release publish jobs execute only for the canonical repository:
 ### For Chocolatey publish
 
 - `CHOCO_API_KEY`
+
+### For Scoop publish
+
+- `SCOOP_BUCKET_TOKEN`: PAT with write access to Scoop bucket repo
+- `SCOOP_BUCKET_REPO`: `empellio/scoop-bucket`
 
 ### For APT publish (unsigned metadata)
 
