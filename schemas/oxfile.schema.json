@@ -1,0 +1,548 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/Vladimir-Urik/OxMgr/main/schemas/oxfile.schema.json",
+  "title": "Oxmgr Oxfile",
+  "description": "Schema for oxfile.toml, the native declarative Oxmgr process-management format.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apps"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "description": "Oxfile format version."
+    },
+    "defaults": {
+      "$ref": "#/definitions/defaults"
+    },
+    "apps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/app"
+      },
+      "description": "Managed application definitions."
+    },
+    "deploy": {
+      "type": "object",
+      "description": "Optional PM2-style deploy environments.",
+      "additionalProperties": {
+        "$ref": "#/definitions/deployTarget"
+      }
+    }
+  },
+  "definitions": {
+    "envMap": {
+      "type": "object",
+      "description": "Environment variables.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "watchValue": {
+      "description": "Either a boolean, one path, or many paths.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ]
+    },
+    "restartPolicy": {
+      "type": "string",
+      "enum": [
+        "always",
+        "on_failure",
+        "on-failure",
+        "never"
+      ]
+    },
+    "hostField": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ]
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "restart_policy": {
+          "$ref": "#/definitions/restartPolicy"
+        },
+        "max_restarts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "crash_restart_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "$ref": "#/definitions/envMap"
+        },
+        "stop_signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stop_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restart_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "start_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watch": {
+          "$ref": "#/definitions/watchValue"
+        },
+        "ignore_watch": {
+          "$ref": "#/definitions/stringArray"
+        },
+        "watch_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cluster_mode": {
+          "type": "boolean"
+        },
+        "cluster_instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_order": {
+          "type": "integer"
+        },
+        "depends_on": {
+          "$ref": "#/definitions/stringArray"
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "instance_var": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_cmd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health_max_failures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_memory_mb": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cgroup_enforce": {
+          "type": "boolean"
+        },
+        "deny_gpu": {
+          "type": "boolean"
+        },
+        "git_repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pull_secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "wait_ready": {
+          "type": "boolean"
+        },
+        "ready_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "$ref": "#/definitions/envMap"
+        },
+        "restart_policy": {
+          "$ref": "#/definitions/restartPolicy"
+        },
+        "max_restarts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "crash_restart_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stop_signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stop_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restart_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "start_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watch": {
+          "$ref": "#/definitions/watchValue"
+        },
+        "ignore_watch": {
+          "$ref": "#/definitions/stringArray"
+        },
+        "watch_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cluster_mode": {
+          "type": "boolean"
+        },
+        "cluster_instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_order": {
+          "type": "integer"
+        },
+        "depends_on": {
+          "$ref": "#/definitions/stringArray"
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "instance_var": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_cmd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health_max_failures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_memory_mb": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cgroup_enforce": {
+          "type": "boolean"
+        },
+        "deny_gpu": {
+          "type": "boolean"
+        },
+        "git_repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pull_secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "wait_ready": {
+          "type": "boolean"
+        },
+        "ready_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "$ref": "#/definitions/envMap"
+        },
+        "restart_policy": {
+          "$ref": "#/definitions/restartPolicy"
+        },
+        "max_restarts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "crash_restart_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stop_signal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stop_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "restart_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "start_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watch": {
+          "$ref": "#/definitions/watchValue"
+        },
+        "ignore_watch": {
+          "$ref": "#/definitions/stringArray"
+        },
+        "watch_delay_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cluster_mode": {
+          "type": "boolean"
+        },
+        "cluster_instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_order": {
+          "type": "integer"
+        },
+        "depends_on": {
+          "$ref": "#/definitions/stringArray"
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "instance_var": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_cmd": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_interval_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "health_max_failures": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_memory_mb": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cgroup_enforce": {
+          "type": "boolean"
+        },
+        "deny_gpu": {
+          "type": "boolean"
+        },
+        "git_repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "git_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pull_secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "wait_ready": {
+          "type": "boolean"
+        },
+        "ready_timeout_secs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "profiles": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/profile"
+          }
+        }
+      }
+    },
+    "deployTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "host",
+        "path"
+      ],
+      "properties": {
+        "user": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host": {
+          "$ref": "#/definitions/hostField"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pre_setup": {
+          "type": "string"
+        },
+        "post_setup": {
+          "type": "string"
+        },
+        "pre_deploy_local": {
+          "type": "string"
+        },
+        "pre_deploy": {
+          "type": "string"
+        },
+        "post_deploy": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

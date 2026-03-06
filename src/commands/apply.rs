@@ -5,47 +5,16 @@ use anyhow::{Context, Result};
 
 use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest};
-use crate::process::{
-    HealthCheck, ManagedProcess, ResourceLimits, RestartPolicy, StartProcessSpec,
-};
+use crate::process::{ManagedProcess, StartProcessSpec};
 
 use super::common::expect_ok;
 use super::import::{load_import_specs, order_specs_for_start};
 
 #[derive(Debug, Clone)]
-struct DesiredProcessSpec {
-    name: String,
-    command: String,
-    restart_policy: RestartPolicy,
-    max_restarts: u32,
-    crash_restart_limit: u32,
-    cwd: Option<PathBuf>,
-    env: HashMap<String, String>,
-    health_check: Option<HealthCheck>,
-    stop_signal: Option<String>,
-    stop_timeout_secs: u64,
-    restart_delay_secs: u64,
-    start_delay_secs: u64,
-    watch: bool,
-    watch_paths: Vec<PathBuf>,
-    ignore_watch: Vec<String>,
-    watch_delay_secs: u64,
-    cluster_mode: bool,
-    cluster_instances: Option<u32>,
-    namespace: Option<String>,
-    resource_limits: Option<ResourceLimits>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret_hash: Option<String>,
-    wait_ready: bool,
-    ready_timeout_secs: u64,
-}
-
-#[derive(Debug, Clone)]
 enum ApplyAction {
-    Start(DesiredProcessSpec),
+    Start(StartProcessSpec),
     Restart(String),
-    Recreate(DesiredProcessSpec),
+    Recreate(StartProcessSpec),
     Delete(String),
     Noop,
 }
@@ -94,13 +63,14 @@ pub(crate) async fn run(
     for action in plan.actions {
         match action {
             ApplyAction::Start(spec) => {
+                let name = spec_name_owned(&spec);
                 let response =
                     send_request(&config.daemon_addr, &start_request_from_spec(spec.clone()))
                         .await?;
                 if response.ok {
                     created = created.saturating_add(1);
                 } else {
-                    failures.push(format!("start {}: {}", spec.name, response.message));
+                    failures.push(format!("start {}: {}", name, response.message));
                 }
             }
             ApplyAction::Restart(name) => {
@@ -118,15 +88,16 @@ pub(crate) async fn run(
                 }
             }
             ApplyAction::Recreate(spec) => {
+                let name = spec_name_owned(&spec);
                 let delete = send_request(
                     &config.daemon_addr,
                     &IpcRequest::Delete {
-                        target: spec.name.clone(),
+                        target: name.clone(),
                     },
                 )
                 .await?;
                 if !delete.ok {
-                    failures.push(format!("delete {}: {}", spec.name, delete.message));
+                    failures.push(format!("delete {}: {}", name, delete.message));
                     continue;
                 }
 
@@ -136,7 +107,7 @@ pub(crate) async fn run(
                 if start.ok {
                     updated = updated.saturating_add(1);
                 } else {
-                    failures.push(format!("start {}: {}", spec.name, start.message));
+                    failures.push(format!("start {}: {}", name, start.message));
                 }
             }
             ApplyAction::Delete(name) => {
@@ -176,7 +147,7 @@ pub(crate) async fn run(
 
 fn expand_specs_for_apply(
     specs: Vec<crate::ecosystem::EcosystemProcessSpec>,
-) -> Result<Vec<DesiredProcessSpec>> {
+) -> Result<Vec<StartProcessSpec>> {
     let mut desired = Vec::new();
     let mut seen_names = HashSet::new();
 
@@ -206,9 +177,9 @@ fn expand_specs_for_apply(
                 anyhow::bail!("duplicate app name in desired config: {}", name);
             }
 
-            desired.push(DesiredProcessSpec {
-                name,
+            desired.push(StartProcessSpec {
                 command: spec.command.clone(),
+                name: Some(name),
                 restart_policy: spec.restart_policy.clone(),
                 max_restarts: spec.max_restarts,
                 crash_restart_limit: spec.crash_restart_limit,
@@ -241,7 +212,7 @@ fn expand_specs_for_apply(
 
 fn plan_apply_actions(
     current: &[ManagedProcess],
-    desired: &[DesiredProcessSpec],
+    desired: &[StartProcessSpec],
     prune: bool,
 ) -> ApplyPlan {
     let mut actions = Vec::new();
@@ -251,17 +222,18 @@ fn plan_apply_actions(
         .map(|process| (process.name.clone(), process))
         .collect();
 
-    let desired_names: HashSet<String> = desired.iter().map(|spec| spec.name.clone()).collect();
+    let desired_names: HashSet<String> = desired.iter().map(spec_name_owned).collect();
 
     for spec in desired {
-        if let Some(existing) = current_map.get(&spec.name) {
+        let name = spec_name(spec);
+        if let Some(existing) = current_map.get(name) {
             if process_matches_spec(existing, spec) {
                 if existing.status == crate::process::ProcessStatus::Running
                     && existing.pid.is_some()
                 {
                     actions.push(ApplyAction::Noop);
                 } else {
-                    actions.push(ApplyAction::Restart(spec.name.clone()));
+                    actions.push(ApplyAction::Restart(name.to_string()));
                 }
             } else {
                 actions.push(ApplyAction::Recreate(spec.clone()));
@@ -286,11 +258,9 @@ fn plan_apply_actions(
     ApplyPlan { actions }
 }
 
-fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec) -> bool {
-    let desired_start = desired_to_start_spec(desired.clone());
-
+fn process_matches_spec(existing: &ManagedProcess, desired: &StartProcessSpec) -> bool {
     if !existing.config_fingerprint.is_empty() {
-        return existing.config_fingerprint == desired_start.config_fingerprint();
+        return existing.config_fingerprint == desired.config_fingerprint();
     }
 
     let desired_cmd = match split_command_line(&desired.command) {
@@ -323,6 +293,16 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &DesiredProcessSpec)
         && existing.ready_timeout_secs == desired.ready_timeout_secs
 }
 
+fn spec_name(spec: &StartProcessSpec) -> &str {
+    spec.name
+        .as_deref()
+        .expect("apply specs should always have deterministic names")
+}
+
+fn spec_name_owned(spec: &StartProcessSpec) -> String {
+    spec_name(spec).to_string()
+}
+
 fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
     let tokens = shell_words::split(command_line)
         .with_context(|| format!("invalid command syntax: {command_line}"))?;
@@ -333,47 +313,17 @@ fn split_command_line(command_line: &str) -> Result<(String, Vec<String>)> {
     Ok((tokens[0].clone(), tokens[1..].to_vec()))
 }
 
-fn start_request_from_spec(spec: DesiredProcessSpec) -> IpcRequest {
+fn start_request_from_spec(spec: StartProcessSpec) -> IpcRequest {
     IpcRequest::Start {
-        spec: Box::new(desired_to_start_spec(spec)),
-    }
-}
-
-fn desired_to_start_spec(spec: DesiredProcessSpec) -> StartProcessSpec {
-    StartProcessSpec {
-        command: spec.command,
-        name: Some(spec.name),
-        restart_policy: spec.restart_policy,
-        max_restarts: spec.max_restarts,
-        crash_restart_limit: spec.crash_restart_limit,
-        cwd: spec.cwd,
-        env: spec.env,
-        health_check: spec.health_check,
-        stop_signal: spec.stop_signal,
-        stop_timeout_secs: spec.stop_timeout_secs.max(1),
-        restart_delay_secs: spec.restart_delay_secs,
-        start_delay_secs: spec.start_delay_secs,
-        watch: spec.watch,
-        watch_paths: spec.watch_paths,
-        ignore_watch: spec.ignore_watch,
-        watch_delay_secs: spec.watch_delay_secs,
-        cluster_mode: spec.cluster_mode,
-        cluster_instances: spec.cluster_instances,
-        namespace: spec.namespace,
-        resource_limits: spec.resource_limits,
-        git_repo: spec.git_repo,
-        git_ref: spec.git_ref,
-        pull_secret_hash: spec.pull_secret_hash,
-        wait_ready: spec.wait_ready,
-        ready_timeout_secs: spec.ready_timeout_secs,
+        spec: Box::new(spec),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_apply_actions, ApplyAction, DesiredProcessSpec};
+    use super::{plan_apply_actions, ApplyAction};
     use crate::process::{
-        DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy,
+        DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy, StartProcessSpec,
     };
     use std::collections::HashMap;
 
@@ -430,10 +380,10 @@ mod tests {
         assert!(matches!(plan.actions[1], ApplyAction::Delete(_)));
     }
 
-    fn desired_spec(name: &str, command: &str) -> DesiredProcessSpec {
-        DesiredProcessSpec {
-            name: name.to_string(),
+    fn desired_spec(name: &str, command: &str) -> StartProcessSpec {
+        StartProcessSpec {
             command: command.to_string(),
+            name: Some(name.to_string()),
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: 3,
@@ -461,7 +411,7 @@ mod tests {
     }
 
     fn process_from_desired(
-        desired: &DesiredProcessSpec,
+        desired: &StartProcessSpec,
         status: ProcessStatus,
         pid: Option<u32>,
     ) -> ManagedProcess {
@@ -472,7 +422,10 @@ mod tests {
         let tmp = std::env::temp_dir();
         ManagedProcess {
             id: 1,
-            name: desired.name.clone(),
+            name: desired
+                .name
+                .clone()
+                .expect("apply test spec should have a name"),
             command,
             args: tokens,
             cwd: desired.cwd.clone(),

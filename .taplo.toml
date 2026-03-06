@@ -1,0 +1,8 @@
+include = ["**/*.toml"]
+
+[[rule]]
+include = ["**/oxfile.toml", "docs/examples/*.toml"]
+
+[rule.schema]
+enabled = true
+path = "./schemas/oxfile.schema.json"

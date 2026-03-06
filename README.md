@@ -18,7 +18,7 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 - Practical operations: restart policies, health checks, logs, and CPU/RAM metrics
 - Config-first workflows with idempotent `oxmgr apply`
 - PM2 ecosystem compatibility via `ecosystem.config.{js,cjs,mjs,json}`
-- Interactive terminal UI for day-to-day operations
+- Interactive terminal UI with live search, filters, and sort controls
 
 ## Core Features
 
@@ -30,6 +30,7 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 - Log tailing, log rotation, and per-process stdout/stderr logs
 - Readiness-aware reloads using health checks
 - Git pull and webhook-driven update workflow
+- Interactive terminal UI with live search, status filters, and CPU/RAM/restart sorting
 - Import and export bundles with `.oxpkg`
 - Service installation for `systemd`, `launchd`, and Windows Task Scheduler
 
@@ -96,6 +97,8 @@ oxmgr status api
 oxmgr logs api -f
 oxmgr ui
 ```
+
+Inside `oxmgr ui`, use `/` for live search, `f` to cycle status filters, and `o` to cycle sort order.
 
 Use a config file for repeatable setups:
 

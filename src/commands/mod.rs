@@ -29,28 +29,8 @@ use crate::config::AppConfig;
 
 /// Dispatches one parsed CLI command to its concrete implementation.
 pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
-    if let Commands::Start {
-        cluster,
-        cluster_instances,
-        watch,
-        watch_path,
-        ignore_watch,
-        watch_delay,
-        wait_ready,
-        ready_timeout,
-        ..
-    } = &command
-    {
-        start::validate_flags(
-            *cluster,
-            *cluster_instances,
-            *watch,
-            watch_path,
-            ignore_watch,
-            *watch_delay,
-            *wait_ready,
-            *ready_timeout,
-        )?;
+    if let Commands::Start(start) = &command {
+        start::validate_flags(start)?;
     }
 
     let needs_daemon = !matches!(
@@ -71,71 +51,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
     }
 
     match command {
-        Commands::Start {
-            command,
-            name,
-            restart,
-            max_restarts,
-            crash_restart_limit,
-            cwd,
-            env,
-            health_cmd,
-            health_interval,
-            health_timeout,
-            health_max_failures,
-            kill_signal,
-            stop_timeout,
-            restart_delay,
-            start_delay,
-            watch,
-            watch_path,
-            ignore_watch,
-            watch_delay,
-            cluster,
-            cluster_instances,
-            namespace,
-            max_memory_mb,
-            max_cpu_percent,
-            cgroup_enforce,
-            deny_gpu,
-            wait_ready,
-            ready_timeout,
-        } => {
-            start::run(
-                config,
-                start::StartArgs {
-                    command,
-                    name,
-                    restart,
-                    max_restarts,
-                    crash_restart_limit,
-                    cwd,
-                    env,
-                    health_cmd,
-                    health_interval,
-                    health_timeout,
-                    health_max_failures,
-                    kill_signal,
-                    stop_timeout,
-                    restart_delay,
-                    start_delay,
-                    watch,
-                    watch_path,
-                    ignore_watch,
-                    watch_delay,
-                    cluster,
-                    cluster_instances,
-                    namespace,
-                    max_memory_mb,
-                    max_cpu_percent,
-                    cgroup_enforce,
-                    deny_gpu,
-                    wait_ready,
-                    ready_timeout,
-                },
-            )
-            .await
-        }
+        Commands::Start(start) => start::run(config, *start).await,
         Commands::Stop { target } => stop::run(config, target).await,
         Commands::Restart { target } => restart::run(config, target).await,
         Commands::Reload { target } => reload::run(config, target).await,

@@ -167,6 +167,8 @@ Full deployment configuration details: [Deployment Guide](./DEPLOY.md).
 - `oxmgr daemon run`
 - `oxmgr daemon stop`
 
+`doctor` checks filesystem layout, state-file readability, daemon IPC reachability, webhook API metrics, service-manager integration, cgroup prerequisites, git pull/webhook setup, and log-rotation policy.
+
 Daemon HTTP API:
 
 - `POST /pull/<name|id>`
