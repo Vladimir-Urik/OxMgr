@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
@@ -66,63 +66,7 @@ pub struct Cli {
 /// User-facing commands supported by the `oxmgr` binary.
 pub enum Commands {
     /// Start and register a new managed process.
-    Start {
-        command: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long, value_enum, default_value_t = RestartArg::OnFailure)]
-        restart: RestartArg,
-        #[arg(long, default_value_t = 10)]
-        max_restarts: u32,
-        #[arg(long, default_value_t = 3)]
-        crash_restart_limit: u32,
-        #[arg(long)]
-        cwd: Option<PathBuf>,
-        #[arg(long = "env", value_parser = parse_env_var)]
-        env: Vec<(String, String)>,
-        #[arg(long = "health-cmd")]
-        health_cmd: Option<String>,
-        #[arg(long = "health-interval", default_value_t = 30)]
-        health_interval: u64,
-        #[arg(long = "health-timeout", default_value_t = 5)]
-        health_timeout: u64,
-        #[arg(long = "health-max-failures", default_value_t = 3)]
-        health_max_failures: u32,
-        #[arg(long = "kill-signal")]
-        kill_signal: Option<String>,
-        #[arg(long = "stop-timeout", default_value_t = 5)]
-        stop_timeout: u64,
-        #[arg(long = "restart-delay", default_value_t = 0)]
-        restart_delay: u64,
-        #[arg(long = "start-delay", default_value_t = 0)]
-        start_delay: u64,
-        #[arg(long, default_value_t = false)]
-        watch: bool,
-        #[arg(long = "watch-path")]
-        watch_path: Vec<PathBuf>,
-        #[arg(long = "ignore-watch")]
-        ignore_watch: Vec<String>,
-        #[arg(long = "watch-delay", default_value_t = 0)]
-        watch_delay: u64,
-        #[arg(long, default_value_t = false)]
-        cluster: bool,
-        #[arg(long = "cluster-instances")]
-        cluster_instances: Option<u32>,
-        #[arg(long)]
-        namespace: Option<String>,
-        #[arg(long = "max-memory-mb")]
-        max_memory_mb: Option<u64>,
-        #[arg(long = "max-cpu-percent")]
-        max_cpu_percent: Option<f32>,
-        #[arg(long = "cgroup-enforce", default_value_t = false)]
-        cgroup_enforce: bool,
-        #[arg(long = "deny-gpu", default_value_t = false)]
-        deny_gpu: bool,
-        #[arg(long = "wait-ready", default_value_t = false)]
-        wait_ready: bool,
-        #[arg(long = "ready-timeout", default_value_t = 30)]
-        ready_timeout: u64,
-    },
+    Start(Box<StartCommand>),
     /// Stop a managed process by name or numeric identifier.
     Stop { target: String },
     #[command(visible_alias = "rs")]
@@ -224,6 +168,66 @@ pub enum Commands {
         #[command(subcommand)]
         command: DaemonCommand,
     },
+}
+
+#[derive(Debug, Clone, Args)]
+/// CLI payload for starting and registering a new managed process.
+pub struct StartCommand {
+    pub command: String,
+    #[arg(long)]
+    pub name: Option<String>,
+    #[arg(long, value_enum, default_value_t = RestartArg::OnFailure)]
+    pub restart: RestartArg,
+    #[arg(long, default_value_t = 10)]
+    pub max_restarts: u32,
+    #[arg(long, default_value_t = 3)]
+    pub crash_restart_limit: u32,
+    #[arg(long)]
+    pub cwd: Option<PathBuf>,
+    #[arg(long = "env", value_parser = parse_env_var)]
+    pub env: Vec<(String, String)>,
+    #[arg(long = "health-cmd")]
+    pub health_cmd: Option<String>,
+    #[arg(long = "health-interval", default_value_t = 30)]
+    pub health_interval: u64,
+    #[arg(long = "health-timeout", default_value_t = 5)]
+    pub health_timeout: u64,
+    #[arg(long = "health-max-failures", default_value_t = 3)]
+    pub health_max_failures: u32,
+    #[arg(long = "kill-signal")]
+    pub kill_signal: Option<String>,
+    #[arg(long = "stop-timeout", default_value_t = 5)]
+    pub stop_timeout: u64,
+    #[arg(long = "restart-delay", default_value_t = 0)]
+    pub restart_delay: u64,
+    #[arg(long = "start-delay", default_value_t = 0)]
+    pub start_delay: u64,
+    #[arg(long, default_value_t = false)]
+    pub watch: bool,
+    #[arg(long = "watch-path")]
+    pub watch_path: Vec<PathBuf>,
+    #[arg(long = "ignore-watch")]
+    pub ignore_watch: Vec<String>,
+    #[arg(long = "watch-delay", default_value_t = 0)]
+    pub watch_delay: u64,
+    #[arg(long, default_value_t = false)]
+    pub cluster: bool,
+    #[arg(long = "cluster-instances")]
+    pub cluster_instances: Option<u32>,
+    #[arg(long)]
+    pub namespace: Option<String>,
+    #[arg(long = "max-memory-mb")]
+    pub max_memory_mb: Option<u64>,
+    #[arg(long = "max-cpu-percent")]
+    pub max_cpu_percent: Option<f32>,
+    #[arg(long = "cgroup-enforce", default_value_t = false)]
+    pub cgroup_enforce: bool,
+    #[arg(long = "deny-gpu", default_value_t = false)]
+    pub deny_gpu: bool,
+    #[arg(long = "wait-ready", default_value_t = false)]
+    pub wait_ready: bool,
+    #[arg(long = "ready-timeout", default_value_t = 30)]
+    pub ready_timeout: u64,
 }
 
 #[derive(Debug, Subcommand)]
@@ -449,18 +453,16 @@ mod tests {
         .expect("expected CLI parsing success");
 
         match cli.command {
-            Commands::Start {
-                name, env, restart, ..
-            } => {
-                assert_eq!(name.as_deref(), Some("api"));
+            Commands::Start(start) => {
+                assert_eq!(start.name.as_deref(), Some("api"));
                 assert_eq!(
-                    env,
+                    start.env,
                     vec![
                         ("A".to_string(), "1".to_string()),
                         ("B".to_string(), "two".to_string())
                     ]
                 );
-                assert!(matches!(restart, RestartArg::Never));
+                assert!(matches!(start.restart, RestartArg::Never));
             }
             _ => panic!("expected start subcommand"),
         }
@@ -492,26 +494,17 @@ mod tests {
         .expect("expected CLI parsing success");
 
         match cli.command {
-            Commands::Start {
-                name,
-                watch,
-                watch_path,
-                ignore_watch,
-                watch_delay,
-                wait_ready,
-                ready_timeout,
-                ..
-            } => {
-                assert_eq!(name.as_deref(), Some("api"));
-                assert!(watch);
+            Commands::Start(start) => {
+                assert_eq!(start.name.as_deref(), Some("api"));
+                assert!(start.watch);
                 assert_eq!(
-                    watch_path,
+                    start.watch_path,
                     vec![PathBuf::from("src"), PathBuf::from("config")]
                 );
-                assert_eq!(ignore_watch, vec!["node_modules".to_string()]);
-                assert_eq!(watch_delay, 2);
-                assert!(wait_ready);
-                assert_eq!(ready_timeout, 9);
+                assert_eq!(start.ignore_watch, vec!["node_modules".to_string()]);
+                assert_eq!(start.watch_delay, 2);
+                assert!(start.wait_ready);
+                assert_eq!(start.ready_timeout, 9);
             }
             _ => panic!("expected start subcommand"),
         }

@@ -14,6 +14,9 @@ Refresh interval is clamped to `200..5000 ms`.
 ## Key Controls
 
 - `j` / `k` or `↑` / `↓`: move selection
+- `/`: open search input for live filtering by name / namespace / command
+- `f`: cycle process filter (`all` -> `running` -> `stopped` -> `unhealthy`)
+- `o`: cycle sort (`id` -> `name` -> `cpu` -> `ram` -> `restarts`)
 - `n`: open create-process modal
 - `s`: stop selected service
 - `d`: open delete confirmation for selected service
@@ -28,6 +31,13 @@ Refresh interval is clamped to `200..5000 ms`.
 - `q`: quit
 
 Delete confirmation uses `Enter` or `y` to confirm, and `Esc` or `n` to cancel.
+
+Search input uses:
+
+- type to filter immediately
+- `Backspace`: delete one character
+- `Delete` or `Ctrl+U`: clear query
+- `Enter` or `Esc`: close the input while keeping the current filter text
 
 ## Log Viewer
 
@@ -49,7 +59,7 @@ Press `l` on a selected service to open the fullscreen log viewer.
 ## Panels
 
 - Header: timestamp, refresh cadence, selected-service summary
-- Fleet summary: total/running/restarting/stopped/unhealthy counters
+- Fleet summary: visible/total plus running/restarting/stopped/unhealthy counters
 - Left services pane: ID, name, status, PID, uptime, CPU, RAM, health
 - Right sidebar (on selected process): full-height runtime/process/git details and compact bars
 - Create modal: in-UI process creation flow

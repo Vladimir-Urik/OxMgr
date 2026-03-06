@@ -71,6 +71,18 @@ Validation checks:
 - watch configuration sanity (`watch`, watch paths, ignore regexes, debounce)
 - readiness settings (`wait_ready` requires health checks and positive timeout)
 
+## Editor Support
+
+The repository ships a schema at [`schemas/oxfile.schema.json`](/Users/vladimirurik/Documents/dev/rust/oxmgr/schemas/oxfile.schema.json) and a root [`.taplo.toml`](/Users/vladimirurik/Documents/dev/rust/oxmgr/.taplo.toml) association for `oxfile.toml` and the example files under [`docs/examples`](/Users/vladimirurik/Documents/dev/rust/oxmgr/docs/examples).
+
+If you want schema-backed completion and validation in a standalone `oxfile.toml`, add this comment at the top of the file:
+
+```toml
+#:schema ./schemas/oxfile.schema.json
+```
+
+Editors using Taplo / Even Better TOML will pick up the schema and surface completion, enum hints, and basic validation for Oxmgr-specific fields.
+
 ## File Structure
 
 ```toml

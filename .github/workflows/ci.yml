@@ -21,15 +21,28 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup Node.js
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Cargo fmt check
         run: cargo fmt --all -- --check
 
       - name: Cargo check
         run: cargo check --all-targets
 
+      - name: Cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
       - name: Validate download metrics script
         if: runner.os == 'Linux'
         run: python3 -m py_compile scripts/generate_download_metrics.py
+
+      - name: Packaging smoke checks
+        if: runner.os == 'Linux'
+        run: bash scripts/smoke_packaging.sh
 
       - name: Cargo test
         run: cargo test --all-targets

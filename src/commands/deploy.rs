@@ -6,6 +6,8 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use crate::js_config::extract_js_object_literal;
+
 #[derive(Debug, Clone)]
 enum DeployAction {
     Setup,
@@ -529,7 +531,7 @@ fn build_current_script(target: &DeployTarget) -> String {
     let source = source_path(&target.path);
     let source_git = format!("{source}/.git");
     let history = history_path(&target.path);
-    vec![
+    [
         "set -e".to_string(),
         format!(
             "if [ -f {} ]; then tail -n 1 {} | awk '{{print $2}}'; elif [ -d {} ]; then cd {} && git rev-parse HEAD; fi",
@@ -544,7 +546,7 @@ fn build_current_script(target: &DeployTarget) -> String {
 
 fn build_previous_script(target: &DeployTarget) -> String {
     let history = history_path(&target.path);
-    vec![
+    [
         "set -e".to_string(),
         format!(
             "if [ -f {} ]; then tail -n 2 {} | head -n 1 | awk '{{print $2}}'; fi",
@@ -557,7 +559,7 @@ fn build_previous_script(target: &DeployTarget) -> String {
 
 fn build_list_script(target: &DeployTarget) -> String {
     let history = history_path(&target.path);
-    vec![
+    [
         "set -e".to_string(),
         format!(
             "if [ -f {} ]; then cat {}; fi",
@@ -570,7 +572,7 @@ fn build_list_script(target: &DeployTarget) -> String {
 
 fn build_exec_script(target: &DeployTarget, command: &str) -> String {
     let source = source_path(&target.path);
-    vec![
+    [
         "set -e".to_string(),
         format!("cd {}", sh_quote(&source)),
         command.to_string(),
@@ -821,4 +823,3 @@ module.exports = {
         std::env::temp_dir().join(format!("{prefix}-{nonce}.{extension}"))
     }
 }
-use crate::js_config::extract_js_object_literal;
