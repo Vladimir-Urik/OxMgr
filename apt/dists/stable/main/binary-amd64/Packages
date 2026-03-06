@@ -1,12 +1,12 @@
 Package: oxmgr
-Version: 0.1.4
+Version: 0.1.5
 Architecture: amd64
 Maintainer: Oxmgr Contributors <maintainers@example.com>
-Filename: pool/main/o/oxmgr/oxmgr_0.1.4_amd64.deb
-Size: 1423158
-MD5sum: 5558def21f0c0afdb4d05ac544fe879d
-SHA1: 66614a233b203ad80dbd0e8d8fbf8f0e9a637610
-SHA256: 77d5c0c9a5fb396e4a58452ff919aad5e38e82c9969f35ad1ad94054cca6478e
+Filename: pool/main/o/oxmgr/oxmgr_0.1.5_amd64.deb
+Size: 1439070
+MD5sum: 077b8c3f959987899fae9fb5c9f0f49d
+SHA1: 0c282e69b86478785f560cd0dbe12a2d326426ea
+SHA256: 8a0c70cf5b3e14079a62304ebbf9c7a6bbb5d44eaddb7c185cbefbf4d618fc8e
 Section: utils
 Priority: optional
 Description: Oxmgr lightweight process manager
