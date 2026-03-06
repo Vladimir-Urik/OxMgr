@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.1.5 - 2026-03-06
+
+This release focuses on stronger diagnostics, better Oxfile editor tooling, a more usable terminal UI, and internal maintenance improvements.
+
+### Added
+
+- Expanded `oxmgr doctor` with checks for API address resolution, `/metrics` reachability, service-manager installation/runtime state, cgroup prerequisites, git pull/webhook setup, and log-rotation policy.
+- Added live search to `oxmgr ui`, with filtering by process name, namespace, and command.
+- Added status filters and sortable process lists in the TUI (`all`, `running`, `stopped`, `unhealthy`; sort by ID, name, CPU, RAM, or restarts).
+- Added a shipped JSON Schema for `oxfile.toml` plus Taplo schema association for editor completion and validation.
+- Added packaging smoke checks in CI for the npm wrapper, Homebrew formula generation, and Scoop manifest generation.
+
+### Changed
+
+- Refactored large runtime and UI modules into smaller internal components, including `process_manager`, TUI rendering/layout helpers, daemon HTTP handling, ecosystem profile/resource parsing, and process fingerprinting.
+- Consolidated shared process-spec handling across `start` and `apply` flows to reduce drift between CLI and config-driven workflows.
+- Reorganized unit tests for large modules into dedicated per-module test directories to keep runtime code easier to review and maintain.
+- Updated the README and docs to cover the richer `doctor` output, Oxfile schema support, and the new TUI search/filter/sort controls.
+
+### Fixed
+
+- Fixed Windows `clippy`/CI failures around private-directory and file-permission helpers by separating Unix and non-Unix implementations.
+- Improved CI coverage by enforcing `cargo clippy` and packaging smoke checks alongside formatting, build, and test steps.
+- Improved TUI empty-state behavior so active search/filter views show a clear “no services match” message instead of a misleading blank table.
+
+### Testing
+
+- Added and reorganized unit coverage for TUI state/render behavior, `doctor` probes, process-manager lifecycle helpers, and packaging checks.
+- Kept end-to-end coverage green for the updated diagnostics, config, and TUI workflows.
+
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.4...v0.1.5
+
 ## v0.1.4 - 2026-03-05
 
 - This release focuses on Windows distribution improvements (Scoop), dependency updates, and refreshed benchmark snapshots since `v0.1.3`.
