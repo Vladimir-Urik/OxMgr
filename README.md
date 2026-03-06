@@ -153,3 +153,13 @@ The project is developed under the open-source patronage of [Empellio](https://e
 ## License
 
 [MIT](./LICENSE)
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=Vladimir-Urik%2FOxMgr&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Vladimir-Urik/OxMgr&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Vladimir-Urik/OxMgr&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Vladimir-Urik/OxMgr&type=date&legend=top-left" />
+ </picture>
+</a>
