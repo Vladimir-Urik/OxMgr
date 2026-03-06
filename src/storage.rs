@@ -114,17 +114,16 @@ fn replace_state_file(tmp_path: &Path, path: &Path) -> Result<()> {
     }
 }
 
+#[cfg(unix)]
 fn ensure_private_dir(path: &Path) -> Result<()> {
     let existed = path.exists();
     fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
 
-        if !existed {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-                .with_context(|| format!("failed to set permissions on {}", path.display()))?;
-        }
+    use std::os::unix::fs::PermissionsExt;
+
+    if !existed {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
     }
     Ok(())
 }
@@ -150,14 +149,23 @@ fn write_private_json_file(path: &Path, state: &PersistedState) -> Result<()> {
     Ok(())
 }
 
-fn set_private_file_permissions(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
+#[cfg(not(unix))]
+fn ensure_private_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
+    Ok(())
+}
 
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
-    }
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_: &Path) -> Result<()> {
     Ok(())
 }
 
