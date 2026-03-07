@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.1.6 - 2026-03-07
+
+This release focuses on Arch Linux distribution support and release automation for the AUR package.
+
+### Added
+
+- Added AUR packaging metadata for the new `oxmgr-bin` package, including `PKGBUILD` and `.SRCINFO`.
+- Added helper scripts to generate AUR package metadata from release version and checksum inputs.
+- Added a dedicated `publish-aur` job to the GitHub release workflow to update the `oxmgr-bin` AUR repository automatically when release tags are published.
+- Added Arch Linux installation instructions using `yay -S oxmgr-bin` across the main project docs and npm package README.
+
+### Changed
+
+- Extended release documentation to cover AUR publishing, required repository secrets, and the release-time metadata generation flow.
+- Aligned packaging maintenance with the existing Homebrew, Chocolatey, Scoop, and APT distribution automation patterns.
+
+### Notes
+
+- The AUR package is published as `oxmgr-bin`, which installs the released Linux binary instead of compiling from source.
+- Final AUR checksums are generated from the tagged GitHub release assets during the release workflow.
+
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.5...v0.1.6
+
+
 ## v0.1.5 - 2026-03-06
 
 This release focuses on stronger diagnostics, better Oxfile editor tooling, a more usable terminal UI, and internal maintenance improvements.
