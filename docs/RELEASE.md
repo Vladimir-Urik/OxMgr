@@ -29,6 +29,7 @@ Release publish jobs execute only for the canonical repository:
 - Update Homebrew tap formula when Homebrew secrets are set
 - Publish Chocolatey package when `CHOCO_API_KEY` is set
 - Update Scoop bucket manifest when Scoop secrets are set
+- Update the `oxmgr-bin` AUR package when `AUR_SSH_PRIVATE_KEY` is set
 - Publish APT repository index to `gh-pages/apt` (optionally signed `Release.gpg` / `InRelease`)
 
 ## Required repository settings
@@ -56,6 +57,10 @@ Release publish jobs execute only for the canonical repository:
 - `SCOOP_BUCKET_TOKEN`: PAT with write access to Scoop bucket repo
 - `SCOOP_BUCKET_REPO`: `empellio/scoop-bucket`
 
+### For AUR publish
+
+- `AUR_SSH_PRIVATE_KEY`: private SSH key for an AUR account with push access to `oxmgr-bin`
+
 ### For APT publish (unsigned metadata)
 
 - no extra secret required (publishes repo files to `gh-pages/apt`)
@@ -79,6 +84,7 @@ When `APT_GPG_*` secrets are set, workflow also publishes:
 
 - npm installer verifies downloaded artifact checksum (`.sha256`) before extraction.
 - If APT signing secrets are configured, metadata is signed and you can avoid `trusted=yes`.
+- AUR publishing uses the release Linux tarball checksum plus the tagged `LICENSE` checksum to regenerate [`packaging/aur/PKGBUILD`](../packaging/aur/PKGBUILD) and [`packaging/aur/.SRCINFO`](../packaging/aur/.SRCINFO) before pushing to `oxmgr-bin`.
 
 ## Download metrics dashboard
 
