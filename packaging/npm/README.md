@@ -51,6 +51,12 @@ brew install oxmgr
 choco install oxmgr -y
 ```
 
+### AUR (Arch Linux)
+
+```bash
+yay -S oxmgr-bin
+```
+
 ### APT (Debian/Ubuntu)
 
 ```bash

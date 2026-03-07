@@ -1,0 +1,18 @@
+pkgbase = oxmgr-bin
+	pkgdesc = Lightweight cross-platform process manager
+	pkgver = 0.1.6
+	pkgrel = 1
+	url = https://github.com/Vladimir-Urik/OxMgr
+	arch = x86_64
+	license = MIT
+	depends = gcc-libs
+	depends = glibc
+	optdepends = systemd: install and manage the oxmgr daemon as a systemd service
+	provides = oxmgr
+	conflicts = oxmgr
+	source = https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.6/oxmgr-v0.1.6-x86_64-unknown-linux-gnu.tar.gz
+	source = LICENSE::https://raw.githubusercontent.com/Vladimir-Urik/OxMgr/v0.1.6/LICENSE
+	sha256sums = SKIP
+	sha256sums = aee235df1ebced77a16a1c5b18e341a89f688085001ccaf4932f9b0f48938282
+
+pkgname = oxmgr-bin
