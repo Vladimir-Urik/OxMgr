@@ -12,11 +12,11 @@
     "status": "available",
     "total_downloads": 5
   },
-  "generated_at": "2026-03-08T07:00:15+00:00",
+  "generated_at": "2026-03-09T07:16:56+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 106,
+        "download_count": 109,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
@@ -65,7 +65,7 @@
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.6/oxmgr-v0.1.6-x86_64-pc-windows-msvc.zip"
         },
         {
-          "download_count": 7,
+          "download_count": 9,
           "kind": "linux_tarball",
           "label": "Linux tar.gz",
           "name": "oxmgr-v0.1.6-x86_64-unknown-linux-gnu.tar.gz",
@@ -81,14 +81,14 @@
       ],
       "counts": {
         "deb_package": 1,
-        "linux_tarball": 7,
+        "linux_tarball": 9,
         "mac_arm_tarball": 0,
         "mac_intel_tarball": 1,
         "other": 0,
         "windows_zip": 1
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.6",
-      "payload_downloads": 10,
+      "payload_downloads": 12,
       "published_at": "2026-03-07T20:40:39Z",
       "tag_name": "v0.1.6"
     },
@@ -118,7 +118,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.6/oxmgr-v0.1.6-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 7,
+            "download_count": 9,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.1.6-x86_64-unknown-linux-gnu.tar.gz",
@@ -134,14 +134,14 @@
         ],
         "counts": {
           "deb_package": 1,
-          "linux_tarball": 7,
+          "linux_tarball": 9,
           "mac_arm_tarball": 0,
           "mac_intel_tarball": 1,
           "other": 0,
           "windows_zip": 1
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.6",
-        "payload_downloads": 10,
+        "payload_downloads": 12,
         "published_at": "2026-03-07T20:40:39Z",
         "tag_name": "v0.1.6"
       },
@@ -373,7 +373,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.1/oxmgr-v0.1.1-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 8,
+            "download_count": 9,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.1.1-x86_64-unknown-linux-gnu.tar.gz",
@@ -389,14 +389,14 @@
         ],
         "counts": {
           "deb_package": 2,
-          "linux_tarball": 8,
+          "linux_tarball": 9,
           "mac_arm_tarball": 2,
           "mac_intel_tarball": 2,
           "other": 0,
           "windows_zip": 3
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.1",
-        "payload_downloads": 17,
+        "payload_downloads": 18,
         "published_at": "2026-03-01T13:36:35Z",
         "tag_name": "v0.1.1"
       },
@@ -1014,7 +1014,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 239
+    "total_payload_downloads": 242
   },
   "homebrew": {
     "formula": "oxmgr",
