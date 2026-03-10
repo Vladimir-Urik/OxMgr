@@ -1125,18 +1125,13 @@ fn e2e_pre_reload_cmd_runs_on_reload() {
 
     let env = TestEnv::new("pre-reload-cmd");
     let marker_path = env.home.join("pre-reload/marker.txt");
-    let marker_parent = marker_path
-        .parent()
-        .expect("marker should have parent dir");
+    let marker_parent = marker_path.parent().expect("marker should have parent dir");
     fs::create_dir_all(marker_parent).expect("failed to create marker dir");
     if marker_path.exists() {
         fs::remove_file(&marker_path).expect("failed to cleanup marker file");
     }
 
-    let pre_cmd = format!(
-        "sh -c \"echo pre_reload > {}\"",
-        path_string(&marker_path)
-    );
+    let pre_cmd = format!("sh -c \"echo pre_reload > {}\"", path_string(&marker_path));
 
     let start = env.run_vec(vec![
         "start".to_string(),
@@ -1184,19 +1179,14 @@ fn e2e_pre_reload_cmd_runs_on_reload_windows() {
 
     let env = TestEnv::new("pre-reload-cmd-win");
     let marker_path = env.home.join("pre-reload/marker.txt");
-    let marker_parent = marker_path
-        .parent()
-        .expect("marker should have parent dir");
+    let marker_parent = marker_path.parent().expect("marker should have parent dir");
     fs::create_dir_all(marker_parent).expect("failed to create marker dir");
     if marker_path.exists() {
         fs::remove_file(&marker_path).expect("failed to cleanup marker file");
     }
 
-    let marker_path_str = path_string(&marker_path).replace('\'', "''");
-    let pre_cmd = format!(
-        "powershell -NoProfile -Command \"Set-Content -Path '{}' -Value pre_reload\"",
-        marker_path_str
-    );
+    let marker_path_str = path_string(&marker_path);
+    let pre_cmd = format!("echo pre_reload> \"{marker_path_str}\"");
 
     let start = env.run_vec(vec![
         "start".to_string(),

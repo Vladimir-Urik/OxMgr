@@ -437,10 +437,7 @@ fn resolve_app(
                 .clone()
                 .or_else(|| defaults.pull_secret.clone()),
         )?,
-        reuse_port: app
-            .reuse_port
-            .or(defaults.reuse_port)
-            .unwrap_or(false),
+        reuse_port: app.reuse_port.or(defaults.reuse_port).unwrap_or(false),
         start_order: app
             .start_order
             .or(defaults.start_order)

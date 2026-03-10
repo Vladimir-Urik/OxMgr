@@ -85,9 +85,8 @@ fn validate_resolved_specs(specs: &[EcosystemProcessSpec]) -> Result<OxfileValid
             }
         }
         if let Some(pre_reload_cmd) = &spec.pre_reload_cmd {
-            let pre_tokens = shell_words::split(pre_reload_cmd).with_context(|| {
-                format!("invalid pre_reload_cmd syntax: {}", pre_reload_cmd)
-            })?;
+            let pre_tokens = shell_words::split(pre_reload_cmd)
+                .with_context(|| format!("invalid pre_reload_cmd syntax: {}", pre_reload_cmd))?;
             if pre_tokens.is_empty() {
                 anyhow::bail!("pre_reload_cmd cannot be empty for app {:?}", spec.name);
             }
