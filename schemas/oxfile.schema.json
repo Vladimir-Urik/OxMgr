@@ -110,6 +110,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "pre_reload_cmd": {
+          "type": "string",
+          "minLength": 1
+        },
         "cwd": {
           "type": "string",
           "minLength": 1
@@ -196,6 +200,9 @@
           "type": "boolean"
         },
         "deny_gpu": {
+          "type": "boolean"
+        },
+        "reuse_port": {
           "type": "boolean"
         },
         "git_repo": {
@@ -241,6 +248,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "pre_reload_cmd": {
+          "type": "string",
+          "minLength": 1
+        },
         "stop_signal": {
           "type": "string",
           "minLength": 1
@@ -320,6 +331,9 @@
           "type": "boolean"
         },
         "deny_gpu": {
+          "type": "boolean"
+        },
+        "reuse_port": {
           "type": "boolean"
         },
         "git_repo": {
@@ -379,6 +393,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "pre_reload_cmd": {
+          "type": "string",
+          "minLength": 1
+        },
         "stop_signal": {
           "type": "string",
           "minLength": 1
@@ -458,6 +476,9 @@
           "type": "boolean"
         },
         "deny_gpu": {
+          "type": "boolean"
+        },
+        "reuse_port": {
           "type": "boolean"
         },
         "git_repo": {

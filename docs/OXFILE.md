@@ -125,6 +125,7 @@ Details:
 - `restart_policy`: `always | on_failure | never`
 - `max_restarts`: integer
 - `crash_restart_limit`: integer (`0` disables crash-loop cutoff, default `3`)
+- `pre_reload_cmd`: command string run before reload attempts
 - `cwd`: string path
 - `env`: key/value table
 - `stop_signal`: string (for example `SIGTERM`, `SIGINT`)
@@ -151,6 +152,7 @@ Details:
 - `max_cpu_percent`: float
 - `cgroup_enforce`: bool (Linux only; applies hard limits via cgroup v2)
 - `deny_gpu`: bool (best-effort GPU visibility disable via environment variables)
+- `reuse_port`: bool (best-effort hint for SO_REUSEPORT on macOS/Linux)
 - `git_repo`: git remote URL for `oxmgr pull`
 - `git_ref`: optional branch/tag/ref for `oxmgr pull`
 - `pull_secret`: secret used by webhook endpoint `POST /pull/<name|id>`
@@ -226,6 +228,30 @@ Behavior:
 - replacement process must pass `health_cmd` before reload cuts over
 - if readiness fails or times out, the old process stays running
 - `wait_ready` requires a health check command
+
+## Pre-Reload Build Hook
+
+```toml
+pre_reload_cmd = "cargo build --release"
+```
+
+Behavior:
+
+- command runs before any `reload` attempt
+- failure stops the reload and leaves the current process running
+- command runs in the app `cwd` with the app `env`
+
+## SO_REUSEPORT Hint
+
+```toml
+reuse_port = true
+```
+
+Behavior:
+
+- on macOS/Linux, Oxmgr sets `OXMGR_REUSEPORT=1` and `SO_REUSEPORT=1` in the child env
+- your app must opt in to `SO_REUSEPORT` for zero-downtime reloads
+- Windows does not support `SO_REUSEPORT` and ignores this flag
 
 ## Resource Limits
 

@@ -1076,6 +1076,166 @@ fn e2e_start_defaults_cwd_to_invocation_directory() {
 
 #[test]
 #[serial]
+#[cfg(not(windows))]
+fn e2e_start_reuse_port_flag() {
+    if !should_run_e2e("e2e_start_reuse_port_flag") {
+        return;
+    }
+
+    let env = TestEnv::new("reuse-port");
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(20),
+        "--name".to_string(),
+        "reuse-port-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--reuse-port".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start with --reuse-port failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "reuse-port-app", Duration::from_secs(8))
+        .expect("expected reuse-port-app pid after startup");
+
+    let status = env.run(&["status", "reuse-port-app"]);
+    assert!(
+        status.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status_stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_stdout.contains("Reuse Port") && status_stdout.contains("enabled"),
+        "reuse port missing from status output:\n{status_stdout}"
+    );
+
+    let _ = env.run(&["delete", "reuse-port-app"]);
+}
+
+#[test]
+#[serial]
+#[cfg(not(windows))]
+fn e2e_pre_reload_cmd_runs_on_reload() {
+    if !should_run_e2e("e2e_pre_reload_cmd_runs_on_reload") {
+        return;
+    }
+
+    let env = TestEnv::new("pre-reload-cmd");
+    let marker_path = env.home.join("pre-reload/marker.txt");
+    let marker_parent = marker_path
+        .parent()
+        .expect("marker should have parent dir");
+    fs::create_dir_all(marker_parent).expect("failed to create marker dir");
+    if marker_path.exists() {
+        fs::remove_file(&marker_path).expect("failed to cleanup marker file");
+    }
+
+    let pre_cmd = format!(
+        "sh -c \"echo pre_reload > {}\"",
+        path_string(&marker_path)
+    );
+
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(20),
+        "--name".to_string(),
+        "pre-reload-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--pre-reload-cmd".to_string(),
+        pre_cmd,
+    ]);
+    assert!(
+        start.status.success(),
+        "start with --pre-reload-cmd failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "pre-reload-app", Duration::from_secs(8))
+        .expect("expected pre-reload-app pid after startup");
+
+    assert!(
+        !marker_path.exists(),
+        "marker file should not exist before reload"
+    );
+
+    let reload = env.run(&["reload", "pre-reload-app"]);
+    assert!(
+        reload.status.success(),
+        "reload failed: {}",
+        String::from_utf8_lossy(&reload.stderr)
+    );
+
+    let created = wait_until(Duration::from_secs(8), || marker_path.exists());
+    assert!(created, "marker file was not created by pre_reload_cmd");
+
+    let _ = env.run(&["delete", "pre-reload-app"]);
+}
+
+#[test]
+#[serial]
+#[cfg(windows)]
+fn e2e_pre_reload_cmd_runs_on_reload_windows() {
+    if !should_run_e2e("e2e_pre_reload_cmd_runs_on_reload_windows") {
+        return;
+    }
+
+    let env = TestEnv::new("pre-reload-cmd-win");
+    let marker_path = env.home.join("pre-reload/marker.txt");
+    let marker_parent = marker_path
+        .parent()
+        .expect("marker should have parent dir");
+    fs::create_dir_all(marker_parent).expect("failed to create marker dir");
+    if marker_path.exists() {
+        fs::remove_file(&marker_path).expect("failed to cleanup marker file");
+    }
+
+    let marker_path_str = path_string(&marker_path).replace('\'', "''");
+    let pre_cmd = format!(
+        "powershell -NoProfile -Command \"Set-Content -Path '{}' -Value pre_reload\"",
+        marker_path_str
+    );
+
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(20),
+        "--name".to_string(),
+        "pre-reload-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--pre-reload-cmd".to_string(),
+        pre_cmd,
+    ]);
+    assert!(
+        start.status.success(),
+        "start with --pre-reload-cmd failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "pre-reload-app", Duration::from_secs(8))
+        .expect("expected pre-reload-app pid after startup");
+
+    assert!(
+        !marker_path.exists(),
+        "marker file should not exist before reload"
+    );
+
+    let reload = env.run(&["reload", "pre-reload-app"]);
+    assert!(
+        reload.status.success(),
+        "reload failed: {}",
+        String::from_utf8_lossy(&reload.stderr)
+    );
+
+    let created = wait_until(Duration::from_secs(8), || marker_path.exists());
+    assert!(created, "marker file was not created by pre_reload_cmd");
+
+    let _ = env.run(&["delete", "pre-reload-app"]);
+}
+
+#[test]
+#[serial]
 fn e2e_validate_profile_and_only_reports_expanded_processes() {
     if !should_run_e2e("e2e_validate_profile_and_only_reports_expanded_processes") {
         return;

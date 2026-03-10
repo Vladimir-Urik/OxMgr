@@ -180,6 +180,7 @@ fn expand_specs_for_apply(
             desired.push(StartProcessSpec {
                 command: spec.command.clone(),
                 name: Some(name),
+                pre_reload_cmd: spec.pre_reload_cmd.clone(),
                 restart_policy: spec.restart_policy.clone(),
                 max_restarts: spec.max_restarts,
                 crash_restart_limit: spec.crash_restart_limit,
@@ -201,6 +202,7 @@ fn expand_specs_for_apply(
                 git_repo: spec.git_repo.clone(),
                 git_ref: spec.git_ref.clone(),
                 pull_secret_hash: spec.pull_secret_hash.clone(),
+                reuse_port: spec.reuse_port,
                 wait_ready: spec.wait_ready,
                 ready_timeout_secs: spec.ready_timeout_secs,
             });
@@ -289,6 +291,8 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &StartProcessSpec) -
         && existing.resource_limits == desired.resource_limits
         && existing.git_repo == desired.git_repo
         && existing.git_ref == desired.git_ref
+        && existing.pre_reload_cmd == desired.pre_reload_cmd
+        && existing.reuse_port == desired.reuse_port
         && existing.wait_ready == desired.wait_ready
         && existing.ready_timeout_secs == desired.ready_timeout_secs
 }
@@ -384,6 +388,7 @@ mod tests {
         StartProcessSpec {
             command: command.to_string(),
             name: Some(name.to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: 3,
@@ -405,6 +410,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         }
@@ -428,6 +434,7 @@ mod tests {
                 .expect("apply test spec should have a name"),
             command,
             args: tokens,
+            pre_reload_cmd: desired.pre_reload_cmd.clone(),
             cwd: desired.cwd.clone(),
             env: desired.env.clone(),
             restart_policy: desired.restart_policy.clone(),
@@ -439,6 +446,7 @@ mod tests {
             git_repo: desired.git_repo.clone(),
             git_ref: desired.git_ref.clone(),
             pull_secret_hash: desired.pull_secret_hash.clone(),
+            reuse_port: desired.reuse_port,
             stop_signal: desired.stop_signal.clone(),
             stop_timeout_secs: desired.stop_timeout_secs,
             restart_delay_secs: desired.restart_delay_secs,

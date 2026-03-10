@@ -60,6 +60,8 @@ Common options:
 - `--max-cpu-percent <n>`
 - `--cgroup-enforce`
 - `--deny-gpu`
+- `--pre-reload-cmd <command>`
+- `--reuse-port` (best-effort hint for SO_REUSEPORT on macOS/Linux)
 
 Cluster mode notes:
 

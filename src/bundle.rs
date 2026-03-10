@@ -46,6 +46,8 @@ struct BundleService {
     program: String,
     #[serde(default)]
     args: Vec<String>,
+    #[serde(default)]
+    pre_reload_cmd: Option<String>,
     restart_policy: RestartPolicy,
     max_restarts: u32,
     crash_restart_limit: u32,
@@ -82,6 +84,8 @@ struct BundleService {
     git_ref: Option<String>,
     #[serde(default)]
     pull_secret_hash: Option<String>,
+    #[serde(default)]
+    reuse_port: bool,
     #[serde(default)]
     wait_ready: bool,
     #[serde(default = "crate::process::default_ready_timeout_secs")]
@@ -291,6 +295,7 @@ impl BundleService {
             name: process.name.clone(),
             program: process.command.clone(),
             args: process.args.clone(),
+            pre_reload_cmd: process.pre_reload_cmd.clone(),
             restart_policy: process.restart_policy.clone(),
             max_restarts: process.max_restarts,
             crash_restart_limit: process.crash_restart_limit,
@@ -312,6 +317,7 @@ impl BundleService {
             git_repo: process.git_repo.clone(),
             git_ref: process.git_ref.clone(),
             pull_secret_hash: process.pull_secret_hash.clone(),
+            reuse_port: process.reuse_port,
             wait_ready: process.wait_ready,
             ready_timeout_secs: process.ready_timeout_secs,
         }
@@ -321,6 +327,7 @@ impl BundleService {
         StartProcessSpec {
             command: command_line_from_parts(&self.program, &self.args),
             name: Some(self.name),
+            pre_reload_cmd: self.pre_reload_cmd,
             restart_policy: self.restart_policy,
             max_restarts: self.max_restarts,
             crash_restart_limit: self.crash_restart_limit,
@@ -346,6 +353,7 @@ impl BundleService {
             git_repo: self.git_repo,
             git_ref: self.git_ref,
             pull_secret_hash: self.pull_secret_hash,
+            reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs.max(1),
         }
@@ -459,6 +467,11 @@ fn validate_service(service: &BundleService) -> Result<()> {
             anyhow::bail!("service '{}' has invalid health thresholds", service.name);
         }
     }
+    if let Some(pre_reload_cmd) = service.pre_reload_cmd.as_ref() {
+        if pre_reload_cmd.trim().is_empty() || pre_reload_cmd.len() > MAX_PROGRAM_LEN {
+            anyhow::bail!("service '{}' has invalid pre_reload_cmd", service.name);
+        }
+    }
 
     if !service.cluster_mode && service.cluster_instances.is_some() {
         anyhow::bail!(
@@ -554,6 +567,7 @@ mod tests {
             name: "api".to_string(),
             program: "node".to_string(),
             args: vec!["server.js".to_string()],
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: 3,
@@ -575,6 +589,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
@@ -592,6 +607,7 @@ mod tests {
             name: "api".to_string(),
             program: "node".to_string(),
             args: vec!["server.js".to_string()],
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: 3,
@@ -613,6 +629,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: Some("abc123".to_string()),
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
@@ -631,6 +648,7 @@ mod tests {
                 "--port".to_string(),
                 "3000".to_string(),
             ],
+            pre_reload_cmd: None,
             cwd: Some(PathBuf::from("/srv/api")),
             env: HashMap::from([("NODE_ENV".to_string(), "production".to_string())]),
             restart_policy: RestartPolicy::OnFailure,
@@ -644,6 +662,7 @@ mod tests {
             pull_secret_hash: Some(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ),
+            reuse_port: false,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 15,
             restart_delay_secs: 1,

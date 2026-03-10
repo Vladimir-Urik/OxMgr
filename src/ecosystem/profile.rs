@@ -51,6 +51,11 @@ pub(super) fn apply_profile_overrides(
                     settings.crash_restart_limit = parsed as u32;
                 }
             }
+            "pre_reload_cmd" => {
+                if let Some(parsed) = value.as_str() {
+                    settings.pre_reload_cmd = Some(parsed.to_string());
+                }
+            }
             "restart_delay" => {
                 if let Some(parsed) = value.as_u64() {
                     settings.restart_delay_secs = parsed;
@@ -107,6 +112,12 @@ pub(super) fn apply_profile_overrides(
                     settings.pull_secret_hash =
                         normalize_pull_secret_hash(Some(parsed.to_string()))?;
                 }
+            }
+            "reuse_port" => {
+                let Some(parsed) = value.as_bool() else {
+                    anyhow::bail!("reuse_port override must be true/false");
+                };
+                settings.reuse_port = parsed;
             }
             "exec_mode" => {
                 if let Some(parsed) = value.as_str() {

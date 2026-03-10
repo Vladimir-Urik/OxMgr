@@ -84,6 +84,7 @@ struct OxDefaults {
     restart_policy: Option<RestartPolicyValue>,
     max_restarts: Option<u32>,
     crash_restart_limit: Option<u32>,
+    pre_reload_cmd: Option<String>,
     cwd: Option<PathBuf>,
     env: Option<HashMap<String, String>>,
     stop_signal: Option<String>,
@@ -111,6 +112,7 @@ struct OxDefaults {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret: Option<String>,
+    reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
 }
@@ -119,6 +121,7 @@ struct OxDefaults {
 struct OxApp {
     name: Option<String>,
     command: String,
+    pre_reload_cmd: Option<String>,
     cwd: Option<PathBuf>,
     env: Option<HashMap<String, String>>,
     restart_policy: Option<RestartPolicyValue>,
@@ -149,6 +152,7 @@ struct OxApp {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret: Option<String>,
+    reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
     profiles: Option<HashMap<String, OxProfile>>,
@@ -162,6 +166,7 @@ struct OxProfile {
     restart_policy: Option<RestartPolicyValue>,
     max_restarts: Option<u32>,
     crash_restart_limit: Option<u32>,
+    pre_reload_cmd: Option<String>,
     stop_signal: Option<String>,
     stop_timeout_secs: Option<u64>,
     restart_delay_secs: Option<u64>,
@@ -187,6 +192,7 @@ struct OxProfile {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret: Option<String>,
+    reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
     disabled: Option<bool>,
@@ -199,6 +205,7 @@ struct Resolved {
     restart_policy: RestartPolicy,
     max_restarts: u32,
     crash_restart_limit: u32,
+    pre_reload_cmd: Option<String>,
     stop_signal: Option<String>,
     stop_timeout_secs: u64,
     restart_delay_secs: u64,
@@ -213,6 +220,7 @@ struct Resolved {
     git_repo: Option<String>,
     git_ref: Option<String>,
     pull_secret_hash: Option<String>,
+    reuse_port: bool,
     start_order: i32,
     depends_on: Vec<String>,
     instances: u32,
@@ -235,6 +243,8 @@ struct OxAppOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pre_reload_cmd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cwd: Option<PathBuf>,
     #[serde(skip_serializing_if = "HashMap::is_empty", default)]
@@ -285,6 +295,8 @@ struct OxAppOut {
     cgroup_enforce: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deny_gpu: Option<bool>,
+    #[serde(skip_serializing_if = "is_false", default)]
+    reuse_port: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     wait_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -315,6 +327,7 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
         result.push(EcosystemProcessSpec {
             command: app.command,
             name: app.name,
+            pre_reload_cmd: resolved.pre_reload_cmd,
             restart_policy: resolved.restart_policy,
             max_restarts: resolved.max_restarts,
             crash_restart_limit: resolved.crash_restart_limit,
@@ -336,6 +349,7 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             git_repo: resolved.git_repo,
             git_ref: resolved.git_ref,
             pull_secret_hash: resolved.pull_secret_hash,
+            reuse_port: resolved.reuse_port,
             start_order: resolved.start_order,
             depends_on: resolved.depends_on,
             instances: resolved.instances,
@@ -371,6 +385,10 @@ fn resolve_app(
             .crash_restart_limit
             .or(defaults.crash_restart_limit)
             .unwrap_or(3),
+        pre_reload_cmd: app
+            .pre_reload_cmd
+            .clone()
+            .or_else(|| defaults.pre_reload_cmd.clone()),
         stop_signal: app
             .stop_signal
             .clone()
@@ -419,6 +437,10 @@ fn resolve_app(
                 .clone()
                 .or_else(|| defaults.pull_secret.clone()),
         )?,
+        reuse_port: app
+            .reuse_port
+            .or(defaults.reuse_port)
+            .unwrap_or(false),
         start_order: app
             .start_order
             .or(defaults.start_order)
@@ -507,6 +529,9 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     if let Some(crash_restart_limit) = profile.crash_restart_limit {
         resolved.crash_restart_limit = crash_restart_limit;
     }
+    if let Some(pre_reload_cmd) = &profile.pre_reload_cmd {
+        resolved.pre_reload_cmd = Some(pre_reload_cmd.clone());
+    }
     if let Some(stop_signal) = &profile.stop_signal {
         resolved.stop_signal = Some(stop_signal.clone());
     }
@@ -547,6 +572,9 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     }
     if let Some(pull_secret) = &profile.pull_secret {
         resolved.pull_secret_hash = normalize_pull_secret_hash(Some(pull_secret.clone()))?;
+    }
+    if let Some(reuse_port) = profile.reuse_port {
+        resolved.reuse_port = reuse_port;
     }
     if let Some(start_order) = profile.start_order {
         resolved.start_order = start_order;
@@ -712,6 +740,7 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
         apps.push(OxAppOut {
             name: spec.name.clone(),
             command: spec.command.clone(),
+            pre_reload_cmd: spec.pre_reload_cmd.clone(),
             cwd: spec.cwd.clone(),
             env: spec.env.clone(),
             restart_policy: spec.restart_policy.clone(),
@@ -759,6 +788,7 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
                 .resource_limits
                 .as_ref()
                 .and_then(|limits| limits.deny_gpu.then_some(true)),
+            reuse_port: spec.reuse_port,
             wait_ready: spec.wait_ready.then_some(true),
             ready_timeout_secs: spec.wait_ready.then_some(spec.ready_timeout_secs),
         });
@@ -857,6 +887,7 @@ NODE_ENV = "production"
         let specs = vec![EcosystemProcessSpec {
             command: "sleep 1".to_string(),
             name: Some("worker".to_string()),
+            pre_reload_cmd: Some("make build".to_string()),
             restart_policy: RestartPolicy::Never,
             max_restarts: 0,
             crash_restart_limit: 4,
@@ -888,6 +919,7 @@ NODE_ENV = "production"
             git_repo: Some("git@github.com:org/worker.git".to_string()),
             git_ref: Some("main".to_string()),
             pull_secret_hash: None,
+            reuse_port: true,
             start_order: 1,
             depends_on: vec!["db".to_string()],
             instances: 1,

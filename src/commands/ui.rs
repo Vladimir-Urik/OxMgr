@@ -1265,6 +1265,7 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         } else {
             Some(name_text)
         },
+        pre_reload_cmd: None,
         restart_policy: crate::process::RestartPolicy::OnFailure,
         max_restarts: 10,
         crash_restart_limit: 3,
@@ -1286,6 +1287,7 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         git_repo: None,
         git_ref: None,
         pull_secret_hash: None,
+        reuse_port: false,
         wait_ready: false,
         ready_timeout_secs: crate::process::default_ready_timeout_secs(),
     };

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.7 - 2026-03-10
+
+This release focuses on reload-time build hooks and best-effort reuse-port support for zero-downtime reloads.
+
+### Added
+
+- Added `pre_reload_cmd` in `oxfile.toml`, ecosystem imports, bundles, and CLI `--pre-reload-cmd` to run a build/script before reload attempts.
+- Added `reuse_port` in `oxfile.toml` and CLI `--reuse-port` as a best-effort hint for SO_REUSEPORT on macOS/Linux (ignored on Windows).
+- Added `Reuse Port` field to `oxmgr status` output.
+- Added schema and documentation updates for the new fields.
+
+### Changed
+
+- Reload now runs `pre_reload_cmd` (when configured) before spawning a replacement process; failures abort the reload and keep the existing process running.
+
+### Testing
+
+- Added end-to-end coverage for `--reuse-port` (non-Windows) and `--pre-reload-cmd` (Windows and non-Windows).
+
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.6...v0.1.7
+
 ## v0.1.6 - 2026-03-07
 
 This release focuses on Arch Linux distribution support and release automation for the AUR package.

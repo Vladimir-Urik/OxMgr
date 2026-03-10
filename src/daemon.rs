@@ -755,6 +755,7 @@ mod tests {
         let spec = StartProcessSpec {
             command,
             name: Some("api".to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 1,
             crash_restart_limit: 3,
@@ -776,6 +777,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: Some(hash_secret("hook-secret")),
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
@@ -820,6 +822,7 @@ mod tests {
         let spec = StartProcessSpec {
             command,
             name: Some(name.to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 1,
             crash_restart_limit: 3,
@@ -841,6 +844,7 @@ mod tests {
             git_repo,
             git_ref: Some("main".to_string()),
             pull_secret_hash,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
@@ -981,6 +985,7 @@ mod tests {
             name: "api".to_string(),
             command: "sleep".to_string(),
             args: vec!["30".to_string()],
+            pre_reload_cmd: None,
             cwd: None,
             env: HashMap::new(),
             restart_policy: RestartPolicy::Always,
@@ -992,6 +997,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 5,
             restart_delay_secs: 1,

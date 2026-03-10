@@ -232,6 +232,7 @@ async fn reload_process_keeps_existing_pid_when_replacement_fails_readiness() {
         .start_process(StartProcessSpec {
             command: command_line(&fixture.command, &fixture.args),
             name: Some("api".to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 1,
             crash_restart_limit: 3,
@@ -253,6 +254,7 @@ async fn reload_process_keeps_existing_pid_when_replacement_fails_readiness() {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         })
@@ -304,6 +306,7 @@ async fn reload_process_replaces_pid_when_replacement_becomes_ready() {
         .start_process(StartProcessSpec {
             command: command_line(&fixture.command, &fixture.args),
             name: Some("api".to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 1,
             crash_restart_limit: 3,
@@ -330,6 +333,7 @@ async fn reload_process_replaces_pid_when_replacement_becomes_ready() {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: true,
             ready_timeout_secs: 2,
         })

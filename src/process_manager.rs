@@ -196,6 +196,7 @@ impl ProcessManager {
         let StartProcessSpec {
             command: command_line,
             name,
+            pre_reload_cmd,
             restart_policy,
             max_restarts,
             crash_restart_limit,
@@ -217,6 +218,7 @@ impl ProcessManager {
             git_repo,
             git_ref,
             pull_secret_hash,
+            reuse_port,
             wait_ready,
             ready_timeout_secs,
         } = spec;
@@ -243,6 +245,7 @@ impl ProcessManager {
             name: resolved_name.clone(),
             command,
             args,
+            pre_reload_cmd,
             cwd,
             env,
             restart_policy,
@@ -254,6 +257,7 @@ impl ProcessManager {
             git_repo,
             git_ref,
             pull_secret_hash,
+            reuse_port,
             stop_signal,
             stop_timeout_secs: stop_timeout_secs.max(1),
             restart_delay_secs,
@@ -426,6 +430,8 @@ impl ProcessManager {
             .cloned()
             .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
 
+        self.run_pre_reload_cmd(&existing).await?;
+
         if existing.pid.is_none() {
             return self.restart_process(target).await;
         }
@@ -467,6 +473,81 @@ impl ProcessManager {
         }
 
         Ok(replacement)
+    }
+
+    async fn run_pre_reload_cmd(&self, process: &ManagedProcess) -> Result<()> {
+        let Some(command_line) = process.pre_reload_cmd.as_ref() else {
+            return Ok(());
+        };
+        let trimmed = command_line.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("pre_reload_cmd cannot be empty for process {}", process.name);
+        }
+
+        info!("running pre_reload_cmd for process {}", process.name);
+        let mut command = if cfg!(windows) {
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/C").arg(trimmed);
+            cmd
+        } else {
+            let mut cmd = Command::new("sh");
+            cmd.arg("-lc").arg(trimmed);
+            cmd
+        };
+
+        if let Some(cwd) = &process.cwd {
+            command.current_dir(cwd);
+        }
+        if !process.env.is_empty() {
+            command.envs(&process.env);
+        }
+        command.env("OXMGR_PROCESS", &process.name);
+
+        let output = command
+            .output()
+            .await
+            .with_context(|| format!("pre_reload_cmd failed to start for {}", process.name))?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let code = output
+            .status
+            .code()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "signal".to_string());
+        let mut detail = String::new();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stdout.trim().is_empty() {
+            detail.push_str("stdout: ");
+            detail.push_str(stdout.trim());
+        }
+        if !stderr.trim().is_empty() {
+            if !detail.is_empty() {
+                detail.push_str(" | ");
+            }
+            detail.push_str("stderr: ");
+            detail.push_str(stderr.trim());
+        }
+        if detail.len() > 2000 {
+            detail.truncate(2000);
+            detail.push_str("...");
+        }
+
+        if detail.is_empty() {
+            anyhow::bail!(
+                "pre_reload_cmd failed for {} (exit code {})",
+                process.name,
+                code
+            );
+        }
+        anyhow::bail!(
+            "pre_reload_cmd failed for {} (exit code {}): {}",
+            process.name,
+            code,
+            detail
+        );
     }
 
     /// Pulls Git updates for one or more managed processes and applies the
@@ -925,6 +1006,20 @@ impl ProcessManager {
         }
         if !spawn.extra_env.is_empty() {
             command.envs(&spawn.extra_env);
+        }
+        if process.reuse_port {
+            #[cfg(unix)]
+            {
+                command.env("OXMGR_REUSEPORT", "1");
+                command.env("SO_REUSEPORT", "1");
+            }
+            #[cfg(windows)]
+            {
+                warn!(
+                    "process {} requested reuse_port but SO_REUSEPORT is not supported on Windows",
+                    process.name
+                );
+            }
         }
         if process
             .resource_limits

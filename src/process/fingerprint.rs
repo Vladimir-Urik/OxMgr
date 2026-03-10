@@ -14,6 +14,7 @@ impl ManagedProcess {
             args: &self.args,
             cwd: self.cwd.as_ref(),
             env: &self.env,
+            pre_reload_cmd: self.pre_reload_cmd.as_deref(),
             restart_policy: &self.restart_policy,
             max_restarts: self.max_restarts,
             crash_restart_limit: self.crash_restart_limit,
@@ -33,6 +34,7 @@ impl ManagedProcess {
             git_repo: self.git_repo.as_deref(),
             git_ref: self.git_ref.as_deref(),
             pull_secret_hash: self.pull_secret_hash.as_deref(),
+            reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
         })
@@ -68,6 +70,7 @@ impl StartProcessSpec {
             args: &args,
             cwd: self.cwd.as_ref(),
             env: &self.env,
+            pre_reload_cmd: self.pre_reload_cmd.as_deref(),
             restart_policy: &self.restart_policy,
             max_restarts: self.max_restarts,
             crash_restart_limit: self.crash_restart_limit,
@@ -87,6 +90,7 @@ impl StartProcessSpec {
             git_repo: self.git_repo.as_deref(),
             git_ref: self.git_ref.as_deref(),
             pull_secret_hash: self.pull_secret_hash.as_deref(),
+            reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
         })
@@ -98,6 +102,7 @@ struct ProcessConfigRef<'a> {
     args: &'a [String],
     cwd: Option<&'a PathBuf>,
     env: &'a HashMap<String, String>,
+    pre_reload_cmd: Option<&'a str>,
     restart_policy: &'a RestartPolicy,
     max_restarts: u32,
     crash_restart_limit: u32,
@@ -117,6 +122,7 @@ struct ProcessConfigRef<'a> {
     git_repo: Option<&'a str>,
     git_ref: Option<&'a str>,
     pull_secret_hash: Option<&'a str>,
+    reuse_port: bool,
     wait_ready: bool,
     ready_timeout_secs: u64,
 }
@@ -137,11 +143,16 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
         payload.push_str(&cwd.display().to_string());
     }
     payload.push('\n');
+    payload.push_str("pre_reload_cmd=");
+    if let Some(cmd) = config.pre_reload_cmd {
+        payload.push_str(cmd);
+    }
+    payload.push('\n');
     payload.push_str("restart_policy=");
     payload.push_str(&config.restart_policy.to_string());
     payload.push('\n');
     payload.push_str(&format!(
-        "max_restarts={}\ncrash_restart_limit={}\nstop_timeout_secs={}\nrestart_delay_secs={}\nstart_delay_secs={}\nwatch={}\nwatch_delay_secs={}\ncluster_mode={}\ncluster_instances={:?}\nnamespace={:?}\ngit_repo={:?}\ngit_ref={:?}\npull_secret_hash={:?}\nwait_ready={}\nready_timeout_secs={}\n",
+        "max_restarts={}\ncrash_restart_limit={}\nstop_timeout_secs={}\nrestart_delay_secs={}\nstart_delay_secs={}\nwatch={}\nwatch_delay_secs={}\ncluster_mode={}\ncluster_instances={:?}\nnamespace={:?}\ngit_repo={:?}\ngit_ref={:?}\npull_secret_hash={:?}\nreuse_port={}\nwait_ready={}\nready_timeout_secs={}\n",
         config.max_restarts,
         config.crash_restart_limit,
         config.stop_timeout_secs,
@@ -155,6 +166,7 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
         config.git_repo,
         config.git_ref,
         config.pull_secret_hash,
+        config.reuse_port,
         config.wait_ready,
         config.ready_timeout_secs
     ));
