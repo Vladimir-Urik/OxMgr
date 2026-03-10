@@ -1186,7 +1186,7 @@ fn e2e_pre_reload_cmd_runs_on_reload_windows() {
     }
 
     let marker_path_str = path_string(&marker_path);
-    let pre_cmd = format!("echo pre_reload> \"{marker_path_str}\"");
+    let pre_cmd = format!("echo pre_reload > {marker_path_str}");
 
     let start = env.run_vec(vec![
         "start".to_string(),
