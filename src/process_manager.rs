@@ -481,7 +481,10 @@ impl ProcessManager {
         };
         let trimmed = command_line.trim();
         if trimmed.is_empty() {
-            anyhow::bail!("pre_reload_cmd cannot be empty for process {}", process.name);
+            anyhow::bail!(
+                "pre_reload_cmd cannot be empty for process {}",
+                process.name
+            );
         }
 
         info!("running pre_reload_cmd for process {}", process.name);

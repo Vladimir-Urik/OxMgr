@@ -194,7 +194,7 @@ pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
         .spawn()
         .context("failed to spawn daemon")?;
 
-    for _ in 0..50 {
+    for _ in 0..100 {
         if daemon_socket_available(&config.daemon_addr).await {
             return Ok(());
         }
