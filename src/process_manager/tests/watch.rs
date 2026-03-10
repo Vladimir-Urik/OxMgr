@@ -84,6 +84,7 @@ async fn watch_delay_schedules_restart_until_due() {
         .start_process(StartProcessSpec {
             command: command_line(&fixture.command, &fixture.args),
             name: Some("api".to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 1,
             crash_restart_limit: 3,
@@ -105,6 +106,7 @@ async fn watch_delay_schedules_restart_until_due() {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         })

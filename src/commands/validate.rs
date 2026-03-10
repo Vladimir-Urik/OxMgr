@@ -84,6 +84,14 @@ fn validate_resolved_specs(specs: &[EcosystemProcessSpec]) -> Result<OxfileValid
                 anyhow::bail!("health command cannot be empty for app {:?}", spec.name);
             }
         }
+        if let Some(pre_reload_cmd) = &spec.pre_reload_cmd {
+            let pre_tokens = shell_words::split(pre_reload_cmd).with_context(|| {
+                format!("invalid pre_reload_cmd syntax: {}", pre_reload_cmd)
+            })?;
+            if pre_tokens.is_empty() {
+                anyhow::bail!("pre_reload_cmd cannot be empty for app {:?}", spec.name);
+            }
+        }
 
         if let Some(name) = &spec.name {
             if !named_apps.insert(name.clone()) {
@@ -523,6 +531,7 @@ mod tests {
         let unnamed = EcosystemProcessSpec {
             command: "echo unnamed".to_string(),
             name: None,
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::Never,
             max_restarts: 0,
             crash_restart_limit: 3,
@@ -544,6 +553,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             start_order: 0,
             depends_on: Vec::new(),
             instances: 1,
@@ -616,6 +626,7 @@ module.exports = {
         EcosystemProcessSpec {
             command: command.to_string(),
             name: Some(name.to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: 3,
@@ -642,6 +653,7 @@ module.exports = {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             start_order: 0,
             depends_on,
             instances,

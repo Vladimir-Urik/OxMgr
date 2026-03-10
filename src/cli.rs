@@ -224,6 +224,10 @@ pub struct StartCommand {
     pub cgroup_enforce: bool,
     #[arg(long = "deny-gpu", default_value_t = false)]
     pub deny_gpu: bool,
+    #[arg(long = "pre-reload-cmd")]
+    pub pre_reload_cmd: Option<String>,
+    #[arg(long = "reuse-port", default_value_t = false)]
+    pub reuse_port: bool,
     #[arg(long = "wait-ready", default_value_t = false)]
     pub wait_ready: bool,
     #[arg(long = "ready-timeout", default_value_t = 30)]

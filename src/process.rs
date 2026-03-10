@@ -138,6 +138,8 @@ pub struct ResourceLimits {
 pub struct StartProcessSpec {
     pub command: String,
     pub name: Option<String>,
+    #[serde(default)]
+    pub pre_reload_cmd: Option<String>,
     pub restart_policy: RestartPolicy,
     pub max_restarts: u32,
     #[serde(default = "default_crash_restart_limit")]
@@ -174,6 +176,8 @@ pub struct StartProcessSpec {
     #[serde(default)]
     pub pull_secret_hash: Option<String>,
     #[serde(default)]
+    pub reuse_port: bool,
+    #[serde(default)]
     pub wait_ready: bool,
     #[serde(default = "default_ready_timeout_secs")]
     pub ready_timeout_secs: u64,
@@ -190,6 +194,8 @@ pub struct ManagedProcess {
     pub name: String,
     pub command: String,
     pub args: Vec<String>,
+    #[serde(default)]
+    pub pre_reload_cmd: Option<String>,
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
     pub restart_policy: RestartPolicy,
@@ -207,6 +213,8 @@ pub struct ManagedProcess {
     pub git_ref: Option<String>,
     #[serde(default)]
     pub pull_secret_hash: Option<String>,
+    #[serde(default)]
+    pub reuse_port: bool,
     #[serde(default)]
     pub stop_signal: Option<String>,
     #[serde(default = "default_stop_timeout_secs")]
@@ -393,6 +401,7 @@ mod tests {
         let spec = StartProcessSpec {
             command: "node server.js --port 3000".to_string(),
             name: Some("api".to_string()),
+            pre_reload_cmd: Some("npm run build".to_string()),
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 5,
             crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
@@ -414,6 +423,7 @@ mod tests {
             git_repo: Some("https://example.com/repo.git".to_string()),
             git_ref: Some("main".to_string()),
             pull_secret_hash: Some("abc123".to_string()),
+            reuse_port: true,
             wait_ready: true,
             ready_timeout_secs: 45,
         };
@@ -427,6 +437,7 @@ mod tests {
         ];
         process.cwd = spec.cwd.clone();
         process.env = env;
+        process.pre_reload_cmd = spec.pre_reload_cmd.clone();
         process.max_restarts = spec.max_restarts;
         process.health_check = health_check;
         process.stop_timeout_secs = spec.stop_timeout_secs;
@@ -443,6 +454,7 @@ mod tests {
         process.git_repo = spec.git_repo.clone();
         process.git_ref = spec.git_ref.clone();
         process.pull_secret_hash = spec.pull_secret_hash.clone();
+        process.reuse_port = spec.reuse_port;
         process.wait_ready = spec.wait_ready;
         process.ready_timeout_secs = spec.ready_timeout_secs;
 
@@ -552,6 +564,7 @@ mod tests {
             name: "api".to_string(),
             command: "node".to_string(),
             args: vec!["server.js".to_string()],
+            pre_reload_cmd: None,
             cwd: None,
             env: HashMap::new(),
             restart_policy: RestartPolicy::OnFailure,
@@ -563,6 +576,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 5,
             restart_delay_secs: 0,
@@ -605,6 +619,7 @@ mod tests {
         StartProcessSpec {
             command: "node server.js".to_string(),
             name: Some("api".to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
@@ -626,6 +641,7 @@ mod tests {
             git_repo: None,
             git_ref: None,
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: default_ready_timeout_secs(),
         }

@@ -66,6 +66,7 @@ fn build_start_spec(args: StartCommand) -> Result<StartProcessSpec> {
     Ok(StartProcessSpec {
         command: args.command,
         name: args.name,
+        pre_reload_cmd: args.pre_reload_cmd,
         restart_policy: args.restart.into(),
         max_restarts: args.max_restarts,
         crash_restart_limit: args.crash_restart_limit,
@@ -87,6 +88,7 @@ fn build_start_spec(args: StartCommand) -> Result<StartProcessSpec> {
         git_repo: None,
         git_ref: None,
         pull_secret_hash: None,
+        reuse_port: args.reuse_port,
         wait_ready: args.wait_ready,
         ready_timeout_secs: args.ready_timeout.max(1),
     })

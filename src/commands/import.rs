@@ -310,6 +310,7 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
             result.push(StartProcessSpec {
                 command: spec.command.clone(),
                 name,
+                pre_reload_cmd: spec.pre_reload_cmd.clone(),
                 restart_policy: spec.restart_policy.clone(),
                 max_restarts: spec.max_restarts,
                 crash_restart_limit: spec.crash_restart_limit,
@@ -331,6 +332,7 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
                 git_repo: spec.git_repo.clone(),
                 git_ref: spec.git_ref.clone(),
                 pull_secret_hash: spec.pull_secret_hash.clone(),
+                reuse_port: spec.reuse_port,
                 wait_ready: spec.wait_ready,
                 ready_timeout_secs: spec.ready_timeout_secs,
             });
@@ -539,6 +541,7 @@ mod tests {
         let spec = crate::process::StartProcessSpec {
             command: "node api.js".to_string(),
             name: Some("api".to_string()),
+            pre_reload_cmd: None,
             restart_policy: RestartPolicy::OnFailure,
             max_restarts: 10,
             crash_restart_limit: 3,
@@ -560,6 +563,7 @@ mod tests {
             git_repo: Some("git@github.com:org/api.git".to_string()),
             git_ref: Some("main".to_string()),
             pull_secret_hash: None,
+            reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         };
@@ -568,6 +572,7 @@ mod tests {
             name: "api".to_string(),
             command: "node".to_string(),
             args: vec!["api.js".to_string()],
+            pre_reload_cmd: None,
             cwd: None,
             env: HashMap::new(),
             restart_policy: RestartPolicy::OnFailure,
@@ -579,6 +584,7 @@ mod tests {
             git_repo: spec.git_repo.clone(),
             git_ref: spec.git_ref.clone(),
             pull_secret_hash: None,
+            reuse_port: false,
             stop_signal: None,
             stop_timeout_secs: 5,
             restart_delay_secs: 0,

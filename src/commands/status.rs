@@ -93,6 +93,14 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
             "disabled"
         },
     );
+    print_field(
+        "Reuse Port",
+        if process.reuse_port {
+            "enabled"
+        } else {
+            "disabled"
+        },
+    );
     print_field("Health", ui::health_value(&process.health_status));
     print_field(
         "Wait Ready",
