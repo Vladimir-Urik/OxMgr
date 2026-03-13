@@ -12,11 +12,11 @@
     "status": "available",
     "total_downloads": 5
   },
-  "generated_at": "2026-03-12T07:12:51+00:00",
+  "generated_at": "2026-03-13T07:11:51+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 116,
+        "download_count": 117,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
@@ -65,7 +65,7 @@
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.7/oxmgr-v0.1.7-x86_64-pc-windows-msvc.zip"
         },
         {
-          "download_count": 3,
+          "download_count": 4,
           "kind": "linux_tarball",
           "label": "Linux tar.gz",
           "name": "oxmgr-v0.1.7-x86_64-unknown-linux-gnu.tar.gz",
@@ -81,14 +81,14 @@
       ],
       "counts": {
         "deb_package": 0,
-        "linux_tarball": 3,
+        "linux_tarball": 4,
         "mac_arm_tarball": 0,
         "mac_intel_tarball": 0,
         "other": 0,
         "windows_zip": 3
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.7",
-      "payload_downloads": 6,
+      "payload_downloads": 7,
       "published_at": "2026-03-10T10:45:22Z",
       "tag_name": "v0.1.7"
     },
@@ -118,7 +118,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.7/oxmgr-v0.1.7-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 3,
+            "download_count": 4,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.1.7-x86_64-unknown-linux-gnu.tar.gz",
@@ -134,14 +134,14 @@
         ],
         "counts": {
           "deb_package": 0,
-          "linux_tarball": 3,
+          "linux_tarball": 4,
           "mac_arm_tarball": 0,
           "mac_intel_tarball": 0,
           "other": 0,
           "windows_zip": 3
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.7",
-        "payload_downloads": 6,
+        "payload_downloads": 7,
         "published_at": "2026-03-10T10:45:22Z",
         "tag_name": "v0.1.7"
       },
@@ -1065,7 +1065,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 264
+    "total_payload_downloads": 265
   },
   "homebrew": {
     "formula": "oxmgr",
