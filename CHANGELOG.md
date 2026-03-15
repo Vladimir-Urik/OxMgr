@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.8 - 2026-03-15
+
+This release focuses on adding native Linux ARM64 support across the entire packaging and distribution ecosystem, alongside minor dependency updates.
+
+### Added
+
+- Added `aarch64-unknown-linux-gnu` (Linux ARM64) build target to the GitHub release workflow.
+- Added `arm64` Debian (`.deb`) package generation and APT repository publishing.
+- Added Linux ARM64 support to the npm wrapper installation script (`oxmgr`).
+- Added Linux ARM64 support to the Homebrew formula.
+- Added `aarch64` target metadata to the AUR package (`oxmgr-bin`).
+- Added Linux ARM64 tracking to the download metrics dashboard.
+
+### Dependencies
+
+- Bumped `sysinfo` from `0.38.3` to `0.38.4`.
+- Bumped `toml` from `1.0.4+spec-1.1.0` to `1.0.6+spec-1.1.0`.
+
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.7...v0.1.8
+
 ## v0.1.7 - 2026-03-10
 
 This release focuses on reload-time build hooks and best-effort reuse-port support for zero-downtime reloads.

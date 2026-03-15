@@ -13,6 +13,7 @@ The AUR package installs the published Linux release artifact instead of compili
    ```bash
    VERSION=0.1.6
    curl -fsSL "https://github.com/Vladimir-Urik/OxMgr/releases/download/v${VERSION}/oxmgr-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
+   curl -fsSL "https://github.com/Vladimir-Urik/OxMgr/releases/download/v${VERSION}/oxmgr-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256"
    curl -fsSL "https://raw.githubusercontent.com/Vladimir-Urik/OxMgr/v${VERSION}/LICENSE" | shasum -a 256
    ```
 
@@ -22,7 +23,8 @@ The AUR package installs the published Linux release artifact instead of compili
    ./scripts/generate_aur_pkgbuild.sh \
      Vladimir-Urik/OxMgr \
      "${VERSION}" \
-     <archive-sha256> \
+     <intel-sha256> \
+     <arm-sha256> \
      <license-sha256> \
      > packaging/aur/PKGBUILD
    ```

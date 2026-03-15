@@ -19,6 +19,7 @@ TIMEOUT_SECONDS = 30
 
 ASSET_LABELS = {
     "linux_tarball": "Linux tar.gz",
+    "linux_arm_tarball": "Linux arm64 tar.gz",
     "mac_intel_tarball": "macOS Intel tar.gz",
     "mac_arm_tarball": "macOS Apple Silicon tar.gz",
     "windows_zip": "Windows zip",
@@ -87,13 +88,15 @@ def is_payload_asset(name: str) -> bool:
 def classify_asset(name: str) -> str:
     if name.endswith("x86_64-unknown-linux-gnu.tar.gz"):
         return "linux_tarball"
+    if name.endswith("aarch64-unknown-linux-gnu.tar.gz"):
+        return "linux_arm_tarball"
     if name.endswith("x86_64-apple-darwin.tar.gz"):
         return "mac_intel_tarball"
     if name.endswith("aarch64-apple-darwin.tar.gz"):
         return "mac_arm_tarball"
     if name.endswith("x86_64-pc-windows-msvc.zip"):
         return "windows_zip"
-    if re.search(r"_amd64\.deb$", name):
+    if re.search(r"_(amd64|arm64)\.deb$", name):
         return "deb_package"
     return "other"
 
@@ -173,6 +176,7 @@ def fetch_github_metrics(repo: str) -> dict[str, object]:
         {"key": key, "label": ASSET_LABELS[key], "download_count": asset_totals[key]}
         for key in (
             "linux_tarball",
+            "linux_arm_tarball",
             "mac_intel_tarball",
             "mac_arm_tarball",
             "windows_zip",
@@ -308,7 +312,7 @@ def iso_to_display(value: str) -> str:
 
 
 def asset_notes(kind: str) -> str:
-    if kind in {"linux_tarball", "mac_intel_tarball", "mac_arm_tarball"}:
+    if kind in {"linux_tarball", "linux_arm_tarball", "mac_intel_tarball", "mac_arm_tarball"}:
         return "Shared by Homebrew, npm postinstall, and direct manual downloads."
     if kind == "windows_zip":
         return "Shared by Chocolatey, npm postinstall, and direct manual downloads."
@@ -362,7 +366,7 @@ def render_homebrew_panel(homebrew: dict[str, object], github_metrics: dict[str,
 
     artifact_rows = []
     for artifact in github_metrics["artifact_totals"]:
-        if artifact["key"] not in {"linux_tarball", "mac_intel_tarball", "mac_arm_tarball"}:
+        if artifact["key"] not in {"linux_tarball", "linux_arm_tarball", "mac_intel_tarball", "mac_arm_tarball"}:
             continue
         artifact_rows.append(
             f"""
@@ -469,6 +473,7 @@ def render_github_panel(github_metrics: dict[str, object]) -> str:
               <th><a href="{html.escape(release['html_url'])}">{html.escape(release['tag_name'])}</a></th>
               <td>{iso_to_display(str(release['published_at']))}</td>
               <td>{number(release['counts']['linux_tarball'])}</td>
+              <td>{number(release['counts']['linux_arm_tarball'])}</td>
               <td>{number(release['counts']['mac_intel_tarball'])}</td>
               <td>{number(release['counts']['mac_arm_tarball'])}</td>
               <td>{number(release['counts']['windows_zip'])}</td>
@@ -504,7 +509,8 @@ def render_github_panel(github_metrics: dict[str, object]) -> str:
           <tr>
             <th>Release</th>
             <th>Published</th>
-            <th>Linux</th>
+            <th>Linux Intel</th>
+            <th>Linux ARM</th>
             <th>macOS Intel</th>
             <th>macOS ARM</th>
             <th>Windows</th>

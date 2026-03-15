@@ -1,33 +1,51 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <deb_path> <repo_out_dir> <version>" >&2
+if [[ $# -lt 3 ]]; then
+  echo "usage: $0 <repo_out_dir> <version> <deb_path>..." >&2
   exit 1
 fi
 
-DEB_PATH="$1"
-REPO_OUT="$2"
-VERSION="$3"
+REPO_OUT="$1"
+VERSION="$2"
+shift 2
 
 POOL_DIR="${REPO_OUT}/pool/main/o/oxmgr"
-DIST_DIR="${REPO_OUT}/dists/stable/main/binary-amd64"
 
 rm -rf "${REPO_OUT}"
-mkdir -p "${POOL_DIR}" "${DIST_DIR}"
-cp "${DEB_PATH}" "${POOL_DIR}/"
+mkdir -p "${POOL_DIR}"
+
+for DEB_PATH in "$@"; do
+  cp "${DEB_PATH}" "${POOL_DIR}/"
+done
+
+# Collect architectures based on provided debs
+ARCHS=()
+for DEB_PATH in "$@"; do
+  ARCH=$(basename "${DEB_PATH}" .deb | awk -F'_' '{print $3}')
+  ARCHS+=("$ARCH")
+done
+
+# Remove duplicates
+ARCHS=($(printf "%s\n" "${ARCHS[@]}" | sort -u))
 
 (
   cd "${REPO_OUT}"
-  dpkg-scanpackages --multiversion pool > dists/stable/main/binary-amd64/Packages
-  gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+  for ARCH in "${ARCHS[@]}"; do
+    DIST_DIR="dists/stable/main/binary-${ARCH}"
+    mkdir -p "${DIST_DIR}"
+    dpkg-scanpackages --arch "${ARCH}" --multiversion pool > "${DIST_DIR}/Packages"
+    gzip -9c "${DIST_DIR}/Packages" > "${DIST_DIR}/Packages.gz"
+  done
+
+  ARCH_LIST=$(IFS=" " ; echo "${ARCHS[*]}")
 
   cat > dists/stable/Release <<RELEASE
 Origin: oxmgr
 Label: oxmgr
 Suite: stable
 Codename: stable
-Architectures: amd64
+Architectures: ${ARCH_LIST}
 Components: main
 Description: Oxmgr APT repository
 Version: ${VERSION}

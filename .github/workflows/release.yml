@@ -24,6 +24,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive_ext: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive_ext: tar.gz
@@ -88,12 +91,17 @@ jobs:
           "$hash  $asset" | Out-File -FilePath "$assetPath.sha256" -Encoding utf8NoBOM
 
       - name: Build Debian package
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && runner.os == 'Linux'
+        if: runner.os == 'Linux' && (matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu')
         shell: bash
         run: |
           set -euo pipefail
+          DEB_ARCH="amd64"
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            DEB_ARCH="arm64"
+          fi
+          
           DEB_ROOT="$RUNNER_TEMP/deb-root"
-          DEB_NAME="oxmgr_${VERSION}_amd64.deb"
+          DEB_NAME="oxmgr_${VERSION}_${DEB_ARCH}.deb"
 
           mkdir -p "$DEB_ROOT/DEBIAN" "$DEB_ROOT/usr/bin"
           install -m 0755 "target/${{ matrix.target }}/release/oxmgr" "$DEB_ROOT/usr/bin/oxmgr"
@@ -103,7 +111,7 @@ jobs:
           Version: ${VERSION}
           Section: utils
           Priority: optional
-          Architecture: amd64
+          Architecture: ${DEB_ARCH}
           Maintainer: Oxmgr Contributors <maintainers@example.com>
           Description: Oxmgr lightweight process manager
           CONTROL
@@ -122,13 +130,13 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Debian artifact
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && runner.os == 'Linux'
+        if: runner.os == 'Linux' && (matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu')
         uses: actions/upload-artifact@v4
         with:
-          name: release-deb
+          name: release-deb-${{ matrix.target }}
           path: |
-            ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_amd64.deb
-            ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_amd64.deb.sha256
+            ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_*.deb
+            ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_*.deb.sha256
           if-no-files-found: error
 
   release:
@@ -252,15 +260,18 @@ jobs:
           VERSION="${TAG#v}"
           REPO="${GITHUB_REPOSITORY}"
 
-          LINUX_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          LINUX_INTEL_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          LINUX_ARM_ASSET="oxmgr-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
           MAC_INTEL_ASSET="oxmgr-${TAG}-x86_64-apple-darwin.tar.gz"
           MAC_ARM_ASSET="oxmgr-${TAG}-aarch64-apple-darwin.tar.gz"
 
-          LINUX_SHA=$(awk '$2=="'"$LINUX_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
+          LINUX_INTEL_SHA=$(awk '$2=="'"$LINUX_INTEL_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
+          LINUX_ARM_SHA=$(awk '$2=="'"$LINUX_ARM_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
           MAC_INTEL_SHA=$(awk '$2=="'"$MAC_INTEL_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
           MAC_ARM_SHA=$(awk '$2=="'"$MAC_ARM_ASSET"'" {print $1}' release-assets/*.sha256 | head -n1)
 
-          LINUX_URL="https://github.com/${REPO}/releases/download/${TAG}/${LINUX_ASSET}"
+          LINUX_INTEL_URL="https://github.com/${REPO}/releases/download/${TAG}/${LINUX_INTEL_ASSET}"
+          LINUX_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/${LINUX_ARM_ASSET}"
           MAC_INTEL_URL="https://github.com/${REPO}/releases/download/${TAG}/${MAC_INTEL_ASSET}"
           MAC_ARM_URL="https://github.com/${REPO}/releases/download/${TAG}/${MAC_ARM_ASSET}"
 
@@ -269,7 +280,8 @@ jobs:
 
           ./scripts/generate_homebrew_formula.sh \
             "$REPO" \
-            "$LINUX_URL" "$LINUX_SHA" \
+            "$LINUX_INTEL_URL" "$LINUX_INTEL_SHA" \
+            "$LINUX_ARM_URL" "$LINUX_ARM_SHA" \
             "$MAC_INTEL_URL" "$MAC_INTEL_SHA" \
             "$MAC_ARM_URL" "$MAC_ARM_SHA" \
             > tap/Formula/oxmgr.rb
@@ -443,11 +455,14 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           REPO="${GITHUB_REPOSITORY}"
-          LINUX_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          LINUX_INTEL_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          LINUX_ARM_ASSET="oxmgr-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
 
-          ARCHIVE_SHA=$(grep -h -F "${LINUX_ASSET}" release-assets/*.sha256 | head -n1 | awk '{print $1}' | tr -d '\r' || true)
-          if [[ -z "${ARCHIVE_SHA}" ]]; then
-            echo "missing SHA256 for ${LINUX_ASSET}" >&2
+          INTEL_SHA=$(grep -h -F "${LINUX_INTEL_ASSET}" release-assets/*.sha256 | head -n1 | awk '{print $1}' | tr -d '\r' || true)
+          ARM_SHA=$(grep -h -F "${LINUX_ARM_ASSET}" release-assets/*.sha256 | head -n1 | awk '{print $1}' | tr -d '\r' || true)
+
+          if [[ -z "${INTEL_SHA}" ]] || [[ -z "${ARM_SHA}" ]]; then
+            echo "missing SHA256 for linux archives" >&2
             exit 1
           fi
 
@@ -456,14 +471,16 @@ jobs:
           bash scripts/generate_aur_pkgbuild.sh \
             "$REPO" \
             "$VERSION" \
-            "$ARCHIVE_SHA" \
+            "$INTEL_SHA" \
+            "$ARM_SHA" \
             "$LICENSE_SHA" \
             > packaging/aur/PKGBUILD
 
           bash scripts/generate_aur_srcinfo.sh \
             "$REPO" \
             "$VERSION" \
-            "$ARCHIVE_SHA" \
+            "$INTEL_SHA" \
+            "$ARM_SHA" \
             "$LICENSE_SHA" \
             > packaging/aur/.SRCINFO
 
@@ -510,9 +527,8 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          DEB_PATH="release-assets/oxmgr_${VERSION}_amd64.deb"
-
-          ./scripts/build_apt_repo.sh "$DEB_PATH" apt-repo "$VERSION"
+          
+          ./scripts/build_apt_repo.sh apt-repo "$VERSION" release-assets/oxmgr_${VERSION}_*.deb
           sed -i "s|REPLACE_ME|${GITHUB_REPOSITORY_OWNER}.github.io/${REPO_NAME}/apt|g" apt-repo/index.html
 
       - name: Sign APT repository metadata
