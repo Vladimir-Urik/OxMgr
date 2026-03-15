@@ -26,8 +26,10 @@ popd >/dev/null
 
 FORMULA_OUTPUT="$("$ROOT_DIR/scripts/generate_homebrew_formula.sh" \
   "example/oxmgr" \
-  "https://example.com/linux.tar.gz" \
-  "linuxsha" \
+  "https://example.com/linux-intel.tar.gz" \
+  "linuxintelsha" \
+  "https://example.com/linux-arm.tar.gz" \
+  "linuxarmsha" \
   "https://example.com/macos-intel.tar.gz" \
   "macintelsha" \
   "https://example.com/macos-arm.tar.gz" \
