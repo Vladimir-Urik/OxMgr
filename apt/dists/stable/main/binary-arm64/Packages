@@ -1,0 +1,13 @@
+Package: oxmgr
+Version: 0.1.8
+Architecture: arm64
+Maintainer: Oxmgr Contributors <maintainers@example.com>
+Filename: pool/main/o/oxmgr/oxmgr_0.1.8_arm64.deb
+Size: 1358308
+MD5sum: 4cc5c29a0757876f87ccd0086e5dbebd
+SHA1: 531b88e2861c2fe79ef760085db7ff0f195661c7
+SHA256: cc47afaf0fe0d80d117c2dfe6d971d13349e16fa508f9ee0436c28153bfef5b2
+Section: utils
+Priority: optional
+Description: Oxmgr lightweight process manager
+
