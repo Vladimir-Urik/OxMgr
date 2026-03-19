@@ -136,6 +136,7 @@ Useful links:
 ## Documentation
 
 - [Documentation Index](./docs/README.md)
+- [AI Skill Reference (experimental)](./docs/SKILL.md) — drop this into your project so your AI assistant (Claude, Cursor, Codex, …) knows how to help you configure and use Oxmgr
 - [Latest Benchmark Results](./BENCHMARK.md)
 - [Latest Benchmark JSON](./benchmark.json)
 - [Architecture Overview](./docs/ARCHITECTURE.md)
