@@ -115,6 +115,8 @@ struct OxDefaults {
     reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
+    log_date_format: Option<String>,
+    cron_restart: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -155,6 +157,8 @@ struct OxApp {
     reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
+    log_date_format: Option<String>,
+    cron_restart: Option<String>,
     profiles: Option<HashMap<String, OxProfile>>,
     disabled: Option<bool>,
 }
@@ -195,6 +199,8 @@ struct OxProfile {
     reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
+    log_date_format: Option<String>,
+    cron_restart: Option<String>,
     disabled: Option<bool>,
 }
 
@@ -229,6 +235,8 @@ struct Resolved {
     resource_limits: Option<ResourceLimits>,
     wait_ready: bool,
     ready_timeout_secs: u64,
+    log_date_format: Option<String>,
+    cron_restart: Option<String>,
     disabled: bool,
 }
 
@@ -301,6 +309,10 @@ struct OxAppOut {
     wait_ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ready_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    log_date_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cron_restart: Option<String>,
 }
 
 /// Loads an `oxfile.toml`, applies defaults and optional profile overrides,
@@ -356,6 +368,8 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             instance_var: resolved.instance_var,
             wait_ready: resolved.wait_ready,
             ready_timeout_secs: resolved.ready_timeout_secs,
+            log_date_format: resolved.log_date_format,
+            cron_restart: resolved.cron_restart,
         });
     }
 
@@ -475,6 +489,14 @@ fn resolve_app(
             .or(defaults.ready_timeout_secs)
             .unwrap_or(30)
             .max(1),
+        log_date_format: app
+            .log_date_format
+            .clone()
+            .or_else(|| defaults.log_date_format.clone()),
+        cron_restart: app
+            .cron_restart
+            .clone()
+            .or_else(|| defaults.cron_restart.clone()),
         disabled: app.disabled.unwrap_or(false),
     };
 
@@ -644,6 +666,12 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     if let Some(ready_timeout_secs) = profile.ready_timeout_secs {
         resolved.ready_timeout_secs = ready_timeout_secs.max(1);
     }
+    if let Some(log_date_format) = &profile.log_date_format {
+        resolved.log_date_format = Some(log_date_format.clone());
+    }
+    if let Some(cron_restart) = &profile.cron_restart {
+        resolved.cron_restart = Some(cron_restart.clone());
+    }
     Ok(())
 }
 
@@ -788,6 +816,8 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             reuse_port: spec.reuse_port,
             wait_ready: spec.wait_ready.then_some(true),
             ready_timeout_secs: spec.wait_ready.then_some(spec.ready_timeout_secs),
+            log_date_format: spec.log_date_format.clone(),
+            cron_restart: spec.cron_restart.clone(),
         });
     }
 
@@ -923,6 +953,8 @@ NODE_ENV = "production"
             instance_var: Some("INSTANCE_ID".to_string()),
             wait_ready: true,
             ready_timeout_secs: 45,
+            log_date_format: None,
+            cron_restart: None,
         }];
 
         write_from_specs(&path, &specs).expect("failed to write oxfile");

@@ -22,6 +22,7 @@ use crate::process::{
     RestartPolicy, StartProcessSpec,
 };
 
+mod cron;
 mod git;
 mod lifecycle;
 mod restart;
@@ -82,6 +83,9 @@ fn fixture_process() -> ManagedProcess {
         last_started_at: Some(now_epoch_secs()),
         last_stopped_at: None,
         config_fingerprint: String::new(),
+        log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+        cron_restart: None,
+        next_cron_restart: None,
     }
 }
 

@@ -37,6 +37,8 @@ impl ManagedProcess {
             reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
+            log_date_format: self.log_date_format.as_deref(),
+            cron_restart: self.cron_restart.as_deref(),
         })
     }
 
@@ -93,6 +95,8 @@ impl StartProcessSpec {
             reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
+            log_date_format: self.log_date_format.as_deref(),
+            cron_restart: self.cron_restart.as_deref(),
         })
     }
 }
@@ -125,6 +129,8 @@ struct ProcessConfigRef<'a> {
     reuse_port: bool,
     wait_ready: bool,
     ready_timeout_secs: u64,
+    log_date_format: Option<&'a str>,
+    cron_restart: Option<&'a str>,
 }
 
 fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
@@ -219,6 +225,16 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
             "{:?}|{:?}|{}|{}",
             limits.max_memory_mb, limits.max_cpu_percent, limits.cgroup_enforce, limits.deny_gpu
         ));
+    }
+    payload.push('\n');
+    payload.push_str("log_date_format=");
+    if let Some(fmt) = config.log_date_format {
+        payload.push_str(fmt);
+    }
+    payload.push('\n');
+    payload.push_str("cron_restart=");
+    if let Some(cron) = config.cron_restart {
+        payload.push_str(cron);
     }
 
     format!("{:x}", Sha256::digest(payload.as_bytes()))

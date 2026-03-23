@@ -181,6 +181,10 @@ pub struct StartProcessSpec {
     pub wait_ready: bool,
     #[serde(default = "default_ready_timeout_secs")]
     pub ready_timeout_secs: u64,
+    #[serde(default)]
+    pub log_date_format: Option<String>,
+    #[serde(default)]
+    pub cron_restart: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +283,12 @@ pub struct ManagedProcess {
     pub last_stopped_at: Option<u64>,
     #[serde(default)]
     pub config_fingerprint: String,
+    #[serde(default)]
+    pub log_date_format: Option<String>,
+    #[serde(default)]
+    pub cron_restart: Option<String>,
+    #[serde(skip)]
+    pub next_cron_restart: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -426,6 +436,8 @@ mod tests {
             reuse_port: true,
             wait_ready: true,
             ready_timeout_secs: 45,
+            log_date_format: None,
+            cron_restart: None,
         };
 
         let mut process = fixture_process();
@@ -457,6 +469,8 @@ mod tests {
         process.reuse_port = spec.reuse_port;
         process.wait_ready = spec.wait_ready;
         process.ready_timeout_secs = spec.ready_timeout_secs;
+        process.log_date_format = spec.log_date_format.clone();
+        process.cron_restart = spec.cron_restart.clone();
 
         assert_eq!(spec.config_fingerprint(), process.config_fingerprint());
     }
@@ -612,6 +626,9 @@ mod tests {
             last_started_at: None,
             last_stopped_at: None,
             config_fingerprint: String::new(),
+            log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            cron_restart: None,
+            next_cron_restart: None,
         }
     }
 
@@ -644,6 +661,8 @@ mod tests {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         }
     }
 }

@@ -7,7 +7,11 @@ use std::process::Stdio;
 use std::time::{Duration, Instant as StdInstant};
 
 use anyhow::{Context, Result};
+use chrono::Local;
+use cron::Schedule;
 use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
+use std::str::FromStr;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, Instant as TokioInstant};
@@ -53,6 +57,96 @@ mod restart;
 mod runtime;
 mod spawn;
 mod watch;
+
+/// Forwards stdout output from a process to a log file, prefixing each line with a formatted timestamp.
+fn forward_logs_with_date_prefix_stdout(
+    pipe: tokio::process::ChildStdout,
+    log_path: std::path::PathBuf,
+    date_format: String,
+) {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(pipe);
+        let mut buffer = String::new();
+
+        loop {
+            buffer.clear();
+            match reader.read_line(&mut buffer).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let now = Local::now();
+                    let formatted_line = match now.format(&date_format).to_string() {
+                        formatted => format!("{}: {}", formatted, buffer),
+                    };
+
+                    if let Ok(mut file) = tokio::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                        .await
+                    {
+                        let _ = AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+/// Forwards stderr output from a process to a log file, prefixing each line with a formatted timestamp.
+fn forward_logs_with_date_prefix_stderr(
+    pipe: tokio::process::ChildStderr,
+    log_path: std::path::PathBuf,
+    date_format: String,
+) {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(pipe);
+        let mut buffer = String::new();
+
+        loop {
+            buffer.clear();
+            match reader.read_line(&mut buffer).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let now = Local::now();
+                    let formatted_line = match now.format(&date_format).to_string() {
+                        formatted => format!("{}: {}", formatted, buffer),
+                    };
+
+                    if let Ok(mut file) = tokio::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&log_path)
+                        .await
+                    {
+                        let _ = AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+/// Validates a cron expression string and returns the next execution time (epoch seconds).
+/// Returns an error if the cron expression is invalid.
+pub(crate) fn calculate_next_cron_restart(cron_expr: &str, from_time: Option<u64>) -> Result<u64> {
+    let schedule = Schedule::from_str(cron_expr)
+        .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", cron_expr, e))?;
+
+    let now = if let Some(timestamp) = from_time {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp as i64, 0)
+            .ok_or_else(|| anyhow::anyhow!("invalid timestamp"))?
+    } else {
+        chrono::Utc::now()
+    };
+
+    schedule
+        .after(&now)
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no next execution time for cron expression '{}'", cron_expr))
+        .map(|dt| dt.timestamp() as u64)
+}
 
 /// Coordinates process lifecycle operations for one local Oxmgr daemon.
 pub struct ProcessManager {
@@ -163,6 +257,21 @@ impl ProcessManager {
                 .health_check
                 .as_ref()
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
+
+            // Initialize next cron restart if configured
+            if let Some(cron_expr) = &process.cron_restart {
+                match calculate_next_cron_restart(cron_expr, Some(now_epoch_secs())) {
+                    Ok(next_restart) => {
+                        process.next_cron_restart = Some(next_restart);
+                    }
+                    Err(err) => {
+                        warn!(
+                            "failed to calculate next cron restart for process {}: {}",
+                            process.name, err
+                        );
+                    }
+                }
+            }
         }
         self.watch_fingerprints.clear();
         self.pending_watch_restarts.clear();
@@ -184,6 +293,7 @@ impl ProcessManager {
     /// Runs the daemon's periodic maintenance tasks.
     pub async fn run_periodic_tasks(&mut self) -> Result<()> {
         self.run_scheduled_restarts().await?;
+        self.run_cron_restarts().await?;
         self.run_due_watch_restarts().await?;
         self.refresh_resource_metrics();
         self.run_resource_limit_checks().await?;
@@ -221,6 +331,8 @@ impl ProcessManager {
             reuse_port,
             wait_ready,
             ready_timeout_secs,
+            log_date_format,
+            cron_restart,
         } = spec;
 
         let (command, args) = parse_command_line(&command_line)?;
@@ -293,6 +405,9 @@ impl ProcessManager {
             last_started_at: Some(now_epoch_secs()),
             last_stopped_at: None,
             config_fingerprint: String::new(),
+            log_date_format,
+            cron_restart,
+            next_cron_restart: None,
         };
         process.refresh_config_fingerprint();
 
@@ -307,6 +422,21 @@ impl ProcessManager {
             .health_check
             .as_ref()
             .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
+
+        // Initialize next cron restart time if configured
+        if let Some(cron_expr) = &process.cron_restart {
+            match calculate_next_cron_restart(cron_expr, Some(now_epoch_secs())) {
+                Ok(next_restart) => {
+                    process.next_cron_restart = Some(next_restart);
+                }
+                Err(err) => {
+                    warn!(
+                        "failed to calculate next cron restart for process {}: {}",
+                        process.name, err
+                    );
+                }
+            }
+        }
 
         info!(
             "started process {} with pid {}",
@@ -973,12 +1103,12 @@ impl ProcessManager {
         );
     }
 
+
     async fn spawn_child(&self, process: &mut ManagedProcess) -> Result<u32> {
         let logs = ProcessLogs {
             stdout: process.stdout_log.clone(),
             stderr: process.stderr_log.clone(),
         };
-        let (stdout, stderr) = open_log_writers(&logs, self.config.log_rotation)?;
         let spawn = resolve_spawn_program(process, &self.config.base_dir)?;
 
         let mut command = Command::new(&spawn.program);
@@ -995,11 +1125,15 @@ impl ProcessManager {
                 });
             }
         }
-        command
-            .args(&spawn.args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr));
+        command.args(&spawn.args).stdin(Stdio::null());
+
+        // Handle log formatting if date format is configured
+        if process.log_date_format.is_some() {
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        } else {
+            let (stdout, stderr) = open_log_writers(&logs, self.config.log_rotation)?;
+            command.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+        }
 
         if let Some(cwd) = &process.cwd {
             command.current_dir(cwd);
@@ -1040,6 +1174,20 @@ impl ProcessManager {
             .spawn()
             .with_context(|| format!("failed to spawn {}", process.command))?;
         let pid = child.id().context("spawned child has no pid")?;
+
+        // Handle log forwarding with date formatting if configured
+        if let Some(date_format) = &process.log_date_format {
+            if let Some(stdout) = child.stdout.take() {
+                let stdout_path = logs.stdout.clone();
+                let date_fmt = date_format.clone();
+                forward_logs_with_date_prefix_stdout(stdout, stdout_path, date_fmt);
+            }
+            if let Some(stderr) = child.stderr.take() {
+                let stderr_path = logs.stderr.clone();
+                let date_fmt = date_format.clone();
+                forward_logs_with_date_prefix_stderr(stderr, stderr_path, date_fmt);
+            }
+        }
         process.cgroup_path = None;
         if let Some(limits) = process.resource_limits.as_ref() {
             match cgroup::apply_limits(&process.name, process.id, pid, limits) {
@@ -1153,6 +1301,63 @@ impl ProcessManager {
         Ok(())
     }
 
+    async fn run_cron_restarts(&mut self) -> Result<()> {
+        let now_secs = now_epoch_secs();
+        let mut due: Vec<String> = self
+            .processes
+            .iter()
+            .filter(|(_, process)| {
+                process.cron_restart.is_some()
+                    && process.next_cron_restart.is_some()
+                    && process.next_cron_restart.unwrap() <= now_secs
+                    && process.status == ProcessStatus::Running
+                    && process.desired_state == DesiredState::Running
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        due.sort();
+
+        for name in due {
+            let Some(process) = self.processes.get(&name).cloned() else {
+                continue;
+            };
+
+            info!("triggering cron-scheduled restart for process {}", name);
+
+            match self.restart_process_internal(&name, false).await {
+                Ok(_) => {
+                    if let Some(p) = self.processes.get_mut(&name) {
+                        p.restart_count = process.restart_count.saturating_add(1);
+                        p.last_health_error = Some("cron-scheduled restart".to_string());
+
+                        // Calculate next cron restart
+                        if let Some(cron_expr) = &p.cron_restart.clone() {
+                            match calculate_next_cron_restart(cron_expr, Some(now_secs)) {
+                                Ok(next_restart) => {
+                                    p.next_cron_restart = Some(next_restart);
+                                }
+                                Err(err) => {
+                                    warn!("failed to calculate next cron restart for {}: {}", name, err);
+                                }
+                            }
+                        }
+                    }
+                    self.save()?;
+                }
+                Err(err) => {
+                    error!("cron restart failed for process {}: {}", name, err);
+                    if let Some(process) = self.processes.get_mut(&name) {
+                        process.status = ProcessStatus::Errored;
+                        process.last_health_error = Some(format!("cron restart failed: {err}"));
+                    }
+                    self.save()?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     async fn run_due_watch_restarts(&mut self) -> Result<()> {
         let now = TokioInstant::now();
         let mut due: Vec<(String, PendingWatchRestart)> = self
@@ -1211,6 +1416,17 @@ impl ProcessManager {
     }
 
     pub(crate) fn next_scheduled_restart_at(&self) -> Option<TokioInstant> {
+        let now_secs = now_epoch_secs();
+        let cron_restarts = self
+            .processes
+            .values()
+            .filter_map(|process| process.next_cron_restart)
+            .filter(|&next_restart| next_restart >= now_secs)
+            .map(|next_restart| {
+                let secs_from_now = next_restart.saturating_sub(now_secs);
+                TokioInstant::now() + Duration::from_secs(secs_from_now)
+            });
+
         self.scheduled_restarts
             .values()
             .copied()
@@ -1219,6 +1435,7 @@ impl ProcessManager {
                     .values()
                     .map(|state| state.due_at),
             )
+            .chain(cron_restarts)
             .min()
     }
 

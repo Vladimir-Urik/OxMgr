@@ -559,6 +559,8 @@ mod tests {
             instance_var: None,
             wait_ready: false,
             ready_timeout_secs: 30,
+            log_date_format: None,
+            cron_restart: None,
         };
         let named = fixture_spec("api", "node server.js", vec![], 1);
 
@@ -659,6 +661,8 @@ module.exports = {
             instance_var: Some("INSTANCE_ID".to_string()),
             wait_ready: false,
             ready_timeout_secs: 30,
+            log_date_format: None,
+            cron_restart: None,
         }
     }
 

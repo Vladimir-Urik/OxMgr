@@ -257,6 +257,8 @@ async fn reload_process_keeps_existing_pid_when_replacement_fails_readiness() {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         })
         .await
         .expect("initial process should start");
@@ -336,6 +338,8 @@ async fn reload_process_replaces_pid_when_replacement_becomes_ready() {
             reuse_port: false,
             wait_ready: true,
             ready_timeout_secs: 2,
+            log_date_format: None,
+            cron_restart: None,
         })
         .await
         .expect("initial process should start");

@@ -827,6 +827,9 @@ mod tests {
             memory_bytes: 0,
             cpu_percent: 0.0,
             config_fingerprint: String::new(),
+            log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            cron_restart: None,
+            next_cron_restart: None,
         }
     }
 }

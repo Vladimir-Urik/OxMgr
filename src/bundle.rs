@@ -90,6 +90,10 @@ struct BundleService {
     wait_ready: bool,
     #[serde(default = "crate::process::default_ready_timeout_secs")]
     ready_timeout_secs: u64,
+    #[serde(default)]
+    log_date_format: Option<String>,
+    #[serde(default)]
+    cron_restart: Option<String>,
 }
 
 /// Returns a filesystem-friendly default file name for a process bundle.
@@ -320,6 +324,8 @@ impl BundleService {
             reuse_port: process.reuse_port,
             wait_ready: process.wait_ready,
             ready_timeout_secs: process.ready_timeout_secs,
+            log_date_format: process.log_date_format.clone(),
+            cron_restart: process.cron_restart.clone(),
         }
     }
 
@@ -356,6 +362,8 @@ impl BundleService {
             reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs.max(1),
+            log_date_format: self.log_date_format,
+            cron_restart: self.cron_restart,
         }
     }
 }
@@ -592,6 +600,8 @@ mod tests {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         };
 
         let err = super::validate_service(&payload).expect_err("expected validation error");
@@ -632,6 +642,8 @@ mod tests {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         };
 
         let err = super::validate_service(&payload).expect_err("expected hash validation error");
@@ -698,6 +710,9 @@ mod tests {
             last_started_at: None,
             last_stopped_at: None,
             config_fingerprint: String::new(),
+            log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            cron_restart: None,
+            next_cron_restart: None,
         }
     }
 }

@@ -780,6 +780,8 @@ mod tests {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         };
 
         manager
@@ -847,6 +849,8 @@ mod tests {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         };
 
         manager
@@ -1033,6 +1037,9 @@ mod tests {
             last_started_at: Some(1_700_000_000),
             last_stopped_at: None,
             config_fingerprint: "fixture-fingerprint".to_string(),
+            log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            cron_restart: None,
+            next_cron_restart: None,
         }
     }
 }

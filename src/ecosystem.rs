@@ -52,6 +52,8 @@ pub struct EcosystemProcessSpec {
     pub instance_var: Option<String>,
     pub wait_ready: bool,
     pub ready_timeout_secs: u64,
+    pub log_date_format: Option<String>,
+    pub cron_restart: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +109,8 @@ struct EcosystemApp {
     deny_gpu: Option<bool>,
     wait_ready: Option<bool>,
     listen_timeout: Option<u64>,
+    log_date_format: Option<String>,
+    cron_restart: Option<String>,
     #[serde(flatten)]
     extra: HashMap<String, Value>,
 }
@@ -172,6 +176,8 @@ struct ResolvedSettings {
     instance_var: Option<String>,
     wait_ready: bool,
     ready_timeout_secs: u64,
+    log_date_format: Option<String>,
+    cron_restart: Option<String>,
 }
 
 /// Loads a PM2-style ecosystem file and normalises it into Oxmgr process
@@ -273,6 +279,8 @@ impl EcosystemApp {
             instance_var: self.instance_var,
             wait_ready: self.wait_ready.unwrap_or(false),
             ready_timeout_secs: millis_to_secs_ceil(self.listen_timeout.unwrap_or(30_000)).max(1),
+            log_date_format: self.log_date_format,
+            cron_restart: self.cron_restart,
         };
 
         if let Some(profile_name) = profile {
@@ -315,6 +323,8 @@ impl EcosystemApp {
             instance_var: settings.instance_var,
             wait_ready: settings.wait_ready,
             ready_timeout_secs: settings.ready_timeout_secs,
+            log_date_format: settings.log_date_format,
+            cron_restart: settings.cron_restart,
         })
     }
 

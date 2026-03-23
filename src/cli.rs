@@ -232,6 +232,10 @@ pub struct StartCommand {
     pub wait_ready: bool,
     #[arg(long = "ready-timeout", default_value_t = 30)]
     pub ready_timeout: u64,
+    #[arg(long = "log-date-format", default_value = "%Y-%m-%d %H:%M:%S")]
+    pub log_date_format: Option<String>,
+    #[arg(long = "cron-restart")]
+    pub cron_restart: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]

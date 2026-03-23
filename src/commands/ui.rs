@@ -1290,6 +1290,8 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         reuse_port: false,
         wait_ready: false,
         ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+        log_date_format: None,
+        cron_restart: None,
     };
 
     match send_request(

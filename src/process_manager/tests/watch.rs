@@ -109,6 +109,8 @@ async fn watch_delay_schedules_restart_until_due() {
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
+            log_date_format: None,
+            cron_restart: None,
         })
         .await
         .expect("initial process should start");
