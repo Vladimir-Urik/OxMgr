@@ -62,6 +62,8 @@ Common options:
 - `--deny-gpu`
 - `--pre-reload-cmd <command>`
 - `--reuse-port` (best-effort hint for SO_REUSEPORT on macOS/Linux)
+- `--log-date-format <format>` (e.g., `"%Y-%m-%d %H:%M:%S"` to prefix each log line with a timestamp)
+- `--cron-restart <expression>` (6-field cron expression for scheduled restarts; e.g., `"0 0 2 * * *"` for daily at 2 AM)
 
 Cluster mode notes:
 

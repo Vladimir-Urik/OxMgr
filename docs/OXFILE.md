@@ -156,6 +156,8 @@ Details:
 - `git_repo`: git remote URL for `oxmgr pull`
 - `git_ref`: optional branch/tag/ref for `oxmgr pull`
 - `pull_secret`: secret used by webhook endpoint `POST /pull/<name|id>`
+- `log_date_format`: date format string (e.g., `"%Y-%m-%d %H:%M:%S"`) to prefix each log line
+- `cron_restart`: cron expression (6-field: `"second minute hour day month dayofweek"`) for scheduled restarts
 
 ### `[[apps]]` fields
 
@@ -286,6 +288,57 @@ Behavior:
 - Webhook endpoint: `POST /pull/<name|id>` with header `X-Oxmgr-Secret: <pull_secret>`.
 - Metrics endpoint: `GET /metrics` on the same daemon HTTP bind address.
 - Daemon HTTP bind address can be set with `OXMGR_API_ADDR`.
+
+## Log Date Formatting
+
+Prefix each log line with a formatted timestamp (PM2-compatible):
+
+```toml
+log_date_format = "%Y-%m-%d %H:%M:%S"
+```
+
+Behavior:
+
+- uses [Chrono date format syntax](https://docs.rs/chrono/latest/chrono/format/strftime/)
+- each line of stdout/stderr gets the timestamp prepended
+- default is ISO 8601 datetime: `"%Y-%m-%d %H:%M:%S"`
+- useful for correlating logs across processes without centralized logging
+
+Example output:
+```
+2024-01-15 10:30:45: Server listening on port 3000
+2024-01-15 10:30:46: Database connected
+```
+
+## Scheduled Restarts (Cron)
+
+Restart processes on a cron schedule without daemon restart:
+
+```toml
+cron_restart = "0 0 2 * * *"
+```
+
+Cron expression format (6 fields):
+
+```
+second minute hour day month dayofweek
+```
+
+Examples:
+
+```toml
+cron_restart = "0 0 2 * * *"      # Daily at 2:00 AM
+cron_restart = "0 0 */6 * * *"    # Every 6 hours (00:00, 06:00, 12:00, 18:00)
+cron_restart = "0 * * * * *"      # Every hour
+cron_restart = "0 30 9 * * 1-5"   # Weekdays at 9:30 AM
+```
+
+Behavior:
+
+- daemon calculates the next restart time at startup and after each restart
+- restarts happen automatically without manual intervention
+- respects the same restart policies and crash limits as manual restarts
+- useful for periodic refreshes, memory cleanup, or maintenance windows
 
 ## Dependencies and Start Ordering
 
