@@ -12,11 +12,11 @@
     "status": "available",
     "total_downloads": 5
   },
-  "generated_at": "2026-03-23T07:38:52+00:00",
+  "generated_at": "2026-03-24T07:18:43+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 121,
+        "download_count": 124,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
@@ -36,7 +36,7 @@
         "label": "macOS Apple Silicon tar.gz"
       },
       {
-        "download_count": 78,
+        "download_count": 79,
         "key": "windows_zip",
         "label": "Windows zip"
       },
@@ -70,14 +70,14 @@
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-apple-darwin.tar.gz"
         },
         {
-          "download_count": 4,
+          "download_count": 5,
           "kind": "windows_zip",
           "label": "Windows zip",
           "name": "oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip",
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip"
         },
         {
-          "download_count": 4,
+          "download_count": 7,
           "kind": "linux_tarball",
           "label": "Linux tar.gz",
           "name": "oxmgr-v0.1.8-x86_64-unknown-linux-gnu.tar.gz",
@@ -101,14 +101,14 @@
       "counts": {
         "deb_package": 0,
         "linux_arm_tarball": 0,
-        "linux_tarball": 4,
+        "linux_tarball": 7,
         "mac_arm_tarball": 1,
         "mac_intel_tarball": 0,
         "other": 0,
-        "windows_zip": 4
+        "windows_zip": 5
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-      "payload_downloads": 9,
+      "payload_downloads": 13,
       "published_at": "2026-03-15T13:25:40Z",
       "tag_name": "v0.1.8"
     },
@@ -138,14 +138,14 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-apple-darwin.tar.gz"
           },
           {
-            "download_count": 4,
+            "download_count": 5,
             "kind": "windows_zip",
             "label": "Windows zip",
             "name": "oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip",
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 4,
+            "download_count": 7,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.1.8-x86_64-unknown-linux-gnu.tar.gz",
@@ -169,14 +169,14 @@
         "counts": {
           "deb_package": 0,
           "linux_arm_tarball": 0,
-          "linux_tarball": 4,
+          "linux_tarball": 7,
           "mac_arm_tarball": 1,
           "mac_intel_tarball": 0,
           "other": 0,
-          "windows_zip": 4
+          "windows_zip": 5
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-        "payload_downloads": 9,
+        "payload_downloads": 13,
         "published_at": "2026-03-15T13:25:40Z",
         "tag_name": "v0.1.8"
       },
@@ -1170,7 +1170,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 274
+    "total_payload_downloads": 278
   },
   "homebrew": {
     "formula": "oxmgr",
