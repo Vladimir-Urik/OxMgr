@@ -12,7 +12,7 @@
     "status": "available",
     "total_downloads": 6
   },
-  "generated_at": "2026-03-25T07:17:16+00:00",
+  "generated_at": "2026-03-26T07:36:00+00:00",
   "github": {
     "artifact_totals": [
       {
@@ -36,7 +36,7 @@
         "label": "macOS Apple Silicon tar.gz"
       },
       {
-        "download_count": 79,
+        "download_count": 83,
         "key": "windows_zip",
         "label": "Windows zip"
       },
@@ -70,7 +70,7 @@
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-apple-darwin.tar.gz"
         },
         {
-          "download_count": 5,
+          "download_count": 9,
           "kind": "windows_zip",
           "label": "Windows zip",
           "name": "oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip",
@@ -105,10 +105,10 @@
         "mac_arm_tarball": 1,
         "mac_intel_tarball": 0,
         "other": 0,
-        "windows_zip": 5
+        "windows_zip": 9
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-      "payload_downloads": 16,
+      "payload_downloads": 20,
       "published_at": "2026-03-15T13:25:40Z",
       "tag_name": "v0.1.8"
     },
@@ -138,7 +138,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-apple-darwin.tar.gz"
           },
           {
-            "download_count": 5,
+            "download_count": 9,
             "kind": "windows_zip",
             "label": "Windows zip",
             "name": "oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip",
@@ -173,10 +173,10 @@
           "mac_arm_tarball": 1,
           "mac_intel_tarball": 0,
           "other": 0,
-          "windows_zip": 5
+          "windows_zip": 9
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-        "payload_downloads": 16,
+        "payload_downloads": 20,
         "published_at": "2026-03-15T13:25:40Z",
         "tag_name": "v0.1.8"
       },
@@ -1170,7 +1170,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 281
+    "total_payload_downloads": 285
   },
   "homebrew": {
     "formula": "oxmgr",
