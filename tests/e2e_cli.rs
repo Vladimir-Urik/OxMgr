@@ -194,7 +194,21 @@ fn logs_contain_cwd_env_marker(log_output: &str, expected_cwd: &str, env_value: 
             return false;
         };
 
-        logged_env_value.trim() == env_value && normalize_path_text_for_compare(cwd) == expected_cwd
+        if logged_env_value.trim() != env_value {
+            return false;
+        }
+
+        let raw_cwd = cwd.trim();
+        if normalize_path_text_for_compare(raw_cwd) == expected_cwd {
+            return true;
+        }
+
+        // Log lines may be prefixed as "<timestamp>: <payload>" when log_date_format is set.
+        if let Some((_, prefixed_cwd)) = raw_cwd.split_once(": ") {
+            return normalize_path_text_for_compare(prefixed_cwd) == expected_cwd;
+        }
+
+        false
     })
 }
 

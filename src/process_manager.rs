@@ -74,9 +74,8 @@ fn forward_logs_with_date_prefix_stdout(
                 Ok(0) => break,
                 Ok(_) => {
                     let now = Local::now();
-                    let formatted_line = match now.format(&date_format).to_string() {
-                        formatted => format!("{}: {}", formatted, buffer),
-                    };
+                    let formatted = now.format(&date_format).to_string();
+                    let formatted_line = format!("{}: {}", formatted, buffer);
 
                     if let Ok(mut file) = tokio::fs::OpenOptions::new()
                         .create(true)
@@ -110,9 +109,8 @@ fn forward_logs_with_date_prefix_stderr(
                 Ok(0) => break,
                 Ok(_) => {
                     let now = Local::now();
-                    let formatted_line = match now.format(&date_format).to_string() {
-                        formatted => format!("{}: {}", formatted, buffer),
-                    };
+                    let formatted = now.format(&date_format).to_string();
+                    let formatted_line = format!("{}: {}", formatted, buffer);
 
                     if let Ok(mut file) = tokio::fs::OpenOptions::new()
                         .create(true)
