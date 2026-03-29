@@ -4,7 +4,6 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use url::Url;
@@ -12,6 +11,7 @@ use url::Url;
 use crate::bundle::{decode_bundle, looks_like_bundle, max_bundle_bytes};
 use crate::config::AppConfig;
 use crate::ecosystem::EcosystemProcessSpec;
+use crate::hash::sha256_hex;
 use crate::ipc::{send_request, IpcRequest};
 use crate::oxfile;
 use crate::process::StartProcessSpec;
@@ -274,8 +274,7 @@ fn verify_sha256(payload: &[u8], expected_hex: &str) -> Result<()> {
         anyhow::bail!("--sha256 must be a 64-character hexadecimal SHA-256 digest");
     }
 
-    let digest = Sha256::digest(payload);
-    let actual = format!("{:x}", digest);
+    let actual = sha256_hex(payload);
     if actual != normalized {
         anyhow::bail!("remote import checksum mismatch for --sha256 pin");
     }

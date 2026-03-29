@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use sha2::{Digest, Sha256};
-
 use super::{HealthCheck, ManagedProcess, ResourceLimits, RestartPolicy, StartProcessSpec};
+use crate::hash::sha256_hex;
 
 impl ManagedProcess {
     /// Computes a stable fingerprint of the process configuration fields that
@@ -237,7 +236,7 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
         payload.push_str(cron);
     }
 
-    format!("{:x}", Sha256::digest(payload.as_bytes()))
+    sha256_hex(payload.as_bytes())
 }
 
 fn split_command_for_fingerprint(command_line: &str) -> (String, Vec<String>) {

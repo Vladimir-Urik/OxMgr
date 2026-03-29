@@ -428,7 +428,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use sha2::{Digest, Sha256};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc::unbounded_channel;
@@ -442,6 +441,7 @@ mod tests {
         HttpBody, HttpRequest, DISABLED_RESTART_SLEEP_SECS, PROMETHEUS_CONTENT_TYPE,
     };
     use crate::config::AppConfig;
+    use crate::hash::sha256_hex;
     use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
     use crate::process::{
         DesiredState, HealthStatus, ManagedProcess, RestartPolicy, StartProcessSpec,
@@ -866,7 +866,7 @@ mod tests {
     }
 
     fn hash_secret(value: &str) -> String {
-        format!("{:x}", Sha256::digest(value.as_bytes()))
+        sha256_hex(value.as_bytes())
     }
 
     struct GitFixture {

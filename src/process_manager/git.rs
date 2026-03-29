@@ -4,7 +4,6 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
 use tokio::process::Command;
 
 #[derive(Debug)]
@@ -127,8 +126,7 @@ pub(super) fn short_commit(commit: &str) -> String {
 }
 
 pub(super) fn sha256_hex(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    format!("{:x}", digest)
+    crate::hash::sha256_hex(value.as_bytes())
 }
 
 pub(super) fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {

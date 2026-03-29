@@ -9,8 +9,8 @@ use std::time::{Duration, Instant as StdInstant};
 use anyhow::{Context, Result};
 use chrono::Local;
 use cron::Schedule;
-use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use std::str::FromStr;
+use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
@@ -84,7 +84,8 @@ fn forward_logs_with_date_prefix_stdout(
                         .open(&log_path)
                         .await
                     {
-                        let _ = AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
+                        let _ =
+                            AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
                     }
                 }
                 Err(_) => break,
@@ -119,7 +120,8 @@ fn forward_logs_with_date_prefix_stderr(
                         .open(&log_path)
                         .await
                     {
-                        let _ = AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
+                        let _ =
+                            AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
                     }
                 }
                 Err(_) => break,
@@ -144,7 +146,9 @@ pub(crate) fn calculate_next_cron_restart(cron_expr: &str, from_time: Option<u64
     schedule
         .after(&now)
         .next()
-        .ok_or_else(|| anyhow::anyhow!("no next execution time for cron expression '{}'", cron_expr))
+        .ok_or_else(|| {
+            anyhow::anyhow!("no next execution time for cron expression '{}'", cron_expr)
+        })
         .map(|dt| dt.timestamp() as u64)
 }
 
@@ -1103,7 +1107,6 @@ impl ProcessManager {
         );
     }
 
-
     async fn spawn_child(&self, process: &mut ManagedProcess) -> Result<u32> {
         let logs = ProcessLogs {
             stdout: process.stdout_log.clone(),
@@ -1132,7 +1135,9 @@ impl ProcessManager {
             command.stdout(Stdio::piped()).stderr(Stdio::piped());
         } else {
             let (stdout, stderr) = open_log_writers(&logs, self.config.log_rotation)?;
-            command.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+            command
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr));
         }
 
         if let Some(cwd) = &process.cwd {
@@ -1337,7 +1342,10 @@ impl ProcessManager {
                                     p.next_cron_restart = Some(next_restart);
                                 }
                                 Err(err) => {
-                                    warn!("failed to calculate next cron restart for {}: {}", name, err);
+                                    warn!(
+                                        "failed to calculate next cron restart for {}: {}",
+                                        name, err
+                                    );
                                 }
                             }
                         }

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
+use crate::hash::sha256_hex;
 use crate::process::ResourceLimits;
 
 use super::ResolvedSettings;
@@ -91,8 +91,7 @@ pub(super) fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Optio
         anyhow::bail!("pull_secret exceeds maximum length 512");
     }
 
-    let digest = Sha256::digest(trimmed.as_bytes());
-    Ok(Some(format!("{:x}", digest)))
+    Ok(Some(sha256_hex(trimmed.as_bytes())))
 }
 
 fn parse_memory_limit_mb_str(input: &str) -> Result<u64> {

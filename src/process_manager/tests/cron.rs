@@ -9,7 +9,11 @@ fn cron_next_restart_daily_at_2am() {
     let base_time = crate::process_manager::now_epoch_secs();
 
     let result = crate::process_manager::calculate_next_cron_restart(cron_expr, Some(base_time));
-    assert!(result.is_ok(), "cron expression should be valid: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "cron expression should be valid: {:?}",
+        result
+    );
 
     let next_restart = result.unwrap();
     // Next restart should be in the future
@@ -28,7 +32,11 @@ fn cron_next_restart_every_6_hours() {
     let base_time = crate::process_manager::now_epoch_secs();
 
     let result = crate::process_manager::calculate_next_cron_restart(cron_expr, Some(base_time));
-    assert!(result.is_ok(), "cron expression should be valid: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "cron expression should be valid: {:?}",
+        result
+    );
 
     let next_restart = result.unwrap();
     // Next restart should be in the future
@@ -58,7 +66,11 @@ fn cron_expression_hourly() {
     let base_time = crate::process_manager::now_epoch_secs();
 
     let result = crate::process_manager::calculate_next_cron_restart(cron_expr, Some(base_time));
-    assert!(result.is_ok(), "cron expression should be valid: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "cron expression should be valid: {:?}",
+        result
+    );
 
     let next_restart = result.unwrap();
     // Next restart should be in the future

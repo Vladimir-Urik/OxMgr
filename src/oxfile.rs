@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::ecosystem::EcosystemProcessSpec;
+use crate::hash::sha256_hex;
 use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -733,8 +733,7 @@ fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Option<String>> 
         anyhow::bail!("pull_secret exceeds maximum length 512");
     }
 
-    let digest = Sha256::digest(trimmed.as_bytes());
-    Ok(Some(format!("{:x}", digest)))
+    Ok(Some(sha256_hex(trimmed.as_bytes())))
 }
 
 fn is_false(value: &bool) -> bool {
