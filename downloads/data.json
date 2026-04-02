@@ -12,7 +12,7 @@
     "status": "available",
     "total_downloads": 6
   },
-  "generated_at": "2026-04-01T07:53:16+00:00",
+  "generated_at": "2026-04-02T07:40:09+00:00",
   "github": {
     "artifact_totals": [
       {
@@ -21,7 +21,7 @@
         "label": "Linux tar.gz"
       },
       {
-        "download_count": 49,
+        "download_count": 51,
         "key": "linux_arm_tarball",
         "label": "Linux arm64 tar.gz"
       },
@@ -56,7 +56,7 @@
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-aarch64-apple-darwin.tar.gz"
         },
         {
-          "download_count": 49,
+          "download_count": 51,
           "kind": "linux_arm_tarball",
           "label": "Linux arm64 tar.gz",
           "name": "oxmgr-v0.1.8-aarch64-unknown-linux-gnu.tar.gz",
@@ -100,7 +100,7 @@
       ],
       "counts": {
         "deb_package": 0,
-        "linux_arm_tarball": 49,
+        "linux_arm_tarball": 51,
         "linux_tarball": 33,
         "mac_arm_tarball": 4,
         "mac_intel_tarball": 0,
@@ -108,7 +108,7 @@
         "windows_zip": 11
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-      "payload_downloads": 97,
+      "payload_downloads": 99,
       "published_at": "2026-03-15T13:25:40Z",
       "tag_name": "v0.1.8"
     },
@@ -124,7 +124,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-aarch64-apple-darwin.tar.gz"
           },
           {
-            "download_count": 49,
+            "download_count": 51,
             "kind": "linux_arm_tarball",
             "label": "Linux arm64 tar.gz",
             "name": "oxmgr-v0.1.8-aarch64-unknown-linux-gnu.tar.gz",
@@ -168,7 +168,7 @@
         ],
         "counts": {
           "deb_package": 0,
-          "linux_arm_tarball": 49,
+          "linux_arm_tarball": 51,
           "linux_tarball": 33,
           "mac_arm_tarball": 4,
           "mac_intel_tarball": 0,
@@ -176,7 +176,7 @@
           "windows_zip": 11
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-        "payload_downloads": 97,
+        "payload_downloads": 99,
         "published_at": "2026-03-15T13:25:40Z",
         "tag_name": "v0.1.8"
       },
@@ -1170,7 +1170,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 366
+    "total_payload_downloads": 368
   },
   "homebrew": {
     "formula": "oxmgr",
