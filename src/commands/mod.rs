@@ -14,6 +14,7 @@ mod logs;
 mod pull;
 mod reload;
 mod restart;
+mod runtime;
 mod service;
 mod start;
 mod startup;
@@ -41,6 +42,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             | Commands::Validate { .. }
             | Commands::Deploy { .. }
             | Commands::Doctor
+            | Commands::Runtime { .. }
             | Commands::Daemon {
                 command: DaemonCommand::Stop,
             }
@@ -86,6 +88,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             args,
         } => deploy::run(config, force, args).await,
         Commands::Doctor => doctor::run(config).await,
+        Commands::Runtime { path, env, only } => runtime::run(config, path, env, only).await,
         Commands::Startup { system } => startup::run(system, config),
         Commands::Service { command, system } => service::run(command, system, config),
         Commands::Daemon {

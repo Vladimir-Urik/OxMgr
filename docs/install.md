@@ -117,6 +117,14 @@ oxmgr status <name>
 oxmgr logs <name> -f
 ```
 
+Foreground/container verification:
+
+```bash
+oxmgr runtime ./oxfile.toml
+# or PM2 ecosystem file
+oxmgr runtime ./ecosystem.config.js
+```
+
 ## Optional Environment Variables
 
 - `OXMGR_HOME`: custom Oxmgr data directory

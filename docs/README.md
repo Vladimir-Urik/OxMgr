@@ -9,6 +9,7 @@ Project docs live here.
 - [Installation Guide](./install.md)
 - [CLI Reference](./CLI.md)
 - [Terminal UI Guide](./UI.md)
+- [Runtime Mode (pm2-runtime style)](./RUNTIME.md)
 - [Latest Benchmark Results](../BENCHMARK.md)
 - [Latest Benchmark JSON](../benchmark.json)
 - [Pull, Webhook, and Metrics Guide](./PULL_WEBHOOK.md)

@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.2.0 - 2026-04-06
+
+This release focuses on Docker/Kubernetes-first runtime workflows, unified logging, and PM2 foreground parity improvements.
+
+### Added
+
+- Added new foreground command: `oxmgr runtime <config> [--env <profile>] [--only a,b]` (pm2-runtime style).
+- Added daemon-less runtime execution mode that keeps `oxmgr` in foreground as PID 1 process manager.
+- Added runtime signal handling (`SIGTERM`/`SIGINT`) with graceful child shutdown behavior.
+- Added runtime child log forwarding to parent stdout/stderr for native container log collection.
+- Added runtime restart supervision in foreground mode, including `restart_policy`, `max_restarts`, `crash_restart_limit`, and `restart_delay_secs`.
+- Added runtime support for both Oxmgr native config (`oxfile.toml`) and PM2 ecosystem files (`ecosystem.config.{js,cjs,mjs,json}`).
+- Added PM2 `merge_logs` compatibility mapping to Oxmgr `unified_logs`.
+- Added `unified_logs` support across Oxfile defaults/apps/profiles, schema validation, parser/writer flow, process fingerprints, and runtime process specs.
+- Added runtime documentation page: `docs/RUNTIME.md`.
+- Added dedicated runtime unit coverage (`src/commands/runtime.rs`) for expansion/restart/spawn behavior and PM2 `merge_logs` mapping.
+- Added CLI parsing coverage for the new `runtime` command.
+- Added CLI log-view deduplication coverage for unified log-path mode.
+
+### Changed
+
+- Updated log-path resolution so unified mode writes both stdout/stderr into a single `<name>.log` stream.
+- Updated `oxmgr logs` behavior to avoid duplicate sections and duplicate follow output when unified logs are enabled.
+- Updated TUI log viewer and tail preview logic to treat identical stdout/stderr paths as one unified source.
+- Updated command dispatch to run `runtime` without daemon auto-start.
+- Updated docs (`README.md`, `docs/CLI.md`, `docs/USAGE.md`, `docs/install.md`, `docs/README.md`, `docs/OXFILE.md`, `docs/OXFILE_VS_PM2.md`) for runtime mode and unified logs.
+
+### Testing
+
+- Extended full test coverage for runtime mode and unified logs.
+- Full suite remains green after changes (`cargo test`).
+
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.9...v0.2.0
+
 ## v0.1.9 - 2026-04-05
 
 This release focuses on PM2 migration parity (`log_date_format`, `cron_restart`), runtime compatibility updates after dependency bumps, and documentation refreshes.
@@ -27,7 +61,7 @@ This release focuses on PM2 migration parity (`log_date_format`, `cron_restart`)
 - Bumped `cron` from `0.12.1` to `0.16.0`.
 - Bumped `sha2` from `0.10.9` to `0.11.0`.
 
-**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.8...HEAD
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.8...v0.1.9
 
 ## v0.1.8 - 2026-03-15
 

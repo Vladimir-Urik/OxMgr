@@ -111,3 +111,23 @@ oxmgr <command> --help
 ```
 
 `oxmgr help` is grouped by runtime, lifecycle, config, platform, and deploy commands.
+
+## 9) Foreground Runtime (Docker / Kubernetes)
+
+Use `runtime` when you want Oxmgr to run as the foreground process (similar to `pm2-runtime`):
+
+```bash
+oxmgr runtime ./oxfile.toml
+```
+
+PM2 files are supported too:
+
+```bash
+oxmgr runtime ./ecosystem.config.js
+oxmgr runtime ./ecosystem.config.json
+```
+
+Useful flags:
+
+- `--env <profile>`
+- `--only a,b`

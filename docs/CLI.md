@@ -6,6 +6,7 @@ This page documents Oxmgr CLI commands and options.
 
 Runtime and monitoring:
 
+- `oxmgr runtime <config>`
 - `oxmgr list` (aliases: `oxmgr ls`, `oxmgr ps`)
 - `oxmgr status <name|id>`
 - `oxmgr logs <name|id>` (alias: `oxmgr log`)
@@ -76,6 +77,22 @@ Cluster mode notes:
 - `--watch-path`, `--ignore-watch`, and `--watch-delay` require `--watch`.
 - `--wait-ready` requires `--health-cmd`.
 
+## Runtime (Foreground / Container Mode)
+
+- `oxmgr runtime <config> [--env <profile>] [--only a,b]`
+
+Behavior:
+
+- runs without daemonization and stays in foreground
+- forwards child logs to stdout/stderr
+- handles `SIGTERM` / `SIGINT` and gracefully stops children
+- applies restart policy in foreground mode
+
+Supported config files:
+
+- `oxfile.toml`
+- PM2 ecosystem files: `ecosystem.config.{js,cjs,mjs,json}`
+
 ## Lifecycle
 
 - `oxmgr stop <name|id>`
@@ -116,6 +133,7 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - `q` quits
 
 Full UI behavior and panel layout: [Terminal UI Guide](./UI.md).
+Foreground runtime details: [Runtime Mode (pm2-runtime style)](./RUNTIME.md).
 
 ## Config Commands
 

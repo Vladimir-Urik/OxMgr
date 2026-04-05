@@ -25,7 +25,7 @@ OPTIONS:
 const HELP_AFTER: &str = "\
 Quick Command Map
   Runtime:
-    list/ls/ps, status, ui, logs/log
+    runtime, list/ls/ps, status, ui, logs/log
   Lifecycle:
     start, stop, restart/rs, reload, pull, delete/rm
   Config:
@@ -151,6 +151,14 @@ pub enum Commands {
     },
     /// Run local environment and installation diagnostics.
     Doctor,
+    /// Run processes in foreground mode (pm2-runtime style) without daemonization.
+    Runtime {
+        path: PathBuf,
+        #[arg(long)]
+        env: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+    },
     /// Print startup integration instructions for the current platform.
     Startup {
         #[arg(long, value_enum, default_value_t = InitSystem::Auto)]
@@ -691,6 +699,29 @@ mod tests {
                 assert_eq!(out, Some(std::path::PathBuf::from("./bundle.oxpkg")));
             }
             _ => panic!("expected export subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_runtime_with_env_and_only_filters() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "runtime",
+            "oxfile.toml",
+            "--env",
+            "prod",
+            "--only",
+            "api,worker",
+        ])
+        .expect("expected runtime parsing success");
+
+        match cli.command {
+            Commands::Runtime { path, env, only } => {
+                assert_eq!(path, std::path::PathBuf::from("oxfile.toml"));
+                assert_eq!(env.as_deref(), Some("prod"));
+                assert_eq!(only, vec!["api".to_string(), "worker".to_string()]);
+            }
+            _ => panic!("expected runtime subcommand"),
         }
     }
 }

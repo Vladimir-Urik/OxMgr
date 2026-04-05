@@ -27,3 +27,5 @@ SHA256SUMS
 /packaging/npm/oxmgr-v*-*.zip
 /packaging/npm/vendor/*
 !/packaging/npm/vendor/.gitkeep
+
+website-link

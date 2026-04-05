@@ -16,6 +16,7 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 - Cross-platform: Linux, macOS, and Windows
 - Low overhead: Rust daemon with persistent local state
 - Practical operations: restart policies, health checks, logs, and CPU/RAM metrics
+- Foreground runtime mode for containers: `oxmgr runtime` (pm2-runtime style)
 - Config-first workflows with idempotent `oxmgr apply`
 - PM2 ecosystem compatibility via `ecosystem.config.{js,cjs,mjs,json}`
 - Interactive terminal UI with live search, filters, and sort controls
@@ -23,6 +24,7 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 ## Core Features
 
 - Start, stop, restart, reload, and delete managed processes
+- Foreground runtime command for Docker/Kubernetes (`oxmgr runtime`)
 - Named services and namespaces
 - Restart policies: `always`, `on-failure`, and `never`
 - Health checks with automatic restart on repeated failures
@@ -124,6 +126,13 @@ oxmgr validate ./oxfile.toml
 oxmgr apply ./oxfile.toml
 ```
 
+Container-style foreground mode:
+
+```bash
+oxmgr runtime ./oxfile.toml
+oxmgr runtime ./ecosystem.config.js
+```
+
 ## PM2 Migration
 
 Oxmgr supports PM2-style `ecosystem.config.{js,cjs,mjs,json}`, including config-driven watch settings and readiness-aware reload fields, which makes it easier to move existing PM2 setups without rewriting everything on day one.
@@ -144,6 +153,7 @@ Useful links:
 - [User Guide](./docs/USAGE.md)
 - [CLI Reference](./docs/CLI.md)
 - [Terminal UI Guide](./docs/UI.md)
+- [Runtime Mode (pm2-runtime style)](./docs/RUNTIME.md)
 - [Pull, Webhook, and Metrics Guide](./docs/PULL_WEBHOOK.md)
 - [Deployment Guide](./docs/DEPLOY.md)
 - [Service Bundles](./docs/BUNDLES.md)
