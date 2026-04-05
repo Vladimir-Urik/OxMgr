@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.1.9 - 2026-04-05
+
+This release focuses on PM2 migration parity (`log_date_format`, `cron_restart`), runtime compatibility updates after dependency bumps, and documentation refreshes.
+
+### Added
+
+- Added `log_date_format` support across CLI start flags, Oxfile/ecosystem parsing, import/export bundles, and runtime process specs ([#21](https://github.com/Vladimir-Urik/OxMgr/issues/21)).
+- Added `cron_restart` support with cron-expression parsing, persisted next-run scheduling, and daemon-managed scheduled restarts ([#21](https://github.com/Vladimir-Urik/OxMgr/issues/21)).
+- Added dedicated cron restart unit coverage in `process_manager` tests.
+- Added a shared SHA-256 hex utility (`src/hash.rs`) and migrated hashing call sites to it for compatibility with `sha2` `0.11`.
+- Added AI Skill reference documentation (`docs/SKILL.md`).
+
+### Changed
+
+- Updated daemon log forwarding paths so timestamp-prefixed log output and cwd/env marker handling stay consistent in E2E coverage.
+- Updated PM2 migration docs and core user docs for `log_date_format` and `cron_restart`.
+- Refreshed benchmark artifacts (`BENCHMARK.md`, `benchmark.json`).
+
+### Dependencies
+
+- Bumped `clap` from `4.5.60` to `4.6.0`.
+- Bumped `tracing-subscriber` from `0.3.22` to `0.3.23`.
+- Bumped `toml` from `1.0.6+spec-1.1.0` to `1.1.0+spec-1.1.0` (via `1.0.7+spec-1.1.0`).
+- Bumped `toml` from `1.1.0+spec-1.1.0` to `1.1.2+spec-1.1.0`.
+- Bumped `cron` from `0.12.1` to `0.16.0`.
+- Bumped `sha2` from `0.10.9` to `0.11.0`.
+
+**Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.8...HEAD
+
 ## v0.1.8 - 2026-03-15
 
 This release focuses on adding native Linux ARM64 support across the entire packaging and distribution ecosystem, alongside minor dependency updates.
