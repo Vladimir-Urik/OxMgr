@@ -72,6 +72,7 @@ pub enum Commands {
     #[command(visible_alias = "rs")]
     /// Restart a managed process by name or numeric identifier.
     Restart { target: String },
+    #[command(visible_alias = "rl")]
     /// Reload a managed process with minimal downtime when possible.
     Reload { target: String },
     /// Pull updates from the configured Git repository and apply them when changed.
@@ -547,6 +548,15 @@ mod tests {
         match cli.command {
             Commands::Restart { target } => assert_eq!(target, "api"),
             _ => panic!("expected restart subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_reload_alias_rl() {
+        let cli = Cli::try_parse_from(["oxmgr", "rl", "api"]).expect("expected rl alias parsing");
+        match cli.command {
+            Commands::Reload { target } => assert_eq!(target, "api"),
+            _ => panic!("expected reload subcommand"),
         }
     }
 
