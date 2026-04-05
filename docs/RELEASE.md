@@ -28,7 +28,6 @@ Release publish jobs execute only for the canonical repository:
 - Optionally sign release assets (`.asc`) with GPG
 - Publish npm package (`oxmgr`) when `NPM_TOKEN` is set
 - Update Homebrew tap formula when Homebrew secrets are set
-- Publish Chocolatey package when `CHOCO_API_KEY` is set
 - Update Scoop bucket manifest when Scoop secrets are set
 - Update the `oxmgr-bin` AUR package when `AUR_SSH_PRIVATE_KEY` is set
 - Publish APT repository index to `gh-pages/apt` (optionally signed `Release.gpg` / `InRelease`)
@@ -48,10 +47,6 @@ Release publish jobs execute only for the canonical repository:
 
 - `HOMEBREW_TAP_TOKEN`: PAT with write access to tap repo
 - `HOMEBREW_TAP_REPO`: e.g. `my-org/homebrew-tap`
-
-### For Chocolatey publish
-
-- `CHOCO_API_KEY`
 
 ### For Scoop publish
 
@@ -84,6 +79,7 @@ When `APT_GPG_*` secrets are set, workflow also publishes:
 ## Optional notes
 
 - npm installer verifies downloaded artifact checksum (`.sha256`) before extraction.
+- Windows package-manager distribution is currently via `npm` and `Scoop` (Chocolatey publish is paused).
 - If APT signing secrets are configured, metadata is signed and you can avoid `trusted=yes`.
 - AUR publishing uses the release Linux tarball checksum plus the tagged `LICENSE` checksum to regenerate [`packaging/aur/PKGBUILD`](../packaging/aur/PKGBUILD) and [`packaging/aur/.SRCINFO`](../packaging/aur/.SRCINFO) before pushing to `oxmgr-bin`.
 

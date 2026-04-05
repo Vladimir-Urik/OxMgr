@@ -51,18 +51,14 @@ brew tap empellio/homebrew-tap
 brew install oxmgr
 ```
 
-### Chocolatey
-
-```powershell
-choco install oxmgr -y
-```
-
 ### Scoop
 
 ```powershell
 scoop bucket add oxmgr https://github.com/empellio/scoop-bucket
 scoop install oxmgr/oxmgr
 ```
+
+Windows package-manager channels are currently `Scoop` and `npm`.
 
 ### AUR (Arch Linux)
 

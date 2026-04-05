@@ -297,7 +297,10 @@ jobs:
     name: Publish Chocolatey package
     runs-on: windows-latest
     needs: release
-    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr'
+    # Temporarily disabled: Chocolatey publishing is paused.
+    # To re-enable, restore the original condition:
+    # if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'Vladimir-Urik/OxMgr'
+    if: false
     env:
       CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
     permissions:

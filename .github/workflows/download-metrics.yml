@@ -31,7 +31,6 @@ jobs:
           python3 scripts/generate_download_metrics.py \
             --repo "${GITHUB_REPOSITORY}" \
             --brew-formula "oxmgr" \
-            --choco-package "oxmgr" \
             --pages-base-url "https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}" \
             --output-dir "site/downloads"
 
