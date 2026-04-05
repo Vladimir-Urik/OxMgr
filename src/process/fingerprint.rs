@@ -37,6 +37,7 @@ impl ManagedProcess {
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
             log_date_format: self.log_date_format.as_deref(),
+            unified_logs: self.unified_logs,
             cron_restart: self.cron_restart.as_deref(),
         })
     }
@@ -95,6 +96,7 @@ impl StartProcessSpec {
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
             log_date_format: self.log_date_format.as_deref(),
+            unified_logs: self.unified_logs,
             cron_restart: self.cron_restart.as_deref(),
         })
     }
@@ -129,6 +131,7 @@ struct ProcessConfigRef<'a> {
     wait_ready: bool,
     ready_timeout_secs: u64,
     log_date_format: Option<&'a str>,
+    unified_logs: bool,
     cron_restart: Option<&'a str>,
 }
 
@@ -230,6 +233,9 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
     if let Some(fmt) = config.log_date_format {
         payload.push_str(fmt);
     }
+    payload.push('\n');
+    payload.push_str("unified_logs=");
+    payload.push_str(if config.unified_logs { "true" } else { "false" });
     payload.push('\n');
     payload.push_str("cron_restart=");
     if let Some(cron) = config.cron_restart {

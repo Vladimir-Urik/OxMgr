@@ -206,6 +206,7 @@ fn expand_specs_for_apply(
                 wait_ready: spec.wait_ready,
                 ready_timeout_secs: spec.ready_timeout_secs,
                 log_date_format: spec.log_date_format.clone(),
+                unified_logs: spec.unified_logs,
                 cron_restart: spec.cron_restart.clone(),
             });
         }
@@ -416,6 +417,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         }
     }
@@ -487,6 +489,7 @@ mod tests {
             last_stopped_at: None,
             config_fingerprint: String::new(),
             log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            unified_logs: desired.unified_logs,
             cron_restart: None,
             next_cron_restart: None,
         }

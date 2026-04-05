@@ -184,6 +184,8 @@ pub struct StartProcessSpec {
     #[serde(default)]
     pub log_date_format: Option<String>,
     #[serde(default)]
+    pub unified_logs: bool,
+    #[serde(default)]
     pub cron_restart: Option<String>,
 }
 
@@ -285,6 +287,8 @@ pub struct ManagedProcess {
     pub config_fingerprint: String,
     #[serde(default)]
     pub log_date_format: Option<String>,
+    #[serde(default)]
+    pub unified_logs: bool,
     #[serde(default)]
     pub cron_restart: Option<String>,
     #[serde(skip)]
@@ -437,6 +441,7 @@ mod tests {
             wait_ready: true,
             ready_timeout_secs: 45,
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         };
 
@@ -470,6 +475,7 @@ mod tests {
         process.wait_ready = spec.wait_ready;
         process.ready_timeout_secs = spec.ready_timeout_secs;
         process.log_date_format = spec.log_date_format.clone();
+        process.unified_logs = spec.unified_logs;
         process.cron_restart = spec.cron_restart.clone();
 
         assert_eq!(spec.config_fingerprint(), process.config_fingerprint());
@@ -627,6 +633,7 @@ mod tests {
             last_stopped_at: None,
             config_fingerprint: String::new(),
             log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
         }
@@ -662,6 +669,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: default_ready_timeout_secs(),
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         }
     }

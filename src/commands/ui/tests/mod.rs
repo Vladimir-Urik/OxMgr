@@ -74,6 +74,7 @@ fn sample_process() -> ManagedProcess {
         last_stopped_at: None,
         config_fingerprint: String::new(),
         log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+        unified_logs: false,
         cron_restart: None,
         next_cron_restart: None,
     }

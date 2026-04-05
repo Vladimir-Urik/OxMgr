@@ -781,6 +781,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         };
 
@@ -850,6 +851,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         };
 
@@ -1038,6 +1040,7 @@ mod tests {
             last_stopped_at: None,
             config_fingerprint: "fixture-fingerprint".to_string(),
             log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
         }

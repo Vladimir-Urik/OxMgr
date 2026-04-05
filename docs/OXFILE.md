@@ -157,6 +157,7 @@ Details:
 - `git_ref`: optional branch/tag/ref for `oxmgr pull`
 - `pull_secret`: secret used by webhook endpoint `POST /pull/<name|id>`
 - `log_date_format`: date format string (e.g., `"%Y-%m-%d %H:%M:%S"`) to prefix each log line
+- `unified_logs`: bool (`true` merges stdout/stderr into one log file)
 - `cron_restart`: cron expression (6-field: `"second minute hour day month dayofweek"`) for scheduled restarts
 
 ### `[[apps]]` fields
@@ -309,6 +310,20 @@ Example output:
 2024-01-15 10:30:45: Server listening on port 3000
 2024-01-15 10:30:46: Database connected
 ```
+
+## Unified Logs
+
+Merge stdout and stderr into a single per-process file:
+
+```toml
+unified_logs = true
+```
+
+Behavior:
+
+- both streams are written to `<name>.log`
+- `oxmgr logs` reads a single stream without duplicate sections
+- TUI log viewer treats the source as `unified`
 
 ## Scheduled Restarts (Cron)
 

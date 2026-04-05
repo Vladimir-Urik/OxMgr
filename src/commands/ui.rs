@@ -876,8 +876,14 @@ impl LogViewerState {
     }
 
     fn reload(&mut self) {
-        self.stderr_lines = read_last_lines(&self.stderr_path, 4000).unwrap_or_default();
-        self.stdout_lines = read_last_lines(&self.stdout_path, 4000).unwrap_or_default();
+        if self.is_unified() {
+            self.stdout_lines = read_last_lines(&self.stdout_path, 4000).unwrap_or_default();
+            self.stderr_lines.clear();
+            self.active_source = LogSource::Stdout;
+        } else {
+            self.stderr_lines = read_last_lines(&self.stderr_path, 4000).unwrap_or_default();
+            self.stdout_lines = read_last_lines(&self.stdout_path, 4000).unwrap_or_default();
+        }
 
         if self.current_lines().is_empty() {
             if !self.stdout_lines.is_empty() {
@@ -890,11 +896,15 @@ impl LogViewerState {
             self.active_source = LogSource::Stderr;
         }
 
-        self.status = Some(format!(
-            "{} stderr lines, {} stdout lines",
-            self.stderr_lines.len(),
-            self.stdout_lines.len()
-        ));
+        self.status = Some(if self.is_unified() {
+            format!("{} unified lines", self.stdout_lines.len())
+        } else {
+            format!(
+                "{} stderr lines, {} stdout lines",
+                self.stderr_lines.len(),
+                self.stdout_lines.len()
+            )
+        });
     }
 
     fn current_lines(&self) -> &[String] {
@@ -912,6 +922,9 @@ impl LogViewerState {
     }
 
     fn source_label(&self) -> &'static str {
+        if self.is_unified() {
+            return "unified";
+        }
         match self.active_source {
             LogSource::Stdout => "stdout",
             LogSource::Stderr => "stderr",
@@ -919,11 +932,20 @@ impl LogViewerState {
     }
 
     fn toggle_source(&mut self, visible_rows: usize) {
+        if self.is_unified() {
+            self.active_source = LogSource::Stdout;
+            self.scroll_to_bottom(visible_rows);
+            return;
+        }
         self.active_source = match self.active_source {
             LogSource::Stdout => LogSource::Stderr,
             LogSource::Stderr => LogSource::Stdout,
         };
         self.scroll_to_bottom(visible_rows);
+    }
+
+    fn is_unified(&self) -> bool {
+        self.stdout_path == self.stderr_path
     }
 
     fn clamp_scroll(&mut self, visible_rows: usize) {
@@ -1097,6 +1119,20 @@ async fn tail_selected(config: &AppConfig, target: Option<String>, state: &mut D
             Ok(response) => match expect_ok(response) {
                 Ok(ok) => {
                     if let Some(logs) = ok.logs {
+                        if logs.stdout == logs.stderr {
+                            let lines = read_last_lines(&logs.stdout, 1)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .filter(|line| !line.trim().is_empty())
+                                .collect::<Vec<_>>();
+                            if let Some(line) = lines.last() {
+                                state.set_info(format!("log: {}", truncate(line.trim(), 90)));
+                            } else {
+                                state.set_info("log: no lines yet");
+                            }
+                            return;
+                        }
+
                         let stdout_lines = read_last_lines(&logs.stdout, 1)
                             .unwrap_or_default()
                             .into_iter()
@@ -1291,6 +1327,7 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         wait_ready: false,
         ready_timeout_secs: crate::process::default_ready_timeout_secs(),
         log_date_format: None,
+        unified_logs: false,
         cron_restart: None,
     };
 

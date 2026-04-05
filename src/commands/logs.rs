@@ -31,6 +31,14 @@ pub(crate) async fn run(
 }
 
 fn print_last_logs(logs: &ProcessLogs, lines: usize) -> Result<()> {
+    if logs.stdout == logs.stderr {
+        println!("==> {} <==", logs.stdout.display());
+        for line in read_last_lines(&logs.stdout, lines)? {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+
     for path in ordered_log_sections(logs) {
         println!("==> {} <==", path.display());
         for line in read_last_lines(path, lines)? {
@@ -41,24 +49,43 @@ fn print_last_logs(logs: &ProcessLogs, lines: usize) -> Result<()> {
     Ok(())
 }
 
-fn ordered_log_sections(logs: &ProcessLogs) -> [&Path; 2] {
+fn ordered_log_sections(logs: &ProcessLogs) -> Vec<&Path> {
+    if logs.stdout == logs.stderr {
+        return vec![logs.stdout.as_path()];
+    }
+
     let mut sections = [logs.stdout.as_path(), logs.stderr.as_path()];
     sections.sort_by(|left, right| {
         log_modified_at(left)
             .cmp(&log_modified_at(right))
             .then_with(|| left.as_os_str().cmp(right.as_os_str()))
     });
-    sections
+    sections.to_vec()
 }
 
 async fn follow_logs(logs: ProcessLogs) -> Result<()> {
     println!("Following logs (Ctrl-C to stop)...");
 
+    if logs.stdout == logs.stderr {
+        let unified_path = logs.stdout.clone();
+        let mut unified_task =
+            tokio::spawn(async move { follow_file(unified_path, "unified", false).await });
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = &mut unified_task => {}
+        }
+        unified_task.abort();
+        let _ = unified_task.await;
+        return Ok(());
+    }
+
     let stdout_path = logs.stdout.clone();
     let stderr_path = logs.stderr.clone();
 
-    let mut stdout_task = tokio::spawn(async move { follow_file(stdout_path, "stdout").await });
-    let mut stderr_task = tokio::spawn(async move { follow_file(stderr_path, "stderr").await });
+    let mut stdout_task =
+        tokio::spawn(async move { follow_file(stdout_path, "stdout", true).await });
+    let mut stderr_task =
+        tokio::spawn(async move { follow_file(stderr_path, "stderr", true).await });
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
@@ -74,7 +101,7 @@ async fn follow_logs(logs: ProcessLogs) -> Result<()> {
     Ok(())
 }
 
-async fn follow_file(path: PathBuf, label: &'static str) -> Result<()> {
+async fn follow_file(path: PathBuf, label: &'static str, prefix_label: bool) -> Result<()> {
     if !path.exists() {
         std::fs::File::create(&path)
             .with_context(|| format!("failed to create {}", path.display()))?;
@@ -94,7 +121,11 @@ async fn follow_file(path: PathBuf, label: &'static str) -> Result<()> {
         if bytes_read > 0 {
             let text = String::from_utf8_lossy(&buffer);
             for line in text.lines() {
-                println!("[{label}] {line}");
+                if prefix_label {
+                    println!("[{label}] {line}");
+                } else {
+                    println!("{line}");
+                }
             }
         } else {
             let current_pos = file.seek(std::io::SeekFrom::Current(0)).await?;
@@ -164,5 +195,18 @@ mod tests {
             sleep(Duration::from_millis(20));
         }
         panic!("failed to produce a newer mtime for {}", path.display());
+    }
+
+    #[test]
+    fn ordered_log_sections_deduplicates_unified_path() {
+        let log_path = PathBuf::from("/tmp/unified.log");
+        let logs = ProcessLogs {
+            stdout: log_path.clone(),
+            stderr: log_path,
+        };
+
+        let sections = ordered_log_sections(&logs);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0], logs.stdout.as_path());
     }
 }

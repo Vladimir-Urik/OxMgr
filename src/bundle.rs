@@ -93,6 +93,8 @@ struct BundleService {
     #[serde(default)]
     log_date_format: Option<String>,
     #[serde(default)]
+    unified_logs: bool,
+    #[serde(default)]
     cron_restart: Option<String>,
 }
 
@@ -325,6 +327,7 @@ impl BundleService {
             wait_ready: process.wait_ready,
             ready_timeout_secs: process.ready_timeout_secs,
             log_date_format: process.log_date_format.clone(),
+            unified_logs: process.unified_logs,
             cron_restart: process.cron_restart.clone(),
         }
     }
@@ -363,6 +366,7 @@ impl BundleService {
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs.max(1),
             log_date_format: self.log_date_format,
+            unified_logs: self.unified_logs,
             cron_restart: self.cron_restart,
         }
     }
@@ -601,6 +605,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         };
 
@@ -643,6 +648,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         };
 
@@ -711,6 +717,7 @@ mod tests {
             last_stopped_at: None,
             config_fingerprint: String::new(),
             log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
         }

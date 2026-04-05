@@ -560,6 +560,7 @@ mod tests {
             wait_ready: false,
             ready_timeout_secs: 30,
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         };
         let named = fixture_spec("api", "node server.js", vec![], 1);
@@ -662,6 +663,7 @@ module.exports = {
             wait_ready: false,
             ready_timeout_secs: 30,
             log_date_format: None,
+            unified_logs: false,
             cron_restart: None,
         }
     }

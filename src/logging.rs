@@ -33,6 +33,19 @@ pub fn process_logs(log_dir: &Path, name: &str) -> ProcessLogs {
     }
 }
 
+/// Returns log paths for either split-stream or unified-log mode.
+pub fn process_logs_for_mode(log_dir: &Path, name: &str, unified_logs: bool) -> ProcessLogs {
+    if unified_logs {
+        let unified = log_dir.join(format!("{name}.log"));
+        ProcessLogs {
+            stdout: unified.clone(),
+            stderr: unified,
+        }
+    } else {
+        process_logs(log_dir, name)
+    }
+}
+
 /// Returns the last modification time of a log file, falling back to the Unix
 /// epoch when metadata is unavailable.
 pub fn log_modified_at(path: &Path) -> SystemTime {

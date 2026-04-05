@@ -119,6 +119,12 @@ pub(super) fn apply_profile_overrides(
                 };
                 settings.reuse_port = parsed;
             }
+            "merge_logs" => {
+                let Some(parsed) = value.as_bool() else {
+                    anyhow::bail!("merge_logs override must be true/false");
+                };
+                settings.unified_logs = parsed;
+            }
             "exec_mode" => {
                 if let Some(parsed) = value.as_str() {
                     settings.cluster_mode = is_cluster_exec_mode(parsed);

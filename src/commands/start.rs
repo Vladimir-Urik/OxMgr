@@ -92,6 +92,7 @@ fn build_start_spec(args: StartCommand) -> Result<StartProcessSpec> {
         wait_ready: args.wait_ready,
         ready_timeout_secs: args.ready_timeout.max(1),
         log_date_format: args.log_date_format,
+        unified_logs: false,
         cron_restart: args.cron_restart,
     })
 }

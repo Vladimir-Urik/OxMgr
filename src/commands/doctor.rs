@@ -828,6 +828,7 @@ mod tests {
             cpu_percent: 0.0,
             config_fingerprint: String::new(),
             log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
+            unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
         }

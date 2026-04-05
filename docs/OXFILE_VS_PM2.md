@@ -41,6 +41,7 @@ Use `oxfile.toml` when:
 | Pull webhook fields | imported/translated | native fields |
 | Crash-loop cutoff | compatibility import only | native `crash_restart_limit` |
 | Log date formatting | supported via `log_date_format` | supported via `log_date_format` |
+| Unified logs | supported via `merge_logs` | supported via `unified_logs` |
 | Scheduled restarts | supported via `cron_restart` | supported via `cron_restart` |
 | Apply idempotency clarity | medium | high |
 

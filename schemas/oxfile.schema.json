@@ -223,6 +223,9 @@
         "ready_timeout_secs": {
           "type": "integer",
           "minimum": 0
+        },
+        "unified_logs": {
+          "type": "boolean"
         }
       }
     },
@@ -354,6 +357,9 @@
         "ready_timeout_secs": {
           "type": "integer",
           "minimum": 0
+        },
+        "unified_logs": {
+          "type": "boolean"
         },
         "disabled": {
           "type": "boolean"
@@ -499,6 +505,9 @@
         "ready_timeout_secs": {
           "type": "integer",
           "minimum": 0
+        },
+        "unified_logs": {
+          "type": "boolean"
         },
         "disabled": {
           "type": "boolean"

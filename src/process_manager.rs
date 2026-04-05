@@ -45,7 +45,7 @@ use self::watch::{watch_fingerprint_for_dir, watch_fingerprint_for_roots};
 use crate::cgroup;
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
-use crate::logging::{open_log_writers, process_logs, ProcessLogs};
+use crate::logging::{open_log_writers, process_logs_for_mode, ProcessLogs};
 use crate::process::{
     DesiredState, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus, StartProcessSpec,
 };
@@ -334,6 +334,7 @@ impl ProcessManager {
             wait_ready,
             ready_timeout_secs,
             log_date_format,
+            unified_logs,
             cron_restart,
         } = spec;
 
@@ -350,7 +351,7 @@ impl ProcessManager {
             None => self.generate_auto_name(&command),
         };
 
-        let logs = process_logs(&self.config.log_dir, &resolved_name);
+        let logs = process_logs_for_mode(&self.config.log_dir, &resolved_name, unified_logs);
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
 
@@ -408,6 +409,7 @@ impl ProcessManager {
             last_stopped_at: None,
             config_fingerprint: String::new(),
             log_date_format,
+            unified_logs,
             cron_restart,
             next_cron_restart: None,
         };

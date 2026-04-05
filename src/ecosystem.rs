@@ -53,6 +53,7 @@ pub struct EcosystemProcessSpec {
     pub wait_ready: bool,
     pub ready_timeout_secs: u64,
     pub log_date_format: Option<String>,
+    pub unified_logs: bool,
     pub cron_restart: Option<String>,
 }
 
@@ -110,6 +111,7 @@ struct EcosystemApp {
     wait_ready: Option<bool>,
     listen_timeout: Option<u64>,
     log_date_format: Option<String>,
+    merge_logs: Option<bool>,
     cron_restart: Option<String>,
     #[serde(flatten)]
     extra: HashMap<String, Value>,
@@ -177,6 +179,7 @@ struct ResolvedSettings {
     wait_ready: bool,
     ready_timeout_secs: u64,
     log_date_format: Option<String>,
+    unified_logs: bool,
     cron_restart: Option<String>,
 }
 
@@ -280,6 +283,7 @@ impl EcosystemApp {
             wait_ready: self.wait_ready.unwrap_or(false),
             ready_timeout_secs: millis_to_secs_ceil(self.listen_timeout.unwrap_or(30_000)).max(1),
             log_date_format: self.log_date_format,
+            unified_logs: self.merge_logs.unwrap_or(false),
             cron_restart: self.cron_restart,
         };
 
@@ -324,6 +328,7 @@ impl EcosystemApp {
             wait_ready: settings.wait_ready,
             ready_timeout_secs: settings.ready_timeout_secs,
             log_date_format: settings.log_date_format,
+            unified_logs: settings.unified_logs,
             cron_restart: settings.cron_restart,
         })
     }

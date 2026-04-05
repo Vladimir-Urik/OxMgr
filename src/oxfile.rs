@@ -116,6 +116,7 @@ struct OxDefaults {
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
     log_date_format: Option<String>,
+    unified_logs: Option<bool>,
     cron_restart: Option<String>,
 }
 
@@ -158,6 +159,7 @@ struct OxApp {
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
     log_date_format: Option<String>,
+    unified_logs: Option<bool>,
     cron_restart: Option<String>,
     profiles: Option<HashMap<String, OxProfile>>,
     disabled: Option<bool>,
@@ -200,6 +202,7 @@ struct OxProfile {
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
     log_date_format: Option<String>,
+    unified_logs: Option<bool>,
     cron_restart: Option<String>,
     disabled: Option<bool>,
 }
@@ -236,6 +239,7 @@ struct Resolved {
     wait_ready: bool,
     ready_timeout_secs: u64,
     log_date_format: Option<String>,
+    unified_logs: bool,
     cron_restart: Option<String>,
     disabled: bool,
 }
@@ -311,6 +315,8 @@ struct OxAppOut {
     ready_timeout_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log_date_format: Option<String>,
+    #[serde(skip_serializing_if = "is_false", default)]
+    unified_logs: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     cron_restart: Option<String>,
 }
@@ -369,6 +375,7 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             wait_ready: resolved.wait_ready,
             ready_timeout_secs: resolved.ready_timeout_secs,
             log_date_format: resolved.log_date_format,
+            unified_logs: resolved.unified_logs,
             cron_restart: resolved.cron_restart,
         });
     }
@@ -493,6 +500,7 @@ fn resolve_app(
             .log_date_format
             .clone()
             .or_else(|| defaults.log_date_format.clone()),
+        unified_logs: app.unified_logs.or(defaults.unified_logs).unwrap_or(false),
         cron_restart: app
             .cron_restart
             .clone()
@@ -669,6 +677,9 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     if let Some(log_date_format) = &profile.log_date_format {
         resolved.log_date_format = Some(log_date_format.clone());
     }
+    if let Some(unified_logs) = profile.unified_logs {
+        resolved.unified_logs = unified_logs;
+    }
     if let Some(cron_restart) = &profile.cron_restart {
         resolved.cron_restart = Some(cron_restart.clone());
     }
@@ -816,6 +827,7 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             wait_ready: spec.wait_ready.then_some(true),
             ready_timeout_secs: spec.wait_ready.then_some(spec.ready_timeout_secs),
             log_date_format: spec.log_date_format.clone(),
+            unified_logs: spec.unified_logs,
             cron_restart: spec.cron_restart.clone(),
         });
     }
@@ -953,6 +965,7 @@ NODE_ENV = "production"
             wait_ready: true,
             ready_timeout_secs: 45,
             log_date_format: None,
+            unified_logs: true,
             cron_restart: None,
         }];
 
@@ -971,6 +984,7 @@ NODE_ENV = "production"
         assert!(rendered.contains("\"config\""));
         assert!(rendered.contains("ignore_watch = [\"node_modules\"]"));
         assert!(rendered.contains("wait_ready = true"));
+        assert!(rendered.contains("unified_logs = true"));
 
         let _ = fs::remove_file(path);
     }
