@@ -7,16 +7,16 @@
     "message": "No Chocolatey package configured.",
     "status": "disabled"
   },
-  "generated_at": "2026-04-06T08:01:11+00:00",
+  "generated_at": "2026-04-07T07:49:06+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 188,
+        "download_count": 189,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
       {
-        "download_count": 68,
+        "download_count": 70,
         "key": "linux_arm_tarball",
         "label": "Linux arm64 tar.gz"
       },
@@ -26,7 +26,7 @@
         "label": "macOS Intel tar.gz"
       },
       {
-        "download_count": 34,
+        "download_count": 36,
         "key": "mac_arm_tarball",
         "label": "macOS Apple Silicon tar.gz"
       },
@@ -44,14 +44,14 @@
     "latest_release": {
       "assets": [
         {
-          "download_count": 2,
+          "download_count": 4,
           "kind": "mac_arm_tarball",
           "label": "macOS Apple Silicon tar.gz",
           "name": "oxmgr-v0.2.0-aarch64-apple-darwin.tar.gz",
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.2.0/oxmgr-v0.2.0-aarch64-apple-darwin.tar.gz"
         },
         {
-          "download_count": 13,
+          "download_count": 15,
           "kind": "linux_arm_tarball",
           "label": "Linux arm64 tar.gz",
           "name": "oxmgr-v0.2.0-aarch64-unknown-linux-gnu.tar.gz",
@@ -95,15 +95,15 @@
       ],
       "counts": {
         "deb_package": 2,
-        "linux_arm_tarball": 13,
+        "linux_arm_tarball": 15,
         "linux_tarball": 10,
-        "mac_arm_tarball": 2,
+        "mac_arm_tarball": 4,
         "mac_intel_tarball": 1,
         "other": 0,
         "windows_zip": 5
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.2.0",
-      "payload_downloads": 33,
+      "payload_downloads": 37,
       "published_at": "2026-04-05T22:48:52Z",
       "tag_name": "v0.2.0"
     },
@@ -112,14 +112,14 @@
       {
         "assets": [
           {
-            "download_count": 2,
+            "download_count": 4,
             "kind": "mac_arm_tarball",
             "label": "macOS Apple Silicon tar.gz",
             "name": "oxmgr-v0.2.0-aarch64-apple-darwin.tar.gz",
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.2.0/oxmgr-v0.2.0-aarch64-apple-darwin.tar.gz"
           },
           {
-            "download_count": 13,
+            "download_count": 15,
             "kind": "linux_arm_tarball",
             "label": "Linux arm64 tar.gz",
             "name": "oxmgr-v0.2.0-aarch64-unknown-linux-gnu.tar.gz",
@@ -163,15 +163,15 @@
         ],
         "counts": {
           "deb_package": 2,
-          "linux_arm_tarball": 13,
+          "linux_arm_tarball": 15,
           "linux_tarball": 10,
-          "mac_arm_tarball": 2,
+          "mac_arm_tarball": 4,
           "mac_intel_tarball": 1,
           "other": 0,
           "windows_zip": 5
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.2.0",
-        "payload_downloads": 33,
+        "payload_downloads": 37,
         "published_at": "2026-04-05T22:48:52Z",
         "tag_name": "v0.2.0"
       },
@@ -272,7 +272,7 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.1.8/oxmgr-v0.1.8-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 50,
+            "download_count": 51,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.1.8-x86_64-unknown-linux-gnu.tar.gz",
@@ -296,14 +296,14 @@
         "counts": {
           "deb_package": 0,
           "linux_arm_tarball": 54,
-          "linux_tarball": 50,
+          "linux_tarball": 51,
           "mac_arm_tarball": 6,
           "mac_intel_tarball": 2,
           "other": 0,
           "windows_zip": 20
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.1.8",
-        "payload_downloads": 132,
+        "payload_downloads": 133,
         "published_at": "2026-03-15T13:25:40Z",
         "tag_name": "v0.1.8"
       },
@@ -1297,7 +1297,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 447
+    "total_payload_downloads": 452
   },
   "homebrew": {
     "formula": "oxmgr",
