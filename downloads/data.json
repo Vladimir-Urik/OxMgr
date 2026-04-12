@@ -7,11 +7,11 @@
     "message": "No Chocolatey package configured.",
     "status": "disabled"
   },
-  "generated_at": "2026-04-11T07:15:57+00:00",
+  "generated_at": "2026-04-12T07:43:33+00:00",
   "github": {
     "artifact_totals": [
       {
-        "download_count": 197,
+        "download_count": 199,
         "key": "linux_tarball",
         "label": "Linux tar.gz"
       },
@@ -26,12 +26,12 @@
         "label": "macOS Intel tar.gz"
       },
       {
-        "download_count": 41,
+        "download_count": 43,
         "key": "mac_arm_tarball",
         "label": "macOS Apple Silicon tar.gz"
       },
       {
-        "download_count": 110,
+        "download_count": 111,
         "key": "windows_zip",
         "label": "Windows zip"
       },
@@ -44,7 +44,7 @@
     "latest_release": {
       "assets": [
         {
-          "download_count": 9,
+          "download_count": 11,
           "kind": "mac_arm_tarball",
           "label": "macOS Apple Silicon tar.gz",
           "name": "oxmgr-v0.2.0-aarch64-apple-darwin.tar.gz",
@@ -65,14 +65,14 @@
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.2.0/oxmgr-v0.2.0-x86_64-apple-darwin.tar.gz"
         },
         {
-          "download_count": 12,
+          "download_count": 13,
           "kind": "windows_zip",
           "label": "Windows zip",
           "name": "oxmgr-v0.2.0-x86_64-pc-windows-msvc.zip",
           "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.2.0/oxmgr-v0.2.0-x86_64-pc-windows-msvc.zip"
         },
         {
-          "download_count": 18,
+          "download_count": 20,
           "kind": "linux_tarball",
           "label": "Linux tar.gz",
           "name": "oxmgr-v0.2.0-x86_64-unknown-linux-gnu.tar.gz",
@@ -96,14 +96,14 @@
       "counts": {
         "deb_package": 2,
         "linux_arm_tarball": 21,
-        "linux_tarball": 18,
-        "mac_arm_tarball": 9,
+        "linux_tarball": 20,
+        "mac_arm_tarball": 11,
         "mac_intel_tarball": 1,
         "other": 0,
-        "windows_zip": 12
+        "windows_zip": 13
       },
       "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.2.0",
-      "payload_downloads": 63,
+      "payload_downloads": 68,
       "published_at": "2026-04-05T22:48:52Z",
       "tag_name": "v0.2.0"
     },
@@ -112,7 +112,7 @@
       {
         "assets": [
           {
-            "download_count": 9,
+            "download_count": 11,
             "kind": "mac_arm_tarball",
             "label": "macOS Apple Silicon tar.gz",
             "name": "oxmgr-v0.2.0-aarch64-apple-darwin.tar.gz",
@@ -133,14 +133,14 @@
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.2.0/oxmgr-v0.2.0-x86_64-apple-darwin.tar.gz"
           },
           {
-            "download_count": 12,
+            "download_count": 13,
             "kind": "windows_zip",
             "label": "Windows zip",
             "name": "oxmgr-v0.2.0-x86_64-pc-windows-msvc.zip",
             "url": "https://github.com/Vladimir-Urik/OxMgr/releases/download/v0.2.0/oxmgr-v0.2.0-x86_64-pc-windows-msvc.zip"
           },
           {
-            "download_count": 18,
+            "download_count": 20,
             "kind": "linux_tarball",
             "label": "Linux tar.gz",
             "name": "oxmgr-v0.2.0-x86_64-unknown-linux-gnu.tar.gz",
@@ -164,14 +164,14 @@
         "counts": {
           "deb_package": 2,
           "linux_arm_tarball": 21,
-          "linux_tarball": 18,
-          "mac_arm_tarball": 9,
+          "linux_tarball": 20,
+          "mac_arm_tarball": 11,
           "mac_intel_tarball": 1,
           "other": 0,
-          "windows_zip": 12
+          "windows_zip": 13
         },
         "html_url": "https://github.com/Vladimir-Urik/OxMgr/releases/tag/v0.2.0",
-        "payload_downloads": 63,
+        "payload_downloads": 68,
         "published_at": "2026-04-05T22:48:52Z",
         "tag_name": "v0.2.0"
       },
@@ -1297,7 +1297,7 @@
       }
     ],
     "repo": "Vladimir-Urik/OxMgr",
-    "total_payload_downloads": 479
+    "total_payload_downloads": 484
   },
   "homebrew": {
     "formula": "oxmgr",
