@@ -8,8 +8,7 @@ use std::time::{Duration, Instant as StdInstant};
 
 use anyhow::{Context, Result};
 use chrono::Local;
-use cron::Schedule;
-use std::str::FromStr;
+use croner::parser::{CronParser, Seconds};
 use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -131,7 +130,10 @@ fn forward_logs_with_date_prefix_stderr(
 /// Validates a cron expression string and returns the next execution time (epoch seconds).
 /// Returns an error if the cron expression is invalid.
 pub(crate) fn calculate_next_cron_restart(cron_expr: &str, from_time: Option<u64>) -> Result<u64> {
-    let schedule = Schedule::from_str(cron_expr)
+    let cron = CronParser::builder()
+        .seconds(Seconds::Required)
+        .build()
+        .parse(cron_expr)
         .map_err(|e| anyhow::anyhow!("invalid cron expression '{}': {}", cron_expr, e))?;
 
     let now = if let Some(timestamp) = from_time {
@@ -141,12 +143,8 @@ pub(crate) fn calculate_next_cron_restart(cron_expr: &str, from_time: Option<u64
         chrono::Utc::now()
     };
 
-    schedule
-        .after(&now)
-        .next()
-        .ok_or_else(|| {
-            anyhow::anyhow!("no next execution time for cron expression '{}'", cron_expr)
-        })
+    cron.find_next_occurrence(&now, false)
+        .map_err(|e| anyhow::anyhow!("no next execution time for cron expression '{}': {}", cron_expr, e))
         .map(|dt| dt.timestamp() as u64)
 }
 

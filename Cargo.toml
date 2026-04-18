@@ -9,7 +9,7 @@ description = "Oxmgr - lightweight language-agnostic process manager"
 anyhow = "1.0"
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
-cron = "0.16"
+croner = "3.0.1"
 dirs = "6.0"
 crossterm = "0.29"
 json5 = "1.3"
