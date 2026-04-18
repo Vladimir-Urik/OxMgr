@@ -264,6 +264,17 @@ async fn execute_request(
             }
             Err(err) => IpcResponse::error(err.to_string()),
         },
+        IpcRequest::Stop { target } if target == "all" => {
+            match manager.stop_all_processes().await {
+                Ok(processes) => {
+                    let mut response =
+                        IpcResponse::ok(format!("stopped {} process(es)", processes.len()));
+                    response.processes = redact_processes(processes);
+                    response
+                }
+                Err(err) => IpcResponse::error(err.to_string()),
+            }
+        }
         IpcRequest::Stop { target } => match manager.stop_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("stopped {}", process.target_label()));
@@ -292,6 +303,17 @@ async fn execute_request(
             Ok(message) => IpcResponse::ok(message),
             Err(err) => IpcResponse::error(err.to_string()),
         },
+        IpcRequest::Delete { target } if target == "all" => {
+            match manager.delete_all_processes().await {
+                Ok(processes) => {
+                    let mut response =
+                        IpcResponse::ok(format!("deleted {} process(es)", processes.len()));
+                    response.processes = redact_processes(processes);
+                    response
+                }
+                Err(err) => IpcResponse::error(err.to_string()),
+            }
+        }
         IpcRequest::Delete { target } => match manager.delete_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("deleted {}", process.target_label()));

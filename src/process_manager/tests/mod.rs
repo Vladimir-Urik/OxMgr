@@ -27,6 +27,7 @@ mod git;
 mod lifecycle;
 mod restart;
 mod spawn;
+mod stop_delete_all;
 mod watch;
 
 fn fixture_process() -> ManagedProcess {

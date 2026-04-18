@@ -486,6 +486,44 @@ impl ProcessManager {
         Ok(process)
     }
 
+    /// Stops every managed process and returns the list of processes that were
+    /// affected. Processes that are already stopped are marked as desired-stopped
+    /// but otherwise left unchanged. State is persisted once after all stops.
+    pub async fn stop_all_processes(&mut self) -> Result<Vec<ManagedProcess>> {
+        let names: Vec<String> = self.processes.keys().cloned().collect();
+        let mut stopped = Vec::with_capacity(names.len());
+
+        for name in &names {
+            let Some(mut process) = self.processes.get(name).cloned() else {
+                continue;
+            };
+            process.desired_state = DesiredState::Stopped;
+            if let Some(pid) = process.pid {
+                let timeout = Duration::from_secs(process.stop_timeout_secs.max(1));
+                let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
+            }
+            process.pid = None;
+            cleanup_process_cgroup(&mut process);
+            process.status = ProcessStatus::Stopped;
+            process.restart_backoff_attempt = 0;
+            process.health_status = HealthStatus::Unknown;
+            process.health_failures = 0;
+            process.next_health_check = None;
+            process.cpu_percent = 0.0;
+            process.memory_bytes = 0;
+            reset_auto_restart_state(&mut process);
+
+            self.watch_fingerprints.remove(name);
+            self.pending_watch_restarts.remove(name);
+            self.scheduled_restarts.remove(name);
+            self.processes.insert(name.clone(), process.clone());
+            stopped.push(process);
+        }
+
+        self.save()?;
+        Ok(stopped)
+    }
+
     /// Restarts a managed process, resetting restart backoff state before the
     /// fresh spawn.
     pub async fn restart_process(&mut self, target: &str) -> Result<ManagedProcess> {
@@ -799,6 +837,37 @@ impl ProcessManager {
         self.scheduled_restarts.remove(&name);
         self.save()?;
         Ok(removed)
+    }
+
+    /// Terminates and removes every managed process. Returns the list of
+    /// deleted processes. State is persisted once after all deletions.
+    pub async fn delete_all_processes(&mut self) -> Result<Vec<ManagedProcess>> {
+        let names: Vec<String> = self.processes.keys().cloned().collect();
+        let mut deleted = Vec::with_capacity(names.len());
+
+        for name in &names {
+            let Some(process) = self.processes.get(name).cloned() else {
+                continue;
+            };
+            if let Some(pid) = process.pid {
+                let timeout = Duration::from_secs(process.stop_timeout_secs.max(1));
+                let _ = terminate_pid(pid, process.stop_signal.as_deref(), timeout).await;
+            }
+            if let Some(path) = process.cgroup_path.as_deref() {
+                if let Err(err) = cgroup::cleanup(path) {
+                    warn!("failed to cleanup cgroup for process {}: {}", name, err);
+                }
+            }
+            if let Some(removed) = self.processes.remove(name) {
+                self.watch_fingerprints.remove(name);
+                self.pending_watch_restarts.remove(name);
+                self.scheduled_restarts.remove(name);
+                deleted.push(removed);
+            }
+        }
+
+        self.save()?;
+        Ok(deleted)
     }
 
     async fn pull_single_process(&mut self, name: &str) -> Result<PullOutcome> {

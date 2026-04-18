@@ -53,6 +53,13 @@ oxmgr delete api
 oxmgr rm api
 ```
 
+To stop or remove **all** managed processes at once:
+
+```bash
+oxmgr stop all
+oxmgr delete all   # or: oxmgr rm all
+```
+
 Aliases:
 
 - `restart` -> `rs`

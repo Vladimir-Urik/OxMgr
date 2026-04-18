@@ -15,11 +15,11 @@ Runtime and monitoring:
 Lifecycle operations:
 
 - `oxmgr start "<command>" --name <name>`
-- `oxmgr stop <name|id>`
+- `oxmgr stop <name|id>` / `oxmgr stop all`
 - `oxmgr restart <name|id>` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
 - `oxmgr pull [name|id]`
-- `oxmgr delete <name|id>` (alias: `oxmgr rm`)
+- `oxmgr delete <name|id>` (alias: `oxmgr rm`) / `oxmgr delete all`
 
 Configuration workflow:
 
@@ -96,10 +96,12 @@ Supported config files:
 ## Lifecycle
 
 - `oxmgr stop <name|id>`
+- `oxmgr stop all` — stops every managed process at once
 - `oxmgr restart <name|id>` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
 - `oxmgr pull [name|id]`
 - `oxmgr delete <name|id>` (alias: `oxmgr rm`)
+- `oxmgr delete all` / `oxmgr rm all` — terminates and removes every managed process
 
 `pull` updates from configured git repository and reloads/restarts the service only when commit changed.
 

@@ -1,5 +1,16 @@
 # Changelog
 
+> Starting from the next release, Oxmgr follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
+> Breaking changes bump `MAJOR`, new backwards-compatible features bump `MINOR`, bug fixes bump `PATCH`.
+
+## Unreleased
+
+### Added
+
+- Added `oxmgr stop all` to stop every managed process in a single command ([#28](https://github.com/Vladimir-Urik/OxMgr/issues/28)).
+- Added `oxmgr delete all` (alias: `oxmgr rm all`) to terminate and remove every managed process in a single command ([#28](https://github.com/Vladimir-Urik/OxMgr/issues/28)).
+- Updated docs (`docs/CLI.md`, `docs/USAGE.md`) to document the new bulk stop/delete behaviour.
+
 ## v0.2.0 - 2026-04-06
 
 This release focuses on Docker/Kubernetes-first runtime workflows, unified logging, and PM2 foreground parity improvements.
