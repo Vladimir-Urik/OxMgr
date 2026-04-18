@@ -123,9 +123,7 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                             }
                             KeyCode::Char(ch) if !ch.is_control() => {
                                 state.push_search_char(ch);
-                                state.clamp_selection(
-                                    visible_processes(&processes, &state).len(),
-                                );
+                                state.clamp_selection(visible_processes(&processes, &state).len());
                                 needs_redraw = true;
                             }
                             _ => {}
