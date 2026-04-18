@@ -1,0 +1,328 @@
+﻿2026-04-18T23:32:00.4718339Z Current runner version: '2.333.1'
+2026-04-18T23:32:00.4753067Z ##[group]Runner Image Provisioner
+2026-04-18T23:32:00.4754277Z Hosted Compute Agent
+2026-04-18T23:32:00.4755104Z Version: 20260213.493
+2026-04-18T23:32:00.4756148Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+2026-04-18T23:32:00.4757258Z Build Date: 2026-02-13T00:28:41Z
+2026-04-18T23:32:00.4758365Z Worker ID: {d8d4f5bd-5e16-444c-a77d-43dc78b9f7cd}
+2026-04-18T23:32:00.4759499Z Azure Region: eastus
+2026-04-18T23:32:00.4760430Z ##[endgroup]
+2026-04-18T23:32:00.4762779Z ##[group]Operating System
+2026-04-18T23:32:00.4763888Z Ubuntu
+2026-04-18T23:32:00.4764662Z 24.04.4
+2026-04-18T23:32:00.4765349Z LTS
+2026-04-18T23:32:00.4766192Z ##[endgroup]
+2026-04-18T23:32:00.4766996Z ##[group]Runner Image
+2026-04-18T23:32:00.4767878Z Image: ubuntu-24.04
+2026-04-18T23:32:00.4768704Z Version: 20260413.86.1
+2026-04-18T23:32:00.4770659Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260413.86/images/ubuntu/Ubuntu2404-Readme.md
+2026-04-18T23:32:00.4773587Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260413.86
+2026-04-18T23:32:00.4775143Z ##[endgroup]
+2026-04-18T23:32:00.4776966Z ##[group]GITHUB_TOKEN Permissions
+2026-04-18T23:32:00.4779611Z Contents: read
+2026-04-18T23:32:00.4780500Z Metadata: read
+2026-04-18T23:32:00.4781755Z Packages: read
+2026-04-18T23:32:00.4782514Z ##[endgroup]
+2026-04-18T23:32:00.4785396Z Secret source: Actions
+2026-04-18T23:32:00.4786552Z Prepare workflow directory
+2026-04-18T23:32:00.5250240Z Prepare all required actions
+2026-04-18T23:32:00.5307256Z Getting action download info
+2026-04-18T23:32:00.8173043Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-04-18T23:32:00.9889844Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:29eef336d9b2848a0b548edc03f92a220660cdb8)
+2026-04-18T23:32:01.1323501Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-04-18T23:32:01.4217041Z Complete job name: Test (ubuntu-latest)
+2026-04-18T23:32:01.4967164Z ##[group]Run actions/checkout@v4
+2026-04-18T23:32:01.4968112Z with:
+2026-04-18T23:32:01.4968559Z   repository: Vladimir-Urik/OxMgr
+2026-04-18T23:32:01.4969259Z   token: ***
+2026-04-18T23:32:01.4969707Z   ssh-strict: true
+2026-04-18T23:32:01.4970136Z   ssh-user: git
+2026-04-18T23:32:01.4970559Z   persist-credentials: true
+2026-04-18T23:32:01.4971399Z   clean: true
+2026-04-18T23:32:01.4971860Z   sparse-checkout-cone-mode: true
+2026-04-18T23:32:01.4972373Z   fetch-depth: 1
+2026-04-18T23:32:01.4972781Z   fetch-tags: false
+2026-04-18T23:32:01.4973217Z   show-progress: true
+2026-04-18T23:32:01.4973648Z   lfs: false
+2026-04-18T23:32:01.4974052Z   submodules: false
+2026-04-18T23:32:01.4974492Z   set-safe-directory: true
+2026-04-18T23:32:01.4975293Z ##[endgroup]
+2026-04-18T23:32:01.6056465Z Syncing repository: Vladimir-Urik/OxMgr
+2026-04-18T23:32:01.6058307Z ##[group]Getting Git version info
+2026-04-18T23:32:01.6059037Z Working directory is '/home/runner/work/OxMgr/OxMgr'
+2026-04-18T23:32:01.6060162Z [command]/usr/bin/git version
+2026-04-18T23:32:01.6108662Z git version 2.53.0
+2026-04-18T23:32:01.6136478Z ##[endgroup]
+2026-04-18T23:32:01.6158364Z Temporarily overriding HOME='/home/runner/work/_temp/cc654e74-9820-4867-a65d-dbd8f7e61ff2' before making global git config changes
+2026-04-18T23:32:01.6159837Z Adding repository directory to the temporary git global config as a safe directory
+2026-04-18T23:32:01.6163666Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/OxMgr/OxMgr
+2026-04-18T23:32:01.6194435Z Deleting the contents of '/home/runner/work/OxMgr/OxMgr'
+2026-04-18T23:32:01.6198072Z ##[group]Initializing the repository
+2026-04-18T23:32:01.6202119Z [command]/usr/bin/git init /home/runner/work/OxMgr/OxMgr
+2026-04-18T23:32:01.6303077Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-04-18T23:32:01.6305014Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-04-18T23:32:01.6306382Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-04-18T23:32:01.6307182Z hint: call:
+2026-04-18T23:32:01.6307573Z hint:
+2026-04-18T23:32:01.6308253Z hint: 	git config --global init.defaultBranch <name>
+2026-04-18T23:32:01.6309102Z hint:
+2026-04-18T23:32:01.6310083Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-04-18T23:32:01.6311701Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-04-18T23:32:01.6312552Z hint:
+2026-04-18T23:32:01.6312951Z hint: 	git branch -m <name>
+2026-04-18T23:32:01.6313406Z hint:
+2026-04-18T23:32:01.6314020Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-04-18T23:32:01.6315486Z Initialized empty Git repository in /home/runner/work/OxMgr/OxMgr/.git/
+2026-04-18T23:32:01.6317116Z [command]/usr/bin/git remote add origin https://github.com/Vladimir-Urik/OxMgr
+2026-04-18T23:32:01.6344897Z ##[endgroup]
+2026-04-18T23:32:01.6345724Z ##[group]Disabling automatic garbage collection
+2026-04-18T23:32:01.6348659Z [command]/usr/bin/git config --local gc.auto 0
+2026-04-18T23:32:01.6376469Z ##[endgroup]
+2026-04-18T23:32:01.6377180Z ##[group]Setting up auth
+2026-04-18T23:32:01.6383184Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-04-18T23:32:01.6412078Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-04-18T23:32:01.6696055Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-04-18T23:32:01.6727370Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-04-18T23:32:01.6939325Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-04-18T23:32:01.6970285Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-04-18T23:32:01.7183114Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-04-18T23:32:01.7216666Z ##[endgroup]
+2026-04-18T23:32:01.7217657Z ##[group]Fetching the repository
+2026-04-18T23:32:01.7224801Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +8674ec40676a115471c2ac42353f03373172b75b:refs/remotes/origin/master
+2026-04-18T23:32:01.9273602Z From https://github.com/Vladimir-Urik/OxMgr
+2026-04-18T23:32:01.9275574Z  * [new ref]         8674ec40676a115471c2ac42353f03373172b75b -> origin/master
+2026-04-18T23:32:01.9301229Z ##[endgroup]
+2026-04-18T23:32:01.9302483Z ##[group]Determining the checkout info
+2026-04-18T23:32:01.9304486Z ##[endgroup]
+2026-04-18T23:32:01.9309454Z [command]/usr/bin/git sparse-checkout disable
+2026-04-18T23:32:01.9346058Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-04-18T23:32:01.9371452Z ##[group]Checking out the ref
+2026-04-18T23:32:01.9376847Z [command]/usr/bin/git checkout --progress --force -B master refs/remotes/origin/master
+2026-04-18T23:32:01.9500343Z Reset branch 'master'
+2026-04-18T23:32:01.9503653Z branch 'master' set up to track 'origin/master'.
+2026-04-18T23:32:01.9510563Z ##[endgroup]
+2026-04-18T23:32:01.9543393Z [command]/usr/bin/git log -1 --format=%H
+2026-04-18T23:32:01.9564974Z 8674ec40676a115471c2ac42353f03373172b75b
+2026-04-18T23:32:02.0128283Z ##[group]Run dtolnay/rust-toolchain@stable
+2026-04-18T23:32:02.0129369Z with:
+2026-04-18T23:32:02.0130037Z   toolchain: stable
+2026-04-18T23:32:02.0130793Z ##[endgroup]
+2026-04-18T23:32:02.0293075Z ##[group]Run : parse toolchain version
+2026-04-18T23:32:02.0294155Z [36;1m: parse toolchain version[0m
+2026-04-18T23:32:02.0295124Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-04-18T23:32:02.0296917Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-04-18T23:32:02.0299095Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-04-18T23:32:02.0300167Z [36;1m  exit 1[0m
+2026-04-18T23:32:02.0301522Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-04-18T23:32:02.0302993Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-04-18T23:32:02.0304923Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0306779Z [36;1m  else[0m
+2026-04-18T23:32:02.0308203Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0309881Z [36;1m  fi[0m
+2026-04-18T23:32:02.0311156Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-04-18T23:32:02.0313415Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0316073Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-04-18T23:32:02.0319319Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0322501Z [36;1melse[0m
+2026-04-18T23:32:02.0323387Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0324463Z [36;1mfi[0m
+2026-04-18T23:32:02.0352417Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:02.0353601Z env:
+2026-04-18T23:32:02.0354218Z   toolchain: stable
+2026-04-18T23:32:02.0354920Z ##[endgroup]
+2026-04-18T23:32:02.0580693Z ##[group]Run : construct rustup command line
+2026-04-18T23:32:02.0582176Z [36;1m: construct rustup command line[0m
+2026-04-18T23:32:02.0583765Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0586055Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0587799Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:02.0610805Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:02.0612119Z env:
+2026-04-18T23:32:02.0612744Z   targets: 
+2026-04-18T23:32:02.0613398Z   components: 
+2026-04-18T23:32:02.0614069Z ##[endgroup]
+2026-04-18T23:32:02.0717776Z ##[group]Run : set $CARGO_HOME
+2026-04-18T23:32:02.0718645Z [36;1m: set $CARGO_HOME[0m
+2026-04-18T23:32:02.0719787Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-04-18T23:32:02.0742852Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:02.0744002Z ##[endgroup]
+2026-04-18T23:32:02.0846229Z ##[group]Run : install rustup if needed
+2026-04-18T23:32:02.0847262Z [36;1m: install rustup if needed[0m
+2026-04-18T23:32:02.0848285Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-04-18T23:32:02.0851146Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-04-18T23:32:02.0853772Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-04-18T23:32:02.0854789Z [36;1mfi[0m
+2026-04-18T23:32:02.0877124Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:02.0878259Z env:
+2026-04-18T23:32:02.0878922Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:02.0879790Z ##[endgroup]
+2026-04-18T23:32:02.0985594Z ##[group]Run rustup toolchain install stable --profile minimal --no-self-update
+2026-04-18T23:32:02.0987475Z [36;1mrustup toolchain install stable --profile minimal --no-self-update[0m
+2026-04-18T23:32:02.1010610Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:02.1012075Z env:
+2026-04-18T23:32:02.1012734Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:02.1013638Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-04-18T23:32:02.1014659Z ##[endgroup]
+2026-04-18T23:32:04.2583989Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-04-18T23:32:04.4711566Z info: latest update on 2026-04-16 for version 1.95.0 (59807616e 2026-04-14)
+2026-04-18T23:32:04.4884378Z info: removing previous version of component clippy
+2026-04-18T23:32:04.4943505Z info: removing previous version of component rustfmt
+2026-04-18T23:32:04.4957143Z info: removing previous version of component cargo
+2026-04-18T23:32:04.5009716Z info: removing previous version of component rust-std
+2026-04-18T23:32:04.5058723Z info: removing previous version of component rustc
+2026-04-18T23:32:04.5111532Z info: downloading 5 components
+2026-04-18T23:32:12.6073577Z 
+2026-04-18T23:32:12.6153281Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.95.0 (59807616e 2026-04-14) (from rustc 1.94.1 (e408947bf 2026-03-25))
+2026-04-18T23:32:12.6154630Z 
+2026-04-18T23:32:12.6243306Z ##[group]Run rustup default stable
+2026-04-18T23:32:12.6243630Z [36;1mrustup default stable[0m
+2026-04-18T23:32:12.6264465Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.6264839Z env:
+2026-04-18T23:32:12.6265092Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.6265364Z ##[endgroup]
+2026-04-18T23:32:12.6359218Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-04-18T23:32:12.6366847Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-04-18T23:32:12.6367442Z 
+2026-04-18T23:32:12.6432587Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.95.0 (59807616e 2026-04-14)
+2026-04-18T23:32:12.6433397Z 
+2026-04-18T23:32:12.6468744Z ##[group]Run : create cachekey
+2026-04-18T23:32:12.6469038Z [36;1m: create cachekey[0m
+2026-04-18T23:32:12.6469575Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-04-18T23:32:12.6470284Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-04-18T23:32:12.6470803Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-04-18T23:32:12.6491583Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.6491954Z env:
+2026-04-18T23:32:12.6492203Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.6492494Z ##[endgroup]
+2026-04-18T23:32:12.6829194Z ##[group]Run : disable incremental compilation
+2026-04-18T23:32:12.6829605Z [36;1m: disable incremental compilation[0m
+2026-04-18T23:32:12.6829957Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-04-18T23:32:12.6830351Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-04-18T23:32:12.6830656Z [36;1mfi[0m
+2026-04-18T23:32:12.6852042Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.6852404Z env:
+2026-04-18T23:32:12.6852620Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.6852883Z ##[endgroup]
+2026-04-18T23:32:12.6918747Z ##[group]Run : enable colors in Cargo output
+2026-04-18T23:32:12.6919104Z [36;1m: enable colors in Cargo output[0m
+2026-04-18T23:32:12.6919454Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-04-18T23:32:12.6919806Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-04-18T23:32:12.6920118Z [36;1mfi[0m
+2026-04-18T23:32:12.6939638Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.6939996Z env:
+2026-04-18T23:32:12.6940222Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.6940491Z   CARGO_INCREMENTAL: 0
+2026-04-18T23:32:12.6940726Z ##[endgroup]
+2026-04-18T23:32:12.7004987Z ##[group]Run : enable Cargo sparse registry
+2026-04-18T23:32:12.7005579Z [36;1m: enable Cargo sparse registry[0m
+2026-04-18T23:32:12.7005969Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-04-18T23:32:12.7006694Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-04-18T23:32:12.7007443Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-04-18T23:32:12.7008154Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-04-18T23:32:12.7008710Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-04-18T23:32:12.7009224Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-04-18T23:32:12.7009795Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-04-18T23:32:12.7010335Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-04-18T23:32:12.7010685Z [36;1m  fi[0m
+2026-04-18T23:32:12.7010890Z [36;1mfi[0m
+2026-04-18T23:32:12.7029932Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.7030284Z env:
+2026-04-18T23:32:12.7030505Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.7030770Z   CARGO_INCREMENTAL: 0
+2026-04-18T23:32:12.7031260Z   CARGO_TERM_COLOR: always
+2026-04-18T23:32:12.7031502Z ##[endgroup]
+2026-04-18T23:32:12.7342166Z ##[group]Run : work around spurious network errors in curl 8.0
+2026-04-18T23:32:12.7342644Z [36;1m: work around spurious network errors in curl 8.0[0m
+2026-04-18T23:32:12.7343394Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-04-18T23:32:12.7344057Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-04-18T23:32:12.7344558Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-04-18T23:32:12.7344898Z [36;1mfi[0m
+2026-04-18T23:32:12.7365774Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.7366141Z env:
+2026-04-18T23:32:12.7366361Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.7366645Z   CARGO_INCREMENTAL: 0
+2026-04-18T23:32:12.7366893Z   CARGO_TERM_COLOR: always
+2026-04-18T23:32:12.7367129Z ##[endgroup]
+2026-04-18T23:32:12.7553809Z ##[group]Run rustc +stable --version --verbose
+2026-04-18T23:32:12.7554171Z [36;1mrustc +stable --version --verbose[0m
+2026-04-18T23:32:12.7574175Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-04-18T23:32:12.7574544Z env:
+2026-04-18T23:32:12.7574759Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.7575037Z   CARGO_INCREMENTAL: 0
+2026-04-18T23:32:12.7575282Z   CARGO_TERM_COLOR: always
+2026-04-18T23:32:12.7575531Z ##[endgroup]
+2026-04-18T23:32:12.7722919Z rustc 1.95.0 (59807616e 2026-04-14)
+2026-04-18T23:32:12.7723684Z binary: rustc
+2026-04-18T23:32:12.7724397Z commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860
+2026-04-18T23:32:12.7724911Z commit-date: 2026-04-14
+2026-04-18T23:32:12.7725280Z host: x86_64-unknown-linux-gnu
+2026-04-18T23:32:12.7725685Z release: 1.95.0
+2026-04-18T23:32:12.7726248Z LLVM version: 22.1.2
+2026-04-18T23:32:12.7869406Z ##[group]Run actions/setup-node@v4
+2026-04-18T23:32:12.7869728Z with:
+2026-04-18T23:32:12.7869941Z   node-version: 20
+2026-04-18T23:32:12.7870174Z   always-auth: false
+2026-04-18T23:32:12.7870413Z   check-latest: false
+2026-04-18T23:32:12.7870813Z   token: ***
+2026-04-18T23:32:12.7871361Z env:
+2026-04-18T23:32:12.7871588Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:12.7871865Z   CARGO_INCREMENTAL: 0
+2026-04-18T23:32:12.7872099Z   CARGO_TERM_COLOR: always
+2026-04-18T23:32:12.7872343Z ##[endgroup]
+2026-04-18T23:32:12.9653911Z Found in cache @ /opt/hostedtoolcache/node/20.20.2/x64
+2026-04-18T23:32:12.9654871Z ##[group]Environment details
+2026-04-18T23:32:15.5209067Z node: v20.20.2
+2026-04-18T23:32:15.5209474Z npm: 10.8.2
+2026-04-18T23:32:15.5209767Z yarn: 1.22.22
+2026-04-18T23:32:15.5211354Z ##[endgroup]
+2026-04-18T23:32:15.5315238Z ##[group]Run cargo fmt --all -- --check
+2026-04-18T23:32:15.5315555Z [36;1mcargo fmt --all -- --check[0m
+2026-04-18T23:32:15.5344638Z shell: /usr/bin/bash -e {0}
+2026-04-18T23:32:15.5344867Z env:
+2026-04-18T23:32:15.5345054Z   CARGO_HOME: /home/runner/.cargo
+2026-04-18T23:32:15.5345297Z   CARGO_INCREMENTAL: 0
+2026-04-18T23:32:15.5345504Z   CARGO_TERM_COLOR: always
+2026-04-18T23:32:15.5345710Z ##[endgroup]
+2026-04-18T23:32:15.7420373Z Diff in /home/runner/work/OxMgr/OxMgr/src/process_manager/tests/stop_delete_all.rs:32:
+2026-04-18T23:32:15.7421722Z              .expect("process should still exist after stop_all");
+2026-04-18T23:32:15.7422441Z          assert_eq!(process.status, ProcessStatus::Stopped);
+2026-04-18T23:32:15.7423137Z          assert_eq!(process.desired_state, DesiredState::Stopped);
+2026-04-18T23:32:15.7424008Z -        assert!(process.pid.is_none(), "pid should be cleared after stop_all");
+2026-04-18T23:32:15.7424629Z +        assert!(
+2026-04-18T23:32:15.7425081Z +            process.pid.is_none(),
+2026-04-18T23:32:15.7425602Z +            "pid should be cleared after stop_all"
+2026-04-18T23:32:15.7426022Z +        );
+2026-04-18T23:32:15.7426279Z      }
+2026-04-18T23:32:15.7426517Z  }
+2026-04-18T23:32:15.7426755Z  
+2026-04-18T23:32:15.7598489Z Diff in /home/runner/work/OxMgr/OxMgr/src/process_manager.rs:144:
+2026-04-18T23:32:15.7599059Z      };
+2026-04-18T23:32:15.7599311Z  
+2026-04-18T23:32:15.7599674Z      cron.find_next_occurrence(&now, false)
+2026-04-18T23:32:15.7600664Z -        .map_err(|e| anyhow::anyhow!("no next execution time for cron expression '{}': {}", cron_expr, e))
+2026-04-18T23:32:15.7601781Z +        .map_err(|e| {
+2026-04-18T23:32:15.7602154Z +            anyhow::anyhow!(
+2026-04-18T23:32:15.7602770Z +                "no next execution time for cron expression '{}': {}",
+2026-04-18T23:32:15.7603301Z +                cron_expr,
+2026-04-18T23:32:15.7603649Z +                e
+2026-04-18T23:32:15.7603930Z +            )
+2026-04-18T23:32:15.7604198Z +        })
+2026-04-18T23:32:15.7604552Z          .map(|dt| dt.timestamp() as u64)
+2026-04-18T23:32:15.7604939Z  }
+2026-04-18T23:32:15.7605185Z  
+2026-04-18T23:32:15.7815792Z ##[error]Process completed with exit code 1.
+2026-04-18T23:32:15.7915193Z Post job cleanup.
+2026-04-18T23:32:15.8861136Z [command]/usr/bin/git version
+2026-04-18T23:32:15.8897662Z git version 2.53.0
+2026-04-18T23:32:15.8942455Z Temporarily overriding HOME='/home/runner/work/_temp/0ef110ab-40b5-4ea0-80cf-8256120606e8' before making global git config changes
+2026-04-18T23:32:15.8944097Z Adding repository directory to the temporary git global config as a safe directory
+2026-04-18T23:32:15.8958080Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/OxMgr/OxMgr
+2026-04-18T23:32:15.8991268Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-04-18T23:32:15.9022961Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-04-18T23:32:15.9241665Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-04-18T23:32:15.9264297Z http.https://github.com/.extraheader
+2026-04-18T23:32:15.9276854Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-04-18T23:32:15.9309032Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-04-18T23:32:15.9541807Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-04-18T23:32:15.9575590Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-04-18T23:32:15.9915857Z Cleaning up orphan processes
+2026-04-18T23:32:16.0180125Z ##[warning]Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@v4, actions/setup-node@v4. Actions will be forced to run with Node.js 24 by default starting June 2nd, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

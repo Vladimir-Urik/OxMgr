@@ -32,7 +32,10 @@ async fn stop_all_stops_every_process() {
             .expect("process should still exist after stop_all");
         assert_eq!(process.status, ProcessStatus::Stopped);
         assert_eq!(process.desired_state, DesiredState::Stopped);
-        assert!(process.pid.is_none(), "pid should be cleared after stop_all");
+        assert!(
+            process.pid.is_none(),
+            "pid should be cleared after stop_all"
+        );
     }
 }
 

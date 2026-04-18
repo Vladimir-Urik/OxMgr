@@ -144,7 +144,13 @@ pub(crate) fn calculate_next_cron_restart(cron_expr: &str, from_time: Option<u64
     };
 
     cron.find_next_occurrence(&now, false)
-        .map_err(|e| anyhow::anyhow!("no next execution time for cron expression '{}': {}", cron_expr, e))
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "no next execution time for cron expression '{}': {}",
+                cron_expr,
+                e
+            )
+        })
         .map(|dt| dt.timestamp() as u64)
 }
 
