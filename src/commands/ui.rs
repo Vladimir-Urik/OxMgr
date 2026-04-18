@@ -121,14 +121,12 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                                 state.clamp_selection(visible_processes(&processes, &state).len());
                                 needs_redraw = true;
                             }
-                            KeyCode::Char(ch) => {
-                                if !ch.is_control() {
-                                    state.push_search_char(ch);
-                                    state.clamp_selection(
-                                        visible_processes(&processes, &state).len(),
-                                    );
-                                    needs_redraw = true;
-                                }
+                            KeyCode::Char(ch) if !ch.is_control() => {
+                                state.push_search_char(ch);
+                                state.clamp_selection(
+                                    visible_processes(&processes, &state).len(),
+                                );
+                                needs_redraw = true;
                             }
                             _ => {}
                         }
@@ -367,17 +365,15 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                             state.open_create_form();
                             needs_redraw = true;
                         }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            if state.selected > 0 {
-                                state.selected -= 1;
-                                needs_redraw = true;
-                            }
+                        KeyCode::Up | KeyCode::Char('k') if state.selected > 0 => {
+                            state.selected -= 1;
+                            needs_redraw = true;
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            if state.selected + 1 < visible.len() {
-                                state.selected += 1;
-                                needs_redraw = true;
-                            }
+                        KeyCode::Down | KeyCode::Char('j')
+                            if state.selected + 1 < visible.len() =>
+                        {
+                            state.selected += 1;
+                            needs_redraw = true;
                         }
                         KeyCode::Char('g') => {
                             next_refresh_at = Instant::now();
