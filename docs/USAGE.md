@@ -33,6 +33,7 @@ oxmgr ps
 oxmgr status api
 oxmgr logs api
 oxmgr log api -f
+oxmgr logs all          # print recent logs for every process at once
 oxmgr ui
 ```
 

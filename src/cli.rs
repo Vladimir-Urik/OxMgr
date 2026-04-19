@@ -91,7 +91,8 @@ pub enum Commands {
     #[command(visible_alias = "log")]
     /// Print recent logs for a managed process.
     Logs {
-        target: String,
+        /// Process name, numeric id, or 'all' to print logs for every process.
+        target: Option<String>,
         #[arg(short = 'f', long)]
         follow: bool,
         #[arg(long, default_value_t = 100)]
@@ -579,7 +580,7 @@ mod tests {
                 follow,
                 lines,
             } => {
-                assert_eq!(target, "api");
+                assert_eq!(target, Some("api".to_string()));
                 assert!(follow);
                 assert_eq!(lines, 100);
             }

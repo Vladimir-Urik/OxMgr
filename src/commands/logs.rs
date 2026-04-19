@@ -12,10 +12,19 @@ use super::common::expect_ok;
 
 pub(crate) async fn run(
     config: &AppConfig,
-    target: String,
+    target: Option<String>,
     follow: bool,
     lines: usize,
 ) -> Result<()> {
+    let Some(target) = target else {
+        print_logs_help();
+        return Ok(());
+    };
+
+    if target == "all" {
+        return run_all(config, lines).await;
+    }
+
     let response = send_request(&config.daemon_addr, &IpcRequest::Logs { target }).await?;
     let response = expect_ok(response)?;
     let logs = response
@@ -28,6 +37,42 @@ pub(crate) async fn run(
     }
 
     Ok(())
+}
+
+async fn run_all(config: &AppConfig, lines: usize) -> Result<()> {
+    let response = send_request(&config.daemon_addr, &IpcRequest::List).await?;
+    let response = expect_ok(response)?;
+
+    if response.processes.is_empty() {
+        println!("No managed processes found.");
+        return Ok(());
+    }
+
+    for process in &response.processes {
+        println!("\n=== {} ===", process.name);
+        let logs = ProcessLogs {
+            stdout: process.stdout_log.clone(),
+            stderr: process.stderr_log.clone(),
+        };
+        if let Err(e) = print_last_logs(&logs, lines) {
+            eprintln!("  (failed to read logs: {e})");
+        }
+    }
+
+    Ok(())
+}
+
+fn print_logs_help() {
+    eprintln!("Usage: oxmgr logs <TARGET>");
+    eprintln!();
+    eprintln!("Print recent logs for a managed process.");
+    eprintln!();
+    eprintln!("Arguments:");
+    eprintln!("  <TARGET>  Process name, numeric id, or 'all' to print logs for every process");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  -f, --follow     Follow log output");
+    eprintln!("      --lines <N>  Number of lines to show [default: 100]");
 }
 
 fn print_last_logs(logs: &ProcessLogs, lines: usize) -> Result<()> {

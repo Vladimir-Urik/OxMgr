@@ -9,7 +9,7 @@ Runtime and monitoring:
 - `oxmgr runtime <config>`
 - `oxmgr list` (aliases: `oxmgr ls`, `oxmgr ps`)
 - `oxmgr status <name|id>`
-- `oxmgr logs <name|id>` (alias: `oxmgr log`)
+- `oxmgr logs <name|id>` / `oxmgr logs all` (alias: `oxmgr log`)
 - `oxmgr ui`
 
 Lifecycle operations:
@@ -112,6 +112,7 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - `oxmgr list` (aliases: `oxmgr ls`, `oxmgr ps`)
 - `oxmgr status <name|id>`
 - `oxmgr logs <name|id> [-f] [--lines <n>]` (alias: `oxmgr log`)
+- `oxmgr logs all [--lines <n>]` — prints recent logs for every managed process at once; running `oxmgr logs` without a target prints usage help
 - `oxmgr ui [--interval-ms <n>]`
 
 `list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health.

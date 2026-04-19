@@ -113,6 +113,10 @@ pub(super) fn validate_process_name(name: &str) -> Result<()> {
         return Err(OxmgrError::InvalidProcessName("name cannot be empty".to_string()).into());
     }
 
+    if name == "all" {
+        return Err(OxmgrError::InvalidProcessName("'all' is a reserved name".to_string()).into());
+    }
+
     let valid = name
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');

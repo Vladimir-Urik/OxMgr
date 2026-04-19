@@ -10,6 +10,9 @@
 - Added `oxmgr stop all` to stop every managed process in a single command ([#28](https://github.com/Vladimir-Urik/OxMgr/issues/28)).
 - Added `oxmgr delete all` (alias: `oxmgr rm all`) to terminate and remove every managed process in a single command ([#28](https://github.com/Vladimir-Urik/OxMgr/issues/28)).
 - Updated docs (`docs/CLI.md`, `docs/USAGE.md`) to document the new bulk stop/delete behaviour.
+- Added `oxmgr logs all` (alias: `oxmgr log all`) to print recent logs for every managed process at once ([#30](https://github.com/Vladimir-Urik/OxMgr/issues/30)).
+- Running `oxmgr logs` without a target now prints usage help instead of an error ([#30](https://github.com/Vladimir-Urik/OxMgr/issues/30)).
+- Reserved `all` as a forbidden process name to avoid conflicts with bulk commands.
 
 ## v0.2.0 - 2026-04-06
 
