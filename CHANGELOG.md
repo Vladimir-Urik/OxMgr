@@ -1,9 +1,6 @@
 # Changelog
 
-> Starting from the next release, Oxmgr follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`.
-> Breaking changes bump `MAJOR`, new backwards-compatible features bump `MINOR`, bug fixes bump `PATCH`.
-
-## Unreleased
+## v0.3.0 - 2026-04-19
 
 ### Added
 
