@@ -2,11 +2,13 @@
 
 ## Supported Versions
 
-OxMgr is currently in the `0.1.x` release line. Security fixes are provided for the latest published `0.1.x` release on a best-effort basis.
+OxMgr is currently in the `0.3.x` release line. Security fixes are provided for the latest published `0.2.x` release on a best-effort basis.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | :white_check_mark: |
+| 0.3.x   | :white_check_mark: |
+| 0.2.x   | :white_check_mark: |
+| 0.1.x   | :x: |
 | < 0.1   | :x: |
 
 ## Reporting a Vulnerability
