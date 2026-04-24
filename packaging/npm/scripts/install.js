@@ -9,13 +9,55 @@ const pkg = require("../package.json");
 function targetTriple() {
   const key = `${process.platform}-${process.arch}`;
   const map = {
-    "linux-x64": { target: "x86_64-unknown-linux-gnu", ext: "tar.gz" },
-    "linux-arm64": { target: "aarch64-unknown-linux-gnu", ext: "tar.gz" },
     "darwin-x64": { target: "x86_64-apple-darwin", ext: "tar.gz" },
     "darwin-arm64": { target: "aarch64-apple-darwin", ext: "tar.gz" },
     "win32-x64": { target: "x86_64-pc-windows-msvc", ext: "zip" }
   };
+
+  if (process.platform === "linux") {
+    const libc = detectLinuxLibc();
+    if (process.arch === "x64") {
+      return {
+        target: libc === "glibc" ? "x86_64-unknown-linux-gnu" : "x86_64-unknown-linux-musl",
+        ext: "tar.gz"
+      };
+    }
+    if (process.arch === "arm64") {
+      return {
+        target: libc === "glibc" ? "aarch64-unknown-linux-gnu" : "aarch64-unknown-linux-musl",
+        ext: "tar.gz"
+      };
+    }
+    return null;
+  }
+
   return map[key] || null;
+}
+
+function detectLinuxLibc() {
+  const report = typeof process.report?.getReport === "function" ? process.report.getReport() : null;
+  const runtime = report?.header?.glibcVersionRuntime;
+  if (runtime) {
+    return "glibc";
+  }
+
+  const getconf = spawnSync("getconf", ["GNU_LIBC_VERSION"], { encoding: "utf8" });
+  const getconfOutput = `${getconf.stdout || ""}\n${getconf.stderr || ""}`.toLowerCase();
+  if (getconf.status === 0 && getconfOutput.includes("glibc")) {
+    return "glibc";
+  }
+
+  const ldd = spawnSync("ldd", ["--version"], { encoding: "utf8" });
+  const lddOutput = `${ldd.stdout || ""}\n${ldd.stderr || ""}`.toLowerCase();
+  if (lddOutput.includes("musl")) {
+    return "musl";
+  }
+  if (lddOutput.includes("glibc") || lddOutput.includes("gnu libc")) {
+    return "glibc";
+  }
+
+  // Prefer the portable static build when libc is unknown.
+  return "musl";
 }
 
 function repositorySlug() {

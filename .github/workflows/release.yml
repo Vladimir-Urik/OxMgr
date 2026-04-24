@@ -27,6 +27,12 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive_ext: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            archive_ext: tar.gz
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive_ext: tar.gz
@@ -53,6 +59,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        if: endsWith(matrix.target, '-linux-musl')
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
 
       - name: Build binary (Unix)
         if: runner.os != 'Windows'
@@ -91,12 +105,12 @@ jobs:
           "$hash  $asset" | Out-File -FilePath "$assetPath.sha256" -Encoding utf8NoBOM
 
       - name: Build Debian package
-        if: runner.os == 'Linux' && (matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu')
+        if: runner.os == 'Linux' && (matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-musl')
         shell: bash
         run: |
           set -euo pipefail
           DEB_ARCH="amd64"
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
             DEB_ARCH="arm64"
           fi
           
@@ -130,7 +144,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Debian artifact
-        if: runner.os == 'Linux' && (matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu')
+        if: runner.os == 'Linux' && (matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-unknown-linux-musl')
         uses: actions/upload-artifact@v4
         with:
           name: release-deb-${{ matrix.target }}
@@ -458,8 +472,8 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           REPO="${GITHUB_REPOSITORY}"
-          LINUX_INTEL_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-gnu.tar.gz"
-          LINUX_ARM_ASSET="oxmgr-${TAG}-aarch64-unknown-linux-gnu.tar.gz"
+          LINUX_INTEL_ASSET="oxmgr-${TAG}-x86_64-unknown-linux-musl.tar.gz"
+          LINUX_ARM_ASSET="oxmgr-${TAG}-aarch64-unknown-linux-musl.tar.gz"
 
           INTEL_SHA=$(grep -h -F "${LINUX_INTEL_ASSET}" release-assets/*.sha256 | head -n1 | awk '{print $1}' | tr -d '\r' || true)
           ARM_SHA=$(grep -h -F "${LINUX_ARM_ASSET}" release-assets/*.sha256 | head -n1 | awk '{print $1}' | tr -d '\r' || true)

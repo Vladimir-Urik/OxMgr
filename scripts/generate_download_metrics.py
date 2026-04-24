@@ -87,9 +87,13 @@ def is_payload_asset(name: str) -> bool:
 
 def classify_asset(name: str) -> str:
     if name.endswith("x86_64-unknown-linux-gnu.tar.gz"):
-        return "linux_tarball"
+        return "linux_gnu_tarball"
     if name.endswith("aarch64-unknown-linux-gnu.tar.gz"):
-        return "linux_arm_tarball"
+        return "linux_arm_gnu_tarball"
+    if name.endswith("x86_64-unknown-linux-musl.tar.gz"):
+        return "linux_musl_tarball"
+    if name.endswith("aarch64-unknown-linux-musl.tar.gz"):
+        return "linux_arm_musl_tarball"
     if name.endswith("x86_64-apple-darwin.tar.gz"):
         return "mac_intel_tarball"
     if name.endswith("aarch64-apple-darwin.tar.gz"):
@@ -312,7 +316,11 @@ def iso_to_display(value: str) -> str:
 
 
 def asset_notes(kind: str) -> str:
-    if kind in {"linux_tarball", "linux_arm_tarball", "mac_intel_tarball", "mac_arm_tarball"}:
+    if kind in {"linux_gnu_tarball", "linux_arm_gnu_tarball"}:
+        return "Shared by Homebrew and direct manual downloads."
+    if kind in {"linux_musl_tarball", "linux_arm_musl_tarball"}:
+        return "Shared by npm postinstall and direct manual downloads."
+    if kind in {"mac_intel_tarball", "mac_arm_tarball"}:
         return "Shared by Homebrew, npm postinstall, and direct manual downloads."
     if kind == "windows_zip":
         return "Shared by Chocolatey, npm postinstall, and direct manual downloads."
@@ -914,7 +922,7 @@ def render_html_report(
       {render_apt_panel()}
     </section>
 
-    <p class="footer">The Linux and macOS tarballs are shared between Homebrew installs, npm postinstall downloads, and manual downloads. The Windows zip is shared between Chocolatey, npm postinstall, and manual downloads. Exact APT installs are not observable with the current GitHub Pages hosting model.</p>
+    <p class="footer">Linux GNU tarballs are primarily shared by Homebrew and manual downloads, while Linux musl tarballs are shared by npm postinstall and manual downloads. macOS tarballs are shared by Homebrew, npm postinstall, and manual downloads. The Windows zip is shared between Chocolatey, npm postinstall, and manual downloads. Exact APT installs are not observable with the current GitHub Pages hosting model.</p>
   </main>
 </body>
 </html>

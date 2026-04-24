@@ -20,10 +20,12 @@ Release publish jobs execute only for the canonical repository:
 - Build release binaries for:
   - `x86_64-unknown-linux-gnu`
   - `aarch64-unknown-linux-gnu`
+  - `x86_64-unknown-linux-musl`
+  - `aarch64-unknown-linux-musl`
   - `x86_64-apple-darwin`
   - `aarch64-apple-darwin`
   - `x86_64-pc-windows-msvc`
-- Build Debian package (`oxmgr_<version>_amd64.deb`)
+- Build Debian packages (`oxmgr_<version>_amd64.deb`, `oxmgr_<version>_arm64.deb`) from the Linux musl binaries
 - Publish GitHub Release assets + `SHA256SUMS`
 - Optionally sign release assets (`.asc`) with GPG
 - Publish npm package (`oxmgr`) when `NPM_TOKEN` is set
@@ -79,9 +81,11 @@ When `APT_GPG_*` secrets are set, workflow also publishes:
 ## Optional notes
 
 - npm installer verifies downloaded artifact checksum (`.sha256`) before extraction.
+- npm installer auto-detects Linux libc and prefers GNU tarballs on glibc systems, with musl as the compatibility fallback.
 - Windows package-manager distribution is currently via `npm` and `Scoop` (Chocolatey publish is paused).
+- Homebrew continues to use the GNU Linux tarballs explicitly.
 - If APT signing secrets are configured, metadata is signed and you can avoid `trusted=yes`.
-- AUR publishing uses the release Linux tarball checksum plus the tagged `LICENSE` checksum to regenerate [`packaging/aur/PKGBUILD`](../packaging/aur/PKGBUILD) and [`packaging/aur/.SRCINFO`](../packaging/aur/.SRCINFO) before pushing to `oxmgr-bin`.
+- AUR publishing uses the release Linux musl tarball checksum plus the tagged `LICENSE` checksum to regenerate [`packaging/aur/PKGBUILD`](../packaging/aur/PKGBUILD) and [`packaging/aur/.SRCINFO`](../packaging/aur/.SRCINFO) before pushing to `oxmgr-bin`.
 
 ## Download metrics dashboard
 

@@ -20,15 +20,14 @@ pkgdesc="Lightweight cross-platform process manager"
 arch=('x86_64' 'aarch64')
 url="https://github.com/${REPO}"
 license=('MIT')
-depends=('gcc-libs' 'glibc')
 optdepends=('systemd: install and manage the oxmgr daemon as a systemd service')
 provides=('oxmgr')
 conflicts=('oxmgr')
 source_x86_64=(
-  "https://github.com/${REPO}/releases/download/v\${pkgver}/oxmgr-v\${pkgver}-x86_64-unknown-linux-gnu.tar.gz"
+  "https://github.com/${REPO}/releases/download/v\${pkgver}/oxmgr-v\${pkgver}-x86_64-unknown-linux-musl.tar.gz"
 )
 source_aarch64=(
-  "https://github.com/${REPO}/releases/download/v\${pkgver}/oxmgr-v\${pkgver}-aarch64-unknown-linux-gnu.tar.gz"
+  "https://github.com/${REPO}/releases/download/v\${pkgver}/oxmgr-v\${pkgver}-aarch64-unknown-linux-musl.tar.gz"
 )
 source=(
   "LICENSE::https://raw.githubusercontent.com/${REPO}/v\${pkgver}/LICENSE"

@@ -44,6 +44,8 @@ Windows package-manager channels are currently `Scoop` and `npm`.
 yay -S oxmgr-bin
 ```
 
+The `oxmgr-bin` package uses the published Linux musl release artifact for broader compatibility across distributions.
+
 ### APT (Debian/Ubuntu)
 
 Unsigned repository (simple setup):
@@ -53,6 +55,8 @@ echo "deb [trusted=yes] https://vladimir-urik.github.io/OxMgr/apt stable main" |
 sudo apt update
 sudo apt install oxmgr
 ```
+
+The published `.deb` packages ship the Linux musl binary to avoid newer glibc runtime requirements on older distributions.
 
 Signed repository (recommended):
 

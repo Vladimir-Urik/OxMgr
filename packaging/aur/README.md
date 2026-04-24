@@ -4,7 +4,6 @@ This directory contains the metadata for the `oxmgr-bin` AUR package.
 
 ## Why `oxmgr-bin`
 
-The AUR package installs the published Linux release artifact instead of compiling from source, which keeps installation fast and matches the binary distributed through the other package managers.
 
 ## Update for a new release
 
@@ -12,8 +11,8 @@ The AUR package installs the published Linux release artifact instead of compili
 
    ```bash
    VERSION=0.1.6
-   curl -fsSL "https://github.com/Vladimir-Urik/OxMgr/releases/download/v${VERSION}/oxmgr-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
-   curl -fsSL "https://github.com/Vladimir-Urik/OxMgr/releases/download/v${VERSION}/oxmgr-v${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256"
+   curl -fsSL "https://github.com/Vladimir-Urik/OxMgr/releases/download/v${VERSION}/oxmgr-v${VERSION}-x86_64-unknown-linux-musl.tar.gz.sha256"
+   curl -fsSL "https://github.com/Vladimir-Urik/OxMgr/releases/download/v${VERSION}/oxmgr-v${VERSION}-aarch64-unknown-linux-musl.tar.gz.sha256"
    curl -fsSL "https://raw.githubusercontent.com/Vladimir-Urik/OxMgr/v${VERSION}/LICENSE" | shasum -a 256
    ```
 
