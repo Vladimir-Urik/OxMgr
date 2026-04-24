@@ -8,7 +8,7 @@ use crate::ipc::{send_request, IpcRequest};
 use crate::process::{ManagedProcess, StartProcessSpec};
 
 use super::common::{expand_specs_with_deterministic_names, expect_ok};
-use super::import::{load_import_specs, order_specs_for_start};
+use super::import::{load_import_specs_from_paths, order_specs_for_start};
 
 #[derive(Debug, Clone)]
 enum ApplyAction {
@@ -26,12 +26,12 @@ struct ApplyPlan {
 
 pub(crate) async fn run(
     config: &AppConfig,
-    path: PathBuf,
+    paths: Vec<PathBuf>,
     env: Option<String>,
     only: Vec<String>,
     prune: bool,
 ) -> Result<()> {
-    let mut specs = load_import_specs(&path, env.as_deref())?;
+    let mut specs = load_import_specs_from_paths(&paths, env.as_deref())?;
     if !only.is_empty() {
         specs.retain(|spec| {
             spec.name
@@ -44,7 +44,7 @@ pub(crate) async fn run(
 
     let desired = expand_specs_for_apply(specs)?;
     if desired.is_empty() {
-        println!("No apps found in {}", path.display());
+        println!("No apps found in {}", display_paths(&paths));
         return Ok(());
     }
 
@@ -143,6 +143,14 @@ pub(crate) async fn run(
     }
 
     Ok(())
+}
+
+fn display_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn expand_specs_for_apply(

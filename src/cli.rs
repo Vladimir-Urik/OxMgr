@@ -118,7 +118,8 @@ pub enum Commands {
     },
     /// Apply an oxfile declaratively against the local daemon state.
     Apply {
-        path: PathBuf,
+        #[arg(required = true, num_args = 1..)]
+        paths: Vec<PathBuf>,
         #[arg(long)]
         env: Option<String>,
         #[arg(long, value_delimiter = ',')]
@@ -136,7 +137,8 @@ pub enum Commands {
     },
     /// Validate an oxfile without mutating daemon state.
     Validate {
-        path: PathBuf,
+        #[arg(required = true, num_args = 1..)]
+        paths: Vec<PathBuf>,
         #[arg(long)]
         env: Option<String>,
         #[arg(long, value_delimiter = ',')]
@@ -714,6 +716,43 @@ mod tests {
     }
 
     #[test]
+    fn clap_parses_apply_with_multiple_paths() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "apply",
+            "core.toml",
+            "worker.toml",
+            "--env",
+            "prod",
+            "--only",
+            "api,worker",
+            "--prune",
+        ])
+        .expect("expected apply parsing success");
+
+        match cli.command {
+            Commands::Apply {
+                paths,
+                env,
+                only,
+                prune,
+            } => {
+                assert_eq!(
+                    paths,
+                    vec![
+                        std::path::PathBuf::from("core.toml"),
+                        std::path::PathBuf::from("worker.toml")
+                    ]
+                );
+                assert_eq!(env.as_deref(), Some("prod"));
+                assert_eq!(only, vec!["api".to_string(), "worker".to_string()]);
+                assert!(prune);
+            }
+            _ => panic!("expected apply subcommand"),
+        }
+    }
+
+    #[test]
     fn clap_parses_runtime_with_env_and_only_filters() {
         let cli = Cli::try_parse_from([
             "oxmgr",
@@ -733,6 +772,36 @@ mod tests {
                 assert_eq!(only, vec!["api".to_string(), "worker".to_string()]);
             }
             _ => panic!("expected runtime subcommand"),
+        }
+    }
+
+    #[test]
+    fn clap_parses_validate_with_multiple_paths() {
+        let cli = Cli::try_parse_from([
+            "oxmgr",
+            "validate",
+            "core.toml",
+            "worker.toml",
+            "--env",
+            "prod",
+            "--only",
+            "api,worker",
+        ])
+        .expect("expected validate parsing success");
+
+        match cli.command {
+            Commands::Validate { paths, env, only } => {
+                assert_eq!(
+                    paths,
+                    vec![
+                        std::path::PathBuf::from("core.toml"),
+                        std::path::PathBuf::from("worker.toml")
+                    ]
+                );
+                assert_eq!(env.as_deref(), Some("prod"));
+                assert_eq!(only, vec!["api".to_string(), "worker".to_string()]);
+            }
+            _ => panic!("expected validate subcommand"),
         }
     }
 }

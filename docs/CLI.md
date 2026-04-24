@@ -24,7 +24,7 @@ Lifecycle operations:
 Configuration workflow:
 
 - `oxmgr validate <config>`
-- `oxmgr apply <oxfile.toml>`
+- `oxmgr apply <config>...`
 - `oxmgr import <source>`
 - `oxmgr export <name|id>`
 
@@ -144,9 +144,11 @@ Foreground runtime details: [Runtime Mode (pm2-runtime style)](./RUNTIME.md).
 
 - `oxmgr import <source> [--env <profile>] [--only a,b] [--sha256 <hex>]`
 - `oxmgr export <name|id> [--out <file>]`
-- `oxmgr apply <path> [--env <profile>] [--only a,b] [--prune]`
+- `oxmgr apply <config>... [--env <profile>] [--only a,b] [--prune]`
 - `oxmgr convert <ecosystem.json> --out <oxfile.toml> [--env <profile>]`
-- `oxmgr validate <config> [--env <profile>] [--only a,b]`
+- `oxmgr validate <config>... [--env <profile>] [--only a,b]`
+
+When multiple config files are passed to `apply` or `validate`, Oxmgr resolves each file independently and then combines the resulting app specs in argument order. Duplicate expanded process names still fail validation/apply.
 
 Import source notes:
 

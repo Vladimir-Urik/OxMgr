@@ -82,9 +82,16 @@ Apply desired state:
 
 ```bash
 oxmgr apply ./oxfile.toml --env prod
+oxmgr apply ./core.toml ./worker.toml --env prod
 ```
 
 `apply` is idempotent and safe for repeated runs in CI/CD.
+
+Validate the same merged config set before applying:
+
+```bash
+oxmgr validate ./core.toml ./worker.toml --env prod
+```
 
 ## 5) Import / Export Service Definitions
 

@@ -699,6 +699,97 @@ stop_timeout_secs = 1
 
 #[test]
 #[serial]
+fn e2e_apply_accepts_multiple_config_files() {
+    if !should_run_e2e("e2e_apply_accepts_multiple_config_files") {
+        return;
+    }
+
+    let env = TestEnv::new("apply-multi-file");
+    let command = escape_toml_string(&sleep_command(25));
+    let core_path = env.write_file(
+        "fixtures/oxfile.core.toml",
+        &format!(
+            r#"version = 1
+
+[[apps]]
+name = "db"
+command = "{command}"
+restart_policy = "never"
+stop_timeout_secs = 1
+"#
+        ),
+    );
+    let worker_path = env.write_file(
+        "fixtures/oxfile.worker.toml",
+        &format!(
+            r#"version = 1
+
+[[apps]]
+name = "worker"
+command = "{command}"
+restart_policy = "never"
+stop_timeout_secs = 1
+depends_on = ["db"]
+"#
+        ),
+    );
+
+    let validate = env.run_vec(vec![
+        "validate".to_string(),
+        path_string(&core_path),
+        path_string(&worker_path),
+    ]);
+    assert!(
+        validate.status.success(),
+        "validate failed: {}",
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    let validate_stdout = String::from_utf8_lossy(&validate.stdout);
+    assert!(
+        validate_stdout.contains("Config validation: OK")
+            && validate_stdout.contains("Format: multiple configs")
+            && validate_stdout.contains("Apps: 2")
+            && validate_stdout.contains("Expanded Processes: 2"),
+        "unexpected validate output: {validate_stdout}"
+    );
+
+    let apply = env.run_vec(vec![
+        "apply".to_string(),
+        path_string(&core_path),
+        path_string(&worker_path),
+    ]);
+    assert!(
+        apply.status.success(),
+        "apply failed: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let apply_stdout = String::from_utf8_lossy(&apply.stdout);
+    assert!(
+        apply_stdout.contains("Apply complete:") && apply_stdout.contains("2 created"),
+        "unexpected apply output: {apply_stdout}"
+    );
+
+    wait_for_pid(&env, "db", Duration::from_secs(8)).expect("expected db pid after apply");
+    wait_for_pid(&env, "worker", Duration::from_secs(8)).expect("expected worker pid after apply");
+
+    let list = env.run(&["list"]);
+    assert!(
+        list.status.success(),
+        "list failed: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("db") && list_stdout.contains("worker"),
+        "unexpected list output: {list_stdout}"
+    );
+
+    let _ = env.run(&["delete", "db"]);
+    let _ = env.run(&["delete", "worker"]);
+}
+
+#[test]
+#[serial]
 fn e2e_reload_replaces_pid() {
     if !should_run_e2e("e2e_reload_replaces_pid") {
         return;

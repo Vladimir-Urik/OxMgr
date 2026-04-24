@@ -94,6 +94,21 @@ pub(crate) fn load_import_specs(
     }
 }
 
+pub(crate) fn load_import_specs_from_paths(
+    paths: &[PathBuf],
+    env: Option<&str>,
+) -> Result<Vec<EcosystemProcessSpec>> {
+    let mut combined = Vec::new();
+
+    for path in paths {
+        let mut specs = load_import_specs(path, env)
+            .with_context(|| format!("failed to load config {}", path.display()))?;
+        combined.append(&mut specs);
+    }
+
+    Ok(combined)
+}
+
 fn load_local_specs(source: &str, env: Option<&str>) -> Result<Vec<StartProcessSpec>> {
     let path = PathBuf::from(source);
     if !path.exists() {

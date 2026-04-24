@@ -1,12 +1,12 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use regex::RegexSet;
 
 use crate::ecosystem::EcosystemProcessSpec;
 
-use super::import::load_import_specs;
+use super::import::load_import_specs_from_paths;
 
 #[derive(Debug, Clone)]
 struct OxfileValidationReport {
@@ -15,12 +15,12 @@ struct OxfileValidationReport {
     unnamed_count: usize,
 }
 
-pub(crate) fn run(path: &Path, env: Option<&str>, only: &[String]) -> Result<()> {
-    validate_oxfile_command(path, env, only)
+pub(crate) fn run(paths: &[PathBuf], env: Option<&str>, only: &[String]) -> Result<()> {
+    validate_oxfile_command(paths, env, only)
 }
 
-fn validate_oxfile_command(path: &Path, env: Option<&str>, only: &[String]) -> Result<()> {
-    let mut specs = load_import_specs(path, env)?;
+fn validate_oxfile_command(paths: &[PathBuf], env: Option<&str>, only: &[String]) -> Result<()> {
+    let mut specs = load_import_specs_from_paths(paths, env)?;
     if !only.is_empty() {
         specs.retain(|spec| {
             spec.name
@@ -32,12 +32,12 @@ fn validate_oxfile_command(path: &Path, env: Option<&str>, only: &[String]) -> R
 
     if specs.is_empty() {
         if only.is_empty() {
-            anyhow::bail!("no apps resolved from {}", path.display());
+            anyhow::bail!("no apps resolved from {}", display_paths(paths));
         } else {
             anyhow::bail!(
                 "no apps matched --only filter ({}) in {}",
                 only.join(","),
-                path.display()
+                display_paths(paths)
             );
         }
     }
@@ -45,8 +45,8 @@ fn validate_oxfile_command(path: &Path, env: Option<&str>, only: &[String]) -> R
     let report = validate_resolved_specs(&specs)?;
 
     println!("Config validation: OK");
-    println!("Path: {}", path.display());
-    println!("Format: {}", config_format_label(path));
+    println!("Paths: {}", display_paths(paths));
+    println!("Format: {}", config_format_label(paths));
     println!("Profile: {}", env.unwrap_or("default"));
     println!("Apps: {}", report.app_count);
     println!("Expanded Processes: {}", report.expanded_process_count);
@@ -240,7 +240,7 @@ fn is_node_command_token(token: &str) -> bool {
     )
 }
 
-fn config_format_label(path: &Path) -> &'static str {
+fn single_config_format_label(path: &Path) -> &'static str {
     match path
         .extension()
         .and_then(|value| value.to_str())
@@ -251,6 +251,22 @@ fn config_format_label(path: &Path) -> &'static str {
         Some("js") | Some("cjs") | Some("mjs") | Some("json") | Some("json5") => "ecosystem config",
         _ => "config",
     }
+}
+
+fn config_format_label(paths: &[PathBuf]) -> &'static str {
+    if paths.len() != 1 {
+        return "multiple configs";
+    }
+
+    single_config_format_label(&paths[0])
+}
+
+fn display_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -584,7 +600,8 @@ mod tests {
         )
         .expect("failed to write ecosystem fixture");
 
-        validate_oxfile_command(&path, None, &[]).expect("validate should accept ecosystem json");
+        validate_oxfile_command(std::slice::from_ref(&path), None, &[])
+            .expect("validate should accept ecosystem json");
 
         let _ = std::fs::remove_file(path);
     }
@@ -614,7 +631,8 @@ module.exports = {
         )
         .expect("failed to write ecosystem fixture");
 
-        validate_oxfile_command(&path, None, &[]).expect("validate should accept ecosystem js");
+        validate_oxfile_command(std::slice::from_ref(&path), None, &[])
+            .expect("validate should accept ecosystem js");
 
         let _ = std::fs::remove_file(path);
     }

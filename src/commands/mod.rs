@@ -75,13 +75,13 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         } => import::run(config, source, env, only, sha256).await,
         Commands::Export { target, out } => export::run(config, target, out).await,
         Commands::Apply {
-            path,
+            paths,
             env,
             only,
             prune,
-        } => apply::run(config, path, env, only, prune).await,
+        } => apply::run(config, paths, env, only, prune).await,
         Commands::Convert { input, out, env } => convert::run(input, out, env),
-        Commands::Validate { path, env, only } => validate::run(&path, env.as_deref(), &only),
+        Commands::Validate { paths, env, only } => validate::run(&paths, env.as_deref(), &only),
         Commands::Deploy {
             config,
             force,

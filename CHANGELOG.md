@@ -6,6 +6,7 @@
 
 - Added `oxmgr restart all` to restart every managed process in a single command ([#31](https://github.com/Vladimir-Urik/OxMgr/issues/31)).
 - Added config-file targets for `oxmgr stop`, `oxmgr restart`, and `oxmgr delete`, so commands like `oxmgr stop ./oxfile.toml` resolve all named apps from an `oxfile.toml` or PM2 ecosystem file and apply the lifecycle action to each expanded process ([#31](https://github.com/Vladimir-Urik/OxMgr/issues/31)).
+- Added multi-file `oxmgr apply <config>...` and `oxmgr validate <config>...`, combining independently resolved config files in CLI argument order while still rejecting duplicate expanded process names ([#31](https://github.com/Vladimir-Urik/OxMgr/issues/31)).
 - Added Linux musl release artifacts for `x86_64` and `aarch64` to improve compatibility on older glibc-based distributions ([#32](https://github.com/Vladimir-Urik/OxMgr/issues/32)).
 
 ### Changed

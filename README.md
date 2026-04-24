@@ -120,6 +120,7 @@ stop_timeout_secs = 5
 ```bash
 oxmgr validate ./oxfile.toml
 oxmgr apply ./oxfile.toml
+oxmgr apply ./core.toml ./worker.toml
 ```
 
 Container-style foreground mode:
