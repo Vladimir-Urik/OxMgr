@@ -389,6 +389,115 @@ fn e2e_process_lifecycle() {
 
 #[test]
 #[serial]
+fn e2e_restart_all_and_config_lifecycle_targets() {
+    if !should_run_e2e("e2e_restart_all_and_config_lifecycle_targets") {
+        return;
+    }
+
+    let env = TestEnv::new("lifecycle-config-targets");
+    let command = escape_toml_string(&sleep_command(25));
+    let oxfile_path = env.write_file(
+        "fixtures/oxfile.lifecycle.toml",
+        &format!(
+            r#"version = 1
+
+[[apps]]
+name = "web"
+command = "{command}"
+restart_policy = "never"
+stop_timeout_secs = 1
+
+[[apps]]
+name = "worker"
+command = "{command}"
+restart_policy = "never"
+stop_timeout_secs = 1
+"#
+        ),
+    );
+
+    let apply = env.run_vec(vec!["apply".to_string(), path_string(&oxfile_path)]);
+    assert!(
+        apply.status.success(),
+        "apply failed: {}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+
+    let first_web_pid =
+        wait_for_pid(&env, "web", Duration::from_secs(8)).expect("expected web pid after apply");
+    let first_worker_pid = wait_for_pid(&env, "worker", Duration::from_secs(8))
+        .expect("expected worker pid after apply");
+
+    let restart_all = env.run(&["restart", "all"]);
+    assert!(
+        restart_all.status.success(),
+        "restart all failed: {}",
+        String::from_utf8_lossy(&restart_all.stderr)
+    );
+
+    let web_restarted = wait_until(Duration::from_secs(8), || {
+        let output = env.run(&["status", "web"]);
+        output.status.success()
+            && parse_pid_from_status(&String::from_utf8_lossy(&output.stdout))
+                != Some(first_web_pid)
+    });
+    assert!(
+        web_restarted,
+        "expected web pid to change after restart all"
+    );
+
+    let worker_restarted = wait_until(Duration::from_secs(8), || {
+        let output = env.run(&["status", "worker"]);
+        output.status.success()
+            && parse_pid_from_status(&String::from_utf8_lossy(&output.stdout))
+                != Some(first_worker_pid)
+    });
+    assert!(
+        worker_restarted,
+        "expected worker pid to change after restart all"
+    );
+
+    let stop_from_config = env.run_vec(vec!["stop".to_string(), path_string(&oxfile_path)]);
+    assert!(
+        stop_from_config.status.success(),
+        "stop from config failed: {}",
+        String::from_utf8_lossy(&stop_from_config.stderr)
+    );
+
+    for name in ["web", "worker"] {
+        let output = env.run(&["status", name]);
+        assert!(
+            output.status.success(),
+            "status failed for {name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Status:      stopped"),
+            "expected {name} to be stopped, got:\n{stdout}"
+        );
+    }
+
+    let delete_from_config = env.run_vec(vec!["delete".to_string(), path_string(&oxfile_path)]);
+    assert!(
+        delete_from_config.status.success(),
+        "delete from config failed: {}",
+        String::from_utf8_lossy(&delete_from_config.stderr)
+    );
+
+    for name in ["web", "worker"] {
+        let output = env.run(&["status", name]);
+        assert!(
+            !output.status.success(),
+            "expected {name} to be deleted, got stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+#[serial]
 fn e2e_validate_oxfile() {
     if !should_run_e2e("e2e_validate_oxfile") {
         return;

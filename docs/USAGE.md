@@ -52,12 +52,16 @@ oxmgr reload api
 oxmgr pull api
 oxmgr delete api
 oxmgr rm api
+oxmgr stop ./oxfile.toml
+oxmgr restart ./oxfile.toml
+oxmgr delete ./oxfile.toml
 ```
 
 To stop or remove **all** managed processes at once:
 
 ```bash
 oxmgr stop all
+oxmgr restart all
 oxmgr delete all   # or: oxmgr rm all
 ```
 

@@ -76,6 +76,50 @@ async fn stop_all_clears_scheduled_restarts() {
 }
 
 #[tokio::test]
+async fn restart_all_restarts_every_process() {
+    let mut manager = empty_manager("restart-all-basic");
+    let mut p1 = spawnable_fixture_process();
+    p1.name = "web".to_string();
+    p1.pid = None;
+
+    let mut p2 = spawnable_fixture_process();
+    p2.name = "worker".to_string();
+    p2.pid = None;
+
+    manager.processes.insert(p1.name.clone(), p1);
+    manager.processes.insert(p2.name.clone(), p2);
+
+    let restarted = manager
+        .restart_all_processes()
+        .await
+        .expect("restart_all should succeed");
+
+    assert_eq!(restarted.len(), 2, "both processes should be returned");
+
+    for name in &["web", "worker"] {
+        let process = manager
+            .processes
+            .get(*name)
+            .expect("process should still exist after restart_all");
+        assert_eq!(process.status, ProcessStatus::Running);
+        assert_eq!(process.desired_state, DesiredState::Running);
+        assert!(process.pid.is_some(), "pid should be set after restart_all");
+    }
+}
+
+#[tokio::test]
+async fn restart_all_on_empty_manager_returns_empty_list() {
+    let mut manager = empty_manager("restart-all-empty");
+
+    let restarted = manager
+        .restart_all_processes()
+        .await
+        .expect("restart_all on empty manager should succeed");
+
+    assert!(restarted.is_empty(), "no processes to restart");
+}
+
+#[tokio::test]
 async fn delete_all_removes_every_process() {
     let mut manager = empty_manager("delete-all-basic");
     let mut p1 = fixture_process();

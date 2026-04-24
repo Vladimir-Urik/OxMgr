@@ -15,11 +15,11 @@ Runtime and monitoring:
 Lifecycle operations:
 
 - `oxmgr start "<command>" --name <name>`
-- `oxmgr stop <name|id>` / `oxmgr stop all`
-- `oxmgr restart <name|id>` (alias: `oxmgr rs`)
+- `oxmgr stop <name|id|config>` / `oxmgr stop all`
+- `oxmgr restart <name|id|config>` / `oxmgr restart all` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
 - `oxmgr pull [name|id]`
-- `oxmgr delete <name|id>` (alias: `oxmgr rm`) / `oxmgr delete all`
+- `oxmgr delete <name|id|config>` (alias: `oxmgr rm`) / `oxmgr delete all`
 
 Configuration workflow:
 
@@ -95,13 +95,15 @@ Supported config files:
 
 ## Lifecycle
 
-- `oxmgr stop <name|id>`
+- `oxmgr stop <name|id|config>`
 - `oxmgr stop all` — stops every managed process at once
-- `oxmgr restart <name|id>` (alias: `oxmgr rs`)
+- `oxmgr restart <name|id|config>` / `oxmgr restart all` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
 - `oxmgr pull [name|id]`
-- `oxmgr delete <name|id>` (alias: `oxmgr rm`)
+- `oxmgr delete <name|id|config>` (alias: `oxmgr rm`)
 - `oxmgr delete all` / `oxmgr rm all` — terminates and removes every managed process
+
+When `config` points to an `oxfile.toml` or PM2 ecosystem file, Oxmgr resolves all named apps in that file and applies the lifecycle action to each expanded process name.
 
 `pull` updates from configured git repository and reloads/restarts the service only when commit changed.
 

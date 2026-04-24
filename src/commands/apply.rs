@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest};
 use crate::process::{ManagedProcess, StartProcessSpec};
 
-use super::common::expect_ok;
+use super::common::{expand_specs_with_deterministic_names, expect_ok};
 use super::import::{load_import_specs, order_specs_for_start};
 
 #[derive(Debug, Clone)]
@@ -148,67 +148,16 @@ pub(crate) async fn run(
 fn expand_specs_for_apply(
     specs: Vec<crate::ecosystem::EcosystemProcessSpec>,
 ) -> Result<Vec<StartProcessSpec>> {
-    let mut desired = Vec::new();
+    let desired = expand_specs_with_deterministic_names(specs, "apply")?;
     let mut seen_names = HashSet::new();
 
-    for spec in specs {
-        let instances = spec.instances.max(1);
-        let base_name = spec.name.clone().with_context(|| {
-            format!(
-                "app command '{}' is missing 'name'; apply requires deterministic names",
-                spec.command
-            )
-        })?;
-
-        for idx in 0..instances {
-            let mut env = spec.env.clone();
-            let name = if instances > 1 {
-                let key = spec
-                    .instance_var
-                    .clone()
-                    .unwrap_or_else(|| "NODE_APP_INSTANCE".to_string());
-                env.insert(key, idx.to_string());
-                format!("{base_name}-{idx}")
-            } else {
-                base_name.clone()
-            };
-
-            if !seen_names.insert(name.clone()) {
-                anyhow::bail!("duplicate app name in desired config: {}", name);
-            }
-
-            desired.push(StartProcessSpec {
-                command: spec.command.clone(),
-                name: Some(name),
-                pre_reload_cmd: spec.pre_reload_cmd.clone(),
-                restart_policy: spec.restart_policy.clone(),
-                max_restarts: spec.max_restarts,
-                crash_restart_limit: spec.crash_restart_limit,
-                cwd: spec.cwd.clone(),
-                env,
-                health_check: spec.health_check.clone(),
-                stop_signal: spec.stop_signal.clone(),
-                stop_timeout_secs: spec.stop_timeout_secs.max(1),
-                restart_delay_secs: spec.restart_delay_secs,
-                start_delay_secs: spec.start_delay_secs,
-                watch: spec.watch,
-                watch_paths: spec.watch_paths.clone(),
-                ignore_watch: spec.ignore_watch.clone(),
-                watch_delay_secs: spec.watch_delay_secs,
-                cluster_mode: spec.cluster_mode,
-                cluster_instances: spec.cluster_instances,
-                namespace: spec.namespace.clone(),
-                resource_limits: spec.resource_limits.clone(),
-                git_repo: spec.git_repo.clone(),
-                git_ref: spec.git_ref.clone(),
-                pull_secret_hash: spec.pull_secret_hash.clone(),
-                reuse_port: spec.reuse_port,
-                wait_ready: spec.wait_ready,
-                ready_timeout_secs: spec.ready_timeout_secs,
-                log_date_format: spec.log_date_format.clone(),
-                unified_logs: spec.unified_logs,
-                cron_restart: spec.cron_restart.clone(),
-            });
+    for spec in &desired {
+        let name = spec
+            .name
+            .as_ref()
+            .expect("apply expansion should always set a process name");
+        if !seen_names.insert(name.clone()) {
+            anyhow::bail!("duplicate app name in desired config: {}", name);
         }
     }
 

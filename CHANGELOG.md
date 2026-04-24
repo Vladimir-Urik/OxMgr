@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added `oxmgr restart all` to restart every managed process in a single command ([#31](https://github.com/Vladimir-Urik/OxMgr/issues/31)).
+- Added config-file targets for `oxmgr stop`, `oxmgr restart`, and `oxmgr delete`, so commands like `oxmgr stop ./oxfile.toml` resolve all named apps from an `oxfile.toml` or PM2 ecosystem file and apply the lifecycle action to each expanded process ([#31](https://github.com/Vladimir-Urik/OxMgr/issues/31)).
+
+### Changed
+
+- Reused shared deterministic config-expansion logic across lifecycle commands, `apply`, and foreground `runtime` to keep instance naming behavior aligned.
+- Updated CLI and usage docs to document `restart all` and config-file lifecycle targets.
+
+### Security
+
+- Updated `SECURITY.md` supported-version guidance.
+
+### Dependencies
+
+- Bumped `clap` from `4.6.0` to `4.6.1`.
+- Bumped `tokio` from `1.51.1` to `1.52.1`.
+
 ## v0.3.0 - 2026-04-19
 
 ### Added

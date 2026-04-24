@@ -536,6 +536,18 @@ impl ProcessManager {
         self.restart_process_internal(target, true).await
     }
 
+    /// Restarts every managed process and returns the refreshed process list.
+    pub async fn restart_all_processes(&mut self) -> Result<Vec<ManagedProcess>> {
+        let names: Vec<String> = self.processes.keys().cloned().collect();
+        let mut restarted = Vec::with_capacity(names.len());
+
+        for name in names {
+            restarted.push(self.restart_process_internal(&name, true).await?);
+        }
+
+        Ok(restarted)
+    }
+
     async fn restart_process_internal(
         &mut self,
         target: &str,

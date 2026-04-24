@@ -283,6 +283,17 @@ async fn execute_request(
             }
             Err(err) => IpcResponse::error(err.to_string()),
         },
+        IpcRequest::Restart { target } if target == "all" => {
+            match manager.restart_all_processes().await {
+                Ok(processes) => {
+                    let mut response =
+                        IpcResponse::ok(format!("restarted {} process(es)", processes.len()));
+                    response.processes = redact_processes(processes);
+                    response
+                }
+                Err(err) => IpcResponse::error(err.to_string()),
+            }
+        }
         IpcRequest::Restart { target } => match manager.restart_process(&target).await {
             Ok(process) => {
                 let mut response = IpcResponse::ok(format!("restarted {}", process.target_label()));
