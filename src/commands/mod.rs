@@ -7,6 +7,7 @@ mod daemon_stop;
 mod delete;
 mod deploy;
 mod doctor;
+mod events;
 mod export;
 mod import;
 mod list;
@@ -46,6 +47,7 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             | Commands::Daemon {
                 command: DaemonCommand::Stop,
             }
+            | Commands::Events { .. }
     );
 
     if needs_daemon {
@@ -88,6 +90,11 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             args,
         } => deploy::run(config, force, args).await,
         Commands::Doctor => doctor::run(config).await,
+        Commands::Events {
+            process,
+            filter,
+            json,
+        } => events::run(config, process, filter, json).await,
         Commands::Runtime { path, env, only } => runtime::run(config, path, env, only).await,
         Commands::Startup { system } => startup::run(system, config),
         Commands::Service { command, system } => service::run(command, system, config),

@@ -14,6 +14,7 @@ async fn handle_exit_event_schedules_restart_without_blocking() {
             name: "api".to_string(),
             pid: 7001,
             exit_code: Some(1),
+            signal: None,
             success: false,
             wait_error: false,
         })
@@ -78,6 +79,7 @@ async fn handle_exit_event_with_zero_delay_restarts_immediately() {
             name: "api".to_string(),
             pid: 9100,
             exit_code: Some(1),
+            signal: None,
             success: false,
             wait_error: false,
         })
@@ -140,6 +142,7 @@ async fn crash_loop_limit_stops_fourth_crash_after_three_auto_restarts() {
                 name: "api".to_string(),
                 pid,
                 exit_code: Some(1),
+                signal: None,
                 success: false,
                 wait_error: false,
             })
@@ -168,6 +171,7 @@ async fn crash_loop_limit_stops_fourth_crash_after_three_auto_restarts() {
             name: "api".to_string(),
             pid,
             exit_code: Some(1),
+            signal: None,
             success: false,
             wait_error: false,
         })

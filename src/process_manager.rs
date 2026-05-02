@@ -1,10 +1,13 @@
 //! In-memory orchestration of managed processes, including persistence,
 //! restarts, health checks, file watching, and metric collection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Mutex;
 use std::time::{Duration, Instant as StdInstant};
+
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::Local;
@@ -12,9 +15,12 @@ use croner::parser::{CronParser, Seconds};
 use sysinfo::{Pid as SysPid, ProcessesToUpdate, System};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::{sleep, Instant as TokioInstant};
 use tracing::{error, info, warn};
+
+use crate::events::{BusEvent, EventProcessInfo};
 
 use self::git::{
     constant_time_eq, ensure_origin_remote, ensure_repo_checkout, git_rev_parse_head, run_git,
@@ -44,7 +50,7 @@ use self::watch::{watch_fingerprint_for_dir, watch_fingerprint_for_roots};
 use crate::cgroup;
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
-use crate::logging::{open_log_writers, process_logs_for_mode, ProcessLogs};
+use crate::logging::{prepare_log_files, process_logs_for_mode, ProcessLogs};
 use crate::process::{
     DesiredState, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus, StartProcessSpec,
 };
@@ -57,12 +63,23 @@ mod runtime;
 mod spawn;
 mod watch;
 
-/// Forwards stdout output from a process to a log file, prefixing each line with a formatted timestamp.
-fn forward_logs_with_date_prefix_stdout(
-    pipe: tokio::process::ChildStdout,
+/// Maximum number of stderr lines kept per process for crash diagnostics.
+const STDERR_TAIL_CAPACITY: usize = 30;
+
+/// Forwards one pipe (stdout or stderr) to a log file and emits line events on
+/// the bus. When `stderr_buf` is provided, each stderr line is also pushed into
+/// the ring buffer so `handle_exit_event` can attach the tail to crash events.
+fn forward_log_pipe<R>(
+    pipe: R,
     log_path: std::path::PathBuf,
-    date_format: String,
-) {
+    date_format: Option<String>,
+    event_tx: broadcast::Sender<Arc<BusEvent>>,
+    process_info: EventProcessInfo,
+    is_stderr: bool,
+    stderr_buf: Option<Arc<Mutex<VecDeque<String>>>>,
+) where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
     tokio::spawn(async move {
         let mut reader = BufReader::new(pipe);
         let mut buffer = String::new();
@@ -72,9 +89,12 @@ fn forward_logs_with_date_prefix_stdout(
             match reader.read_line(&mut buffer).await {
                 Ok(0) => break,
                 Ok(_) => {
-                    let now = Local::now();
-                    let formatted = now.format(&date_format).to_string();
-                    let formatted_line = format!("{}: {}", formatted, buffer);
+                    let file_line = match &date_format {
+                        Some(fmt) => {
+                            format!("{}: {}", Local::now().format(fmt), buffer)
+                        }
+                        None => buffer.clone(),
+                    };
 
                     if let Ok(mut file) = tokio::fs::OpenOptions::new()
                         .create(true)
@@ -82,43 +102,25 @@ fn forward_logs_with_date_prefix_stdout(
                         .open(&log_path)
                         .await
                     {
-                        let _ =
-                            AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
+                        let _ = file.write_all(file_line.as_bytes()).await;
                     }
-                }
-                Err(_) => break,
-            }
-        }
-    });
-}
 
-/// Forwards stderr output from a process to a log file, prefixing each line with a formatted timestamp.
-fn forward_logs_with_date_prefix_stderr(
-    pipe: tokio::process::ChildStderr,
-    log_path: std::path::PathBuf,
-    date_format: String,
-) {
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(pipe);
-        let mut buffer = String::new();
-
-        loop {
-            buffer.clear();
-            match reader.read_line(&mut buffer).await {
-                Ok(0) => break,
-                Ok(_) => {
-                    let now = Local::now();
-                    let formatted = now.format(&date_format).to_string();
-                    let formatted_line = format!("{}: {}", formatted, buffer);
-
-                    if let Ok(mut file) = tokio::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&log_path)
-                        .await
-                    {
-                        let _ =
-                            AsyncWriteExt::write_all(&mut file, formatted_line.as_bytes()).await;
+                    let line = buffer.trim_end_matches(['\n', '\r']).to_string();
+                    if !line.is_empty() {
+                        if let Some(ref buf) = stderr_buf {
+                            if let Ok(mut guard) = buf.lock() {
+                                if guard.len() >= STDERR_TAIL_CAPACITY {
+                                    guard.pop_front();
+                                }
+                                guard.push_back(line.clone());
+                            }
+                        }
+                        let event = if is_stderr {
+                            BusEvent::log_err(process_info.clone(), line)
+                        } else {
+                            BusEvent::log_out(process_info.clone(), line)
+                        };
+                        let _ = event_tx.send(Arc::new(event));
                     }
                 }
                 Err(_) => break,
@@ -154,6 +156,44 @@ pub(crate) fn calculate_next_cron_restart(cron_expr: &str, from_time: Option<u64
         .map(|dt| dt.timestamp() as u64)
 }
 
+/// Returns the POSIX signal name for a process that was killed by a signal.
+/// Returns `None` on Windows or when the process exited normally.
+#[cfg(unix)]
+fn exit_signal_name(status: &std::process::ExitStatus) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().map(|sig| {
+        match sig {
+            1 => "SIGHUP", 2 => "SIGINT", 3 => "SIGQUIT",
+            4 => "SIGILL", 5 => "SIGTRAP", 6 => "SIGABRT",
+            7 => "SIGBUS", 8 => "SIGFPE", 9 => "SIGKILL",
+            10 => "SIGUSR1", 11 => "SIGSEGV", 12 => "SIGUSR2",
+            13 => "SIGPIPE", 14 => "SIGALRM", 15 => "SIGTERM",
+            _ => return format!("SIG{sig}"),
+        }
+        .to_string()
+    })
+}
+
+#[cfg(not(unix))]
+fn exit_signal_name(_status: &std::process::ExitStatus) -> Option<String> {
+    None
+}
+
+/// Computes uptime in seconds from `last_started_at` to now.
+fn uptime_secs_since(last_started_at: Option<u64>) -> u64 {
+    let Some(started) = last_started_at else {
+        return 0;
+    };
+    now_epoch_secs().saturating_sub(started)
+}
+
+/// Drains a stderr ring buffer into a `Vec<String>`, preserving order.
+fn drain_stderr_buf(buf: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
+    buf.lock()
+        .map(|mut g| g.drain(..).collect())
+        .unwrap_or_default()
+}
+
 /// Coordinates process lifecycle operations for one local Oxmgr daemon.
 pub struct ProcessManager {
     config: AppConfig,
@@ -163,6 +203,10 @@ pub struct ProcessManager {
     scheduled_restarts: HashMap<String, TokioInstant>,
     next_id: u64,
     exit_tx: UnboundedSender<ProcessExitEvent>,
+    event_tx: broadcast::Sender<Arc<BusEvent>>,
+    /// Per-process ring buffers of recent stderr lines, used to attach crash
+    /// context (stack traces, panics, tracebacks) to exit events.
+    stderr_buffers: HashMap<String, Arc<Mutex<VecDeque<String>>>>,
     system: System,
 }
 
@@ -213,8 +257,22 @@ impl ProcessManager {
             scheduled_restarts: HashMap::new(),
             next_id,
             exit_tx,
+            event_tx: crate::events::new_bus(),
+            stderr_buffers: HashMap::new(),
             system: System::new_all(),
         })
+    }
+
+    /// Returns a cloned sender for the event broadcast channel.
+    ///
+    /// Use this to subscribe (`sender.subscribe()`) or to emit daemon-level
+    /// events from outside the manager.
+    pub fn event_tx(&self) -> broadcast::Sender<Arc<BusEvent>> {
+        self.event_tx.clone()
+    }
+
+    fn emit(&self, event: BusEvent) {
+        let _ = self.event_tx.send(Arc::new(event));
     }
 
     /// Reconciles persisted process state with the live machine and respawns
@@ -423,6 +481,7 @@ impl ProcessManager {
             sleep(Duration::from_secs(process.start_delay_secs)).await;
         }
 
+        self.emit(BusEvent::process_started(EventProcessInfo::from(&process)));
         let pid = self.spawn_child_with_readiness(&mut process).await?;
         process.pid = Some(pid);
         process.status = ProcessStatus::Running;
@@ -452,6 +511,7 @@ impl ProcessManager {
             pid
         );
 
+        self.emit(BusEvent::process_online(EventProcessInfo::from(&process)));
         self.processes.insert(process.name.clone(), process.clone());
         self.update_watch_fingerprint(&process);
         self.save()?;
@@ -487,6 +547,7 @@ impl ProcessManager {
         self.watch_fingerprints.remove(&name);
         self.pending_watch_restarts.remove(&name);
         self.scheduled_restarts.remove(&name);
+        self.emit(BusEvent::process_stopped(EventProcessInfo::from(&process)));
         self.processes.insert(name, process.clone());
         self.save()?;
         Ok(process)
@@ -1003,6 +1064,13 @@ impl ProcessManager {
         let now = now_epoch_secs();
         process.last_stopped_at = Some(now);
 
+        let uptime = uptime_secs_since(process.last_started_at);
+        let stderr_tail = self
+            .stderr_buffers
+            .get(&process.name)
+            .map(drain_stderr_buf)
+            .unwrap_or_default();
+
         if process.desired_state == DesiredState::Stopped {
             process.status = ProcessStatus::Stopped;
             process.restart_backoff_attempt = 0;
@@ -1031,6 +1099,7 @@ impl ProcessManager {
                     "crash loop detected after {} auto restarts in 5 minutes; manual restart required",
                     process.crash_restart_limit
                 ));
+                self.emit(BusEvent::process_errored(EventProcessInfo::from(&process)));
                 self.processes.insert(process.name.clone(), process);
                 self.save()?;
                 return Ok(());
@@ -1049,6 +1118,14 @@ impl ProcessManager {
                 .as_ref()
                 .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
             let process_name = process.name.clone();
+            self.emit(BusEvent::process_restarting(
+                EventProcessInfo::from(&process),
+                event.exit_code,
+                event.signal.clone(),
+                uptime,
+                process.restart_count,
+                restart_delay,
+            ));
             self.processes.insert(process_name.clone(), process.clone());
 
             if restart_delay == 0 {
@@ -1057,10 +1134,17 @@ impl ProcessManager {
                         "failed to restart process {} immediately after exit: {}",
                         process_name, err
                     );
-                    if let Some(process) = self.processes.get_mut(&process_name) {
-                        process.status = ProcessStatus::Errored;
-                        process.desired_state = DesiredState::Stopped;
-                        process.last_health_error = Some(format!("restart failed: {err}"));
+                    let errored_info =
+                        if let Some(process) = self.processes.get_mut(&process_name) {
+                            process.status = ProcessStatus::Errored;
+                            process.desired_state = DesiredState::Stopped;
+                            process.last_health_error = Some(format!("restart failed: {err}"));
+                            Some(EventProcessInfo::from(process as &ManagedProcess))
+                        } else {
+                            None
+                        };
+                    if let Some(info) = errored_info {
+                        self.emit(BusEvent::process_errored(info));
                     }
                     self.save()?;
                 }
@@ -1087,6 +1171,29 @@ impl ProcessManager {
         process.next_health_check = None;
         if !matches!(process.status, ProcessStatus::Restarting) {
             reset_auto_restart_state(&mut process);
+        }
+
+        match process.status {
+            ProcessStatus::Crashed => self.emit(BusEvent::process_crashed(
+                EventProcessInfo::from(&process),
+                event.exit_code,
+                event.signal.clone(),
+                uptime,
+                process.restart_count,
+                stderr_tail,
+            )),
+            ProcessStatus::Stopped => self.emit(BusEvent::process_exited(
+                EventProcessInfo::from(&process),
+                event.exit_code,
+                event.signal.clone(),
+                uptime,
+                process.restart_count,
+                vec![],
+            )),
+            ProcessStatus::Errored => {
+                self.emit(BusEvent::process_errored(EventProcessInfo::from(&process)))
+            }
+            _ => {}
         }
 
         self.processes.insert(process.name.clone(), process);
@@ -1141,13 +1248,14 @@ impl ProcessManager {
 
         self.scheduled_restarts.remove(name);
         self.pending_watch_restarts.remove(name);
+        self.emit(BusEvent::process_online(EventProcessInfo::from(&process)));
         self.processes.insert(name.to_string(), process.clone());
         self.update_watch_fingerprint(&process);
         self.save()?;
         Ok(process)
     }
 
-    async fn spawn_child_with_readiness(&self, process: &mut ManagedProcess) -> Result<u32> {
+    async fn spawn_child_with_readiness(&mut self, process: &mut ManagedProcess) -> Result<u32> {
         let pid = self.spawn_child(process).await?;
         if !process.wait_ready {
             return Ok(pid);
@@ -1192,7 +1300,7 @@ impl ProcessManager {
         );
     }
 
-    async fn spawn_child(&self, process: &mut ManagedProcess) -> Result<u32> {
+    async fn spawn_child(&mut self, process: &mut ManagedProcess) -> Result<u32> {
         let logs = ProcessLogs {
             stdout: process.stdout_log.clone(),
             stderr: process.stderr_log.clone(),
@@ -1215,15 +1323,8 @@ impl ProcessManager {
         }
         command.args(&spawn.args).stdin(Stdio::null());
 
-        // Handle log formatting if date format is configured
-        if process.log_date_format.is_some() {
-            command.stdout(Stdio::piped()).stderr(Stdio::piped());
-        } else {
-            let (stdout, stderr) = open_log_writers(&logs, self.config.log_rotation)?;
-            command
-                .stdout(Stdio::from(stdout))
-                .stderr(Stdio::from(stderr));
-        }
+        prepare_log_files(&logs, self.config.log_rotation)?;
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         if let Some(cwd) = &process.cwd {
             command.current_dir(cwd);
@@ -1265,18 +1366,39 @@ impl ProcessManager {
             .with_context(|| format!("failed to spawn {}", process.command))?;
         let pid = child.id().context("spawned child has no pid")?;
 
-        // Handle log forwarding with date formatting if configured
-        if let Some(date_format) = &process.log_date_format {
-            if let Some(stdout) = child.stdout.take() {
-                let stdout_path = logs.stdout.clone();
-                let date_fmt = date_format.clone();
-                forward_logs_with_date_prefix_stdout(stdout, stdout_path, date_fmt);
-            }
-            if let Some(stderr) = child.stderr.take() {
-                let stderr_path = logs.stderr.clone();
-                let date_fmt = date_format.clone();
-                forward_logs_with_date_prefix_stderr(stderr, stderr_path, date_fmt);
-            }
+        let process_info = EventProcessInfo::from(process as &ManagedProcess);
+        // Refresh pid in the info we pass to log pipes (process.pid set after spawn).
+        let process_info = EventProcessInfo {
+            pid: Some(pid),
+            ..process_info
+        };
+
+        // Create (or reset) the per-process stderr ring buffer.
+        let stderr_buf = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_CAPACITY)));
+        self.stderr_buffers
+            .insert(process.name.clone(), Arc::clone(&stderr_buf));
+
+        if let Some(stdout) = child.stdout.take() {
+            forward_log_pipe(
+                stdout,
+                logs.stdout.clone(),
+                process.log_date_format.clone(),
+                self.event_tx.clone(),
+                process_info.clone(),
+                false,
+                None,
+            );
+        }
+        if let Some(stderr) = child.stderr.take() {
+            forward_log_pipe(
+                stderr,
+                logs.stderr.clone(),
+                process.log_date_format.clone(),
+                self.event_tx.clone(),
+                process_info,
+                true,
+                Some(stderr_buf),
+            );
         }
         process.cgroup_path = None;
         if let Some(limits) = process.resource_limits.as_ref() {
@@ -1308,6 +1430,7 @@ impl ProcessManager {
                     name,
                     pid,
                     exit_code: status.code(),
+                    signal: exit_signal_name(&status),
                     success: status.success(),
                     wait_error: false,
                 },
@@ -1317,6 +1440,7 @@ impl ProcessManager {
                         name,
                         pid,
                         exit_code: None,
+                        signal: None,
                         success: false,
                         wait_error: true,
                     }
@@ -1842,7 +1966,7 @@ impl ProcessManager {
             let outcome = execute_health_check(&snapshot, &check).await;
             let mut should_restart = false;
 
-            {
+            let health_event = {
                 let Some(process) = self.processes.get_mut(&name) else {
                     continue;
                 };
@@ -1854,24 +1978,38 @@ impl ProcessManager {
                 process.last_health_check = Some(now);
                 process.next_health_check = Some(now.saturating_add(check.interval_secs.max(1)));
 
-                match outcome {
+                let event = match &outcome {
                     Ok(()) => {
                         process.health_status = HealthStatus::Healthy;
                         process.health_failures = 0;
                         process.last_health_error = None;
+                        Some(BusEvent::health_healthy(EventProcessInfo::from(
+                            process as &ManagedProcess,
+                        )))
                     }
                     Err(err) => {
                         process.health_status = HealthStatus::Unhealthy;
                         process.health_failures = process.health_failures.saturating_add(1);
                         process.last_health_error = Some(err.to_string());
+                        let ev = BusEvent::health_unhealthy(
+                            EventProcessInfo::from(process as &ManagedProcess),
+                            err.to_string(),
+                            process.health_failures,
+                        );
 
                         if process.health_failures >= check.max_failures.max(1) {
                             should_restart = true;
                             process.health_failures = 0;
                         }
+                        Some(ev)
                     }
-                }
+                };
                 should_save = true;
+                event
+            };
+
+            if let Some(event) = health_event {
+                self.emit(event);
             }
 
             if should_restart {

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added a Unix domain socket event bus (`events.sock`) so external tools can subscribe to real-time process lifecycle, log, and health events without polling the HTTP API.
+- Added `BusEvent` — a tagged NDJSON enum covering `process:started`, `process:online`, `process:stopped`, `process:restarting`, `process:errored`, `process:crashed`, `process:exited`, `log:out`, `log:err`, `health:healthy`, `health:unhealthy`, and `daemon:shutdown`.
+- Added `oxmgr events` CLI command to stream events from the daemon socket, with `--filter`/`-f` glob patterns, `--process`/`-p` name filter, and `--json` raw output flag.
+- Added `EventFilter` subscription protocol: client sends one JSON filter object within 500 ms of connecting, then receives a stream of matching NDJSON events.
+- Added `SDK.md` describing the NDJSON wire protocol, all event types, TypeScript type definitions, a reference Node.js client implementation, and reconnect/error-handling patterns.
+- Unified stdout/stderr log forwarding into a single generic `forward_log_pipe` function; log lines are now always piped and emitted as `log:out`/`log:err` events regardless of `log_date_format`.
+- Added `prepare_log_files` helper that handles log rotation and cleanup without keeping file handles open.
+- Enriched exit/crash events with `signal` (POSIX signal name, e.g. `"SIGSEGV"`), `uptime_secs` (how long the process ran), and `stderr_tail` (last ≤30 stderr lines — captures stack traces, panics, and tracebacks for any language).
+- Extended `process` object in all bus events with `command` (full command line) and `cwd` (working directory).
+
+### Changed
+
+- `AppConfig` gains an `event_socket_path` field (default: `{base_dir}/events.sock`).
+- Daemon startup now spawns the event socket listener alongside the existing HTTP API and IPC listeners.
+- Both daemon shutdown paths (SIGTERM/SIGINT and IPC stop) emit a `daemon:shutdown` event before closing the socket.
+
 ## v0.4.0 - 2026-04-26
 
 ### Added

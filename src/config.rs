@@ -21,6 +21,8 @@ pub struct AppConfig {
     pub state_path: PathBuf,
     pub log_dir: PathBuf,
     pub log_rotation: LogRotationPolicy,
+    /// Unix socket path for the streaming event bus (Unix only).
+    pub event_socket_path: PathBuf,
 }
 
 impl AppConfig {
@@ -53,6 +55,7 @@ impl AppConfig {
             .unwrap_or_else(|| format!("127.0.0.1:{}", api_port()));
         let state_path = base_dir.join("state.json");
         let log_dir = base_dir.join("logs");
+        let event_socket_path = base_dir.join("events.sock");
         let log_rotation = LogRotationPolicy {
             max_size_bytes: env_u64("OXMGR_LOG_MAX_SIZE_MB", 20)
                 .max(1)
@@ -68,6 +71,7 @@ impl AppConfig {
             state_path,
             log_dir,
             log_rotation,
+            event_socket_path,
         };
         config.ensure_layout()?;
         Ok(config)
@@ -282,6 +286,7 @@ mod tests {
                 max_files: 3,
                 max_age_days: 7,
             },
+            event_socket_path: base.join("events.sock"),
         };
 
         cfg.ensure_layout()

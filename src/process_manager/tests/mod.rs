@@ -145,6 +145,7 @@ fn test_config(prefix: &str) -> AppConfig {
             max_files: 2,
             max_age_days: 1,
         },
+        event_socket_path: base.join("events.sock"),
     }
 }
 

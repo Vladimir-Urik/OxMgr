@@ -155,6 +155,19 @@ pub enum Commands {
     },
     /// Run local environment and installation diagnostics.
     Doctor,
+    /// Stream live events from the daemon event bus.
+    Events {
+        /// Only show events for this process name.
+        #[arg(long, short = 'p')]
+        process: Option<String>,
+        /// Event name patterns to subscribe to (e.g. `process:*`, `log:out`).
+        /// Can be specified multiple times. Defaults to all events.
+        #[arg(long = "filter", short = 'f', action = clap::ArgAction::Append)]
+        filter: Vec<String>,
+        /// Print raw JSON instead of the formatted human-readable output.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run processes in foreground mode (pm2-runtime style) without daemonization.
     Runtime {
         path: PathBuf,

@@ -12,6 +12,7 @@ mod config;
 mod daemon;
 mod ecosystem;
 mod errors;
+mod events;
 mod hash;
 mod ipc;
 mod js_config;

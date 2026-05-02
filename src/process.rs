@@ -301,6 +301,10 @@ pub struct ProcessExitEvent {
     pub name: String,
     pub pid: u32,
     pub exit_code: Option<i32>,
+    /// POSIX signal name that killed the process, e.g. `"SIGSEGV"`. `None` on
+    /// Windows or when the process exited normally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
     pub success: bool,
     pub wait_error: bool,
 }

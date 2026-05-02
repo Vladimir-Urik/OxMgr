@@ -54,6 +54,26 @@ pub fn log_modified_at(path: &Path) -> SystemTime {
         .unwrap_or(UNIX_EPOCH)
 }
 
+/// Performs log rotation and retention cleanup without opening file handles.
+///
+/// Call this before spawning a process that will use async log forwarding so
+/// that the rotation policy is still enforced.
+pub fn prepare_log_files(logs: &ProcessLogs, policy: LogRotationPolicy) -> Result<()> {
+    if let Some(parent) = logs.stdout.parent() {
+        ensure_private_dir(parent)?;
+    }
+    rotate_log_if_needed(&logs.stdout, policy)?;
+    cleanup_rotated_logs(&logs.stdout, policy)?;
+    if logs.stdout != logs.stderr {
+        if let Some(parent) = logs.stderr.parent() {
+            ensure_private_dir(parent)?;
+        }
+        rotate_log_if_needed(&logs.stderr, policy)?;
+        cleanup_rotated_logs(&logs.stderr, policy)?;
+    }
+    Ok(())
+}
+
 /// Opens stdout and stderr log writers, performing rotation and retention
 /// cleanup first.
 pub fn open_log_writers(logs: &ProcessLogs, policy: LogRotationPolicy) -> Result<(File, File)> {

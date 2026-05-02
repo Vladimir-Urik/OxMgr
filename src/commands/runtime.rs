@@ -711,6 +711,7 @@ module.exports = {
                 max_files: 3,
                 max_age_days: 1,
             },
+            event_socket_path: base.join("events.sock"),
         }
     }
 

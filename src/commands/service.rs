@@ -319,6 +319,7 @@ mod tests {
                 max_files: 3,
                 max_age_days: 7,
             },
+            event_socket_path: Path::new("/tmp/oxmgr/events.sock").to_path_buf(),
         };
 
         let plist = render_launchd_plist(Path::new("/usr/local/bin/oxmgr"), &cfg);
@@ -340,6 +341,7 @@ mod tests {
                 max_files: 3,
                 max_age_days: 7,
             },
+            event_socket_path: Path::new(r"C:\tmp\oxmgr\events.sock").to_path_buf(),
         };
 
         let plist = render_launchd_plist(Path::new(r"C:\usr\local\bin\oxmgr"), &cfg);
