@@ -8,8 +8,8 @@
 
 # Oxmgr vs PM2 Benchmarks
 
-- Generated: 2026-05-11T08:39:01.024669+00:00
-- Host platform: linux (Linux 6.17.0-1010-azure)
+- Generated: 2026-05-18T08:54:53.544969+00:00
+- Host platform: linux (Linux 6.17.0-1013-azure)
 - Node.js: v20.20.2
 - pm2 command: `/opt/hostedtoolcache/node/20.20.2/x64/bin/pm2`
 - oxmgr binary: `/home/runner/work/OxMgr/OxMgr/target/release/oxmgr`
@@ -20,50 +20,50 @@ GitHub-hosted runners are noisy. Treat the numbers as trend signals, not absolut
 
 | Manager | boot median (ms) | boot p95 (ms) | daemon RSS median (KB) |
 | --- | ---: | ---: | ---: |
-| oxmgr | 100.8 | 101.9 | 6668.0 |
-| pm2 | 390.7 | 398.2 | 57260.0 |
+| oxmgr | 100.7 | 101.9 | 6684.0 |
+| pm2 | 395.9 | 399.1 | 55956.0 |
 
 ## Scale: Start, Settle, List, RSS
 
 | Processes | Manager | start median (ms) | settle median (ms) | list median (ms) | daemon RSS median (KB) |
 | ---: | --- | ---: | ---: | ---: | ---: |
-| 1 | oxmgr | 3.8 | 0.1 | 2.5 | 6888.0 |
-| 1 | pm2 | 193.3 | 191.3 | 132.2 | 67148.0 |
-| 25 | oxmgr | 158.3 | 0.6 | 4.7 | 7588.0 |
-| 25 | pm2 | 1526.5 | 236.4 | 204.1 | 117840.0 |
-| 100 | oxmgr | 815.3 | 1.8 | 6.1 | 9764.0 |
-| 100 | pm2 | 5989.1 | 398.5 | 323.7 | 163964.0 |
+| 1 | oxmgr | 3.6 | 0.1 | 2.4 | 6932.0 |
+| 1 | pm2 | 191.6 | 188.9 | 133.3 | 65216.0 |
+| 25 | oxmgr | 165.5 | 0.6 | 6.3 | 7708.0 |
+| 25 | pm2 | 1495.1 | 255.6 | 204.6 | 117084.0 |
+| 100 | oxmgr | 850.6 | 1.9 | 4.0 | 9784.0 |
+| 100 | pm2 | 5915.8 | 382.4 | 335.1 | 169432.0 |
 
 ## Single-App Lifecycle
 
 | Scenario | Manager | median (ms) | p95 (ms) |
 | --- | --- | ---: | ---: |
-| restart command | oxmgr | 206.0 | 206.9 |
-| restart command | pm2 | 276.7 | 279.3 |
-| restart -> pid visible | oxmgr | 206.3 | 207.2 |
-| restart -> pid visible | pm2 | 306.6 | 310.1 |
-| restart -> ready event emitted | oxmgr | 230.8 | 231.8 |
-| restart -> ready event emitted | pm2 | 392.2 | 398.5 |
-| restart -> ready event visible | oxmgr | 237.5 | 238.0 |
-| restart -> ready event visible | pm2 | 400.1 | 406.6 |
-| restart -> tcp ready | oxmgr | 239.1 | 239.6 |
-| restart -> tcp ready | pm2 | 401.2 | 407.6 |
-| crash -> pid visible | oxmgr | 3.9 | 4.0 |
-| crash -> pid visible | pm2 | 179.8 | 185.8 |
-| crash -> ready event emitted | oxmgr | 29.5 | 30.1 |
-| crash -> ready event emitted | pm2 | 154.2 | 171.8 |
-| crash -> ready event visible | oxmgr | 34.8 | 34.8 |
-| crash -> ready event visible | pm2 | 179.9 | 185.9 |
-| crash -> tcp ready | oxmgr | 36.4 | 36.4 |
-| crash -> tcp ready | pm2 | 180.9 | 187.1 |
+| restart command | oxmgr | 206.5 | 206.6 |
+| restart command | pm2 | 275.4 | 283.0 |
+| restart -> pid visible | oxmgr | 206.9 | 207.1 |
+| restart -> pid visible | pm2 | 307.6 | 318.3 |
+| restart -> ready event emitted | oxmgr | 230.9 | 232.0 |
+| restart -> ready event emitted | pm2 | 387.6 | 406.5 |
+| restart -> ready event visible | oxmgr | 237.7 | 237.9 |
+| restart -> ready event visible | pm2 | 390.2 | 408.9 |
+| restart -> tcp ready | oxmgr | 239.2 | 239.4 |
+| restart -> tcp ready | pm2 | 391.3 | 410.0 |
+| crash -> pid visible | oxmgr | 3.8 | 12.3 |
+| crash -> pid visible | pm2 | 173.4 | 186.5 |
+| crash -> ready event emitted | oxmgr | 28.8 | 29.8 |
+| crash -> ready event emitted | pm2 | 148.8 | 164.3 |
+| crash -> ready event visible | oxmgr | 34.5 | 35.8 |
+| crash -> ready event visible | pm2 | 173.5 | 186.6 |
+| crash -> tcp ready | oxmgr | 36.0 | 37.4 |
+| crash -> tcp ready | pm2 | 174.6 | 187.6 |
 
 ## Quick Read
 
-- Empty-daemon boot: oxmgr 3.88x lower vs pm2
-- Empty-daemon RSS: oxmgr 8.59x lower vs pm2
-- Restart command latency: oxmgr 1.34x lower vs pm2
-- Restart TCP-ready latency: oxmgr 1.68x lower vs pm2
-- Crash replacement PID visibility: oxmgr 45.71x lower vs pm2
-- Crash ready-event emitted latency: oxmgr 5.24x lower vs pm2
-- Crash TCP-ready latency: oxmgr 4.98x lower vs pm2
-- Daemon RSS at 100 processes: oxmgr 16.79x lower vs pm2
+- Empty-daemon boot: oxmgr 3.93x lower vs pm2
+- Empty-daemon RSS: oxmgr 8.37x lower vs pm2
+- Restart command latency: oxmgr 1.33x lower vs pm2
+- Restart TCP-ready latency: oxmgr 1.64x lower vs pm2
+- Crash replacement PID visibility: oxmgr 45.27x lower vs pm2
+- Crash ready-event emitted latency: oxmgr 5.17x lower vs pm2
+- Crash TCP-ready latency: oxmgr 4.85x lower vs pm2
+- Daemon RSS at 100 processes: oxmgr 17.32x lower vs pm2
