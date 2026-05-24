@@ -14,6 +14,10 @@
 - Enriched exit/crash events with `signal` (POSIX signal name, e.g. `"SIGSEGV"`), `uptime_secs` (how long the process ran), and `stderr_tail` (last ≤30 stderr lines — captures stack traces, panics, and tracebacks for any language).
 - Extended `process` object in all bus events with `command` (full command line) and `cwd` (working directory).
 
+### Fixed
+
+- Relative `cwd` values in `oxfile.toml` and PM2 ecosystem files are now resolved against the directory containing the config file, instead of the daemon's working directory. Absolute `cwd` values are unaffected.
+
 ### Changed
 
 - `AppConfig` gains an `event_socket_path` field (default: `{base_dir}/events.sock`).

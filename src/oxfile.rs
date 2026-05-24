@@ -321,6 +321,14 @@ struct OxAppOut {
     cron_restart: Option<String>,
 }
 
+fn resolve_relative_to(base: &Path, value: &Path) -> PathBuf {
+    if value.is_absolute() {
+        value.to_path_buf()
+    } else {
+        base.join(value)
+    }
+}
+
 /// Loads an `oxfile.toml`, applies defaults and optional profile overrides,
 /// and converts the result into canonical process specifications.
 pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<EcosystemProcessSpec>> {
@@ -334,12 +342,16 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
         }
     }
 
+    let base_dir = path.parent().map(Path::to_path_buf);
     let defaults = parsed.defaults.unwrap_or_default();
     let mut result = Vec::with_capacity(parsed.apps.len());
     for (idx, app) in parsed.apps.into_iter().enumerate() {
-        let resolved = resolve_app(&app, &defaults, profile, idx as i32)?;
+        let mut resolved = resolve_app(&app, &defaults, profile, idx as i32)?;
         if resolved.disabled {
             continue;
+        }
+        if let (Some(base), Some(cwd)) = (base_dir.as_deref(), resolved.cwd.as_ref()) {
+            resolved.cwd = Some(resolve_relative_to(base, cwd));
         }
 
         result.push(EcosystemProcessSpec {
@@ -1035,6 +1047,40 @@ command = "node server.js"
         )
         .expect("failed to parse profiles example with prod profile");
         assert!(!prod_specs.is_empty());
+    }
+
+    #[test]
+    fn load_with_profile_resolves_relative_cwd_against_oxfile_dir() {
+        let dir = std::env::temp_dir().join(format!(
+            "oxfile-cwd-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock failure")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("failed to create temp dir");
+        let path = dir.join("oxfile.toml");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "api"
+command = "node server.js"
+cwd = "./services/api"
+
+[[apps]]
+name = "abs"
+command = "node abs.js"
+cwd = "/srv/abs"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+
+        let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0].cwd, Some(dir.join("services/api")));
+        assert_eq!(specs[1].cwd, Some(PathBuf::from("/srv/abs")));
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     fn temp_file(prefix: &str) -> PathBuf {

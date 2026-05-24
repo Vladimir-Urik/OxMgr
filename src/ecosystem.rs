@@ -190,9 +190,16 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
         .with_context(|| format!("failed to read ecosystem file {}", path.display()))?;
     let file = load_ecosystem_file(path, &payload)?;
 
+    let base_dir = path.parent().map(Path::to_path_buf);
     let mut specs = Vec::with_capacity(file.apps.len());
     for (idx, app) in file.apps.into_iter().enumerate() {
-        specs.push(app.into_spec(profile, idx as i32)?);
+        let mut spec = app.into_spec(profile, idx as i32)?;
+        if let (Some(base), Some(cwd)) = (base_dir.as_deref(), spec.cwd.as_ref()) {
+            if cwd.is_relative() {
+                spec.cwd = Some(base.join(cwd));
+            }
+        }
+        specs.push(spec);
     }
 
     Ok(specs)
