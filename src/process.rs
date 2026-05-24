@@ -187,6 +187,10 @@ pub struct StartProcessSpec {
     pub unified_logs: bool,
     #[serde(default)]
     pub cron_restart: Option<String>,
+    #[serde(default)]
+    pub stdout_log_override: Option<PathBuf>,
+    #[serde(default)]
+    pub stderr_log_override: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -447,6 +451,8 @@ mod tests {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         };
 
         let mut process = fixture_process();
@@ -675,6 +681,8 @@ mod tests {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         }
     }
 }

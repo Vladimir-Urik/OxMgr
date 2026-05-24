@@ -94,5 +94,7 @@ fn build_start_spec(args: StartCommand) -> Result<StartProcessSpec> {
         log_date_format: args.log_date_format,
         unified_logs: false,
         cron_restart: args.cron_restart,
+        stdout_log_override: None,
+        stderr_log_override: None,
     })
 }

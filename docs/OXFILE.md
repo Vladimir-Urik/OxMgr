@@ -159,6 +159,12 @@ Details:
 - `log_date_format`: date format string (e.g., `"%Y-%m-%d %H:%M:%S"`) to prefix each log line
 - `unified_logs`: bool (`true` merges stdout/stderr into one log file)
 - `cron_restart`: cron expression (6-field: `"second minute hour day month dayofweek"`) for scheduled restarts
+- `[apps.logs]` (or `[defaults.logs]`): optional table to override log file destinations
+  - `stdout`: custom path for the stdout log file
+  - `stderr`: custom path for the stderr log file
+  - `combined`: convenience field that routes both stdout and stderr to one file (overridden by explicit `stdout`/`stderr`)
+  - Relative paths resolve against the directory containing the oxfile; `~` and `$VAR` are expanded
+  - When unset the daemon keeps the previous default of `<log_dir>/<name>.out.log` / `<name>.err.log` (or `<name>.log` with `unified_logs = true`)
 
 ### `[[apps]]` fields
 

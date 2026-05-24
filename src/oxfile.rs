@@ -72,6 +72,22 @@ enum WatchValueOut {
     Many(Vec<String>),
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+struct OxLogs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stdout: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stderr: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    combined: Option<PathBuf>,
+}
+
+impl OxLogs {
+    fn is_empty(&self) -> bool {
+        self.stdout.is_none() && self.stderr.is_none() && self.combined.is_none()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct Oxfile {
     version: Option<u32>,
@@ -118,6 +134,7 @@ struct OxDefaults {
     log_date_format: Option<String>,
     unified_logs: Option<bool>,
     cron_restart: Option<String>,
+    logs: Option<OxLogs>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +178,7 @@ struct OxApp {
     log_date_format: Option<String>,
     unified_logs: Option<bool>,
     cron_restart: Option<String>,
+    logs: Option<OxLogs>,
     profiles: Option<HashMap<String, OxProfile>>,
     disabled: Option<bool>,
 }
@@ -204,6 +222,7 @@ struct OxProfile {
     log_date_format: Option<String>,
     unified_logs: Option<bool>,
     cron_restart: Option<String>,
+    logs: Option<OxLogs>,
     disabled: Option<bool>,
 }
 
@@ -241,6 +260,8 @@ struct Resolved {
     log_date_format: Option<String>,
     unified_logs: bool,
     cron_restart: Option<String>,
+    stdout_log_override: Option<PathBuf>,
+    stderr_log_override: Option<PathBuf>,
     disabled: bool,
 }
 
@@ -319,6 +340,8 @@ struct OxAppOut {
     unified_logs: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     cron_restart: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    logs: Option<OxLogs>,
 }
 
 fn expand_env_values(env: &mut HashMap<String, String>) -> Result<()> {
@@ -343,6 +366,36 @@ fn resolve_relative_to(base: &Path, value: &Path) -> PathBuf {
     } else {
         base.join(value)
     }
+}
+
+fn merge_logs(defaults: Option<&OxLogs>, app: Option<&OxLogs>) -> OxLogs {
+    let mut merged = defaults.cloned().unwrap_or_default();
+    if let Some(app) = app {
+        if app.stdout.is_some() {
+            merged.stdout = app.stdout.clone();
+        }
+        if app.stderr.is_some() {
+            merged.stderr = app.stderr.clone();
+        }
+        if app.combined.is_some() {
+            merged.combined = app.combined.clone();
+        }
+    }
+    merged
+}
+
+fn flatten_logs(logs: &OxLogs) -> (Option<PathBuf>, Option<PathBuf>) {
+    let stdout = logs.stdout.clone().or_else(|| logs.combined.clone());
+    let stderr = logs.stderr.clone().or_else(|| logs.combined.clone());
+    (stdout, stderr)
+}
+
+fn expand_log_path(path: &Path) -> Result<PathBuf> {
+    let raw = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("log path is not valid UTF-8: {}", path.display()))?;
+    crate::env_expand::expand_path(raw)
+        .with_context(|| format!("failed to expand log path `{raw}`"))
 }
 
 /// Loads an `oxfile.toml`, applies defaults and optional profile overrides,
@@ -372,6 +425,21 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
         }
         if let (Some(base), Some(cwd)) = (base_dir.as_deref(), resolved.cwd.as_ref()) {
             resolved.cwd = Some(resolve_relative_to(base, cwd));
+        }
+
+        if let Some(path) = resolved.stdout_log_override.as_ref() {
+            let expanded = expand_log_path(path)?;
+            resolved.stdout_log_override = Some(match base_dir.as_deref() {
+                Some(base) => resolve_relative_to(base, &expanded),
+                None => expanded,
+            });
+        }
+        if let Some(path) = resolved.stderr_log_override.as_ref() {
+            let expanded = expand_log_path(path)?;
+            resolved.stderr_log_override = Some(match base_dir.as_deref() {
+                Some(base) => resolve_relative_to(base, &expanded),
+                None => expanded,
+            });
         }
 
         result.push(EcosystemProcessSpec {
@@ -409,6 +477,8 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             log_date_format: resolved.log_date_format,
             unified_logs: resolved.unified_logs,
             cron_restart: resolved.cron_restart,
+            stdout_log_override: resolved.stdout_log_override,
+            stderr_log_override: resolved.stderr_log_override,
         });
     }
 
@@ -537,8 +607,15 @@ fn resolve_app(
             .cron_restart
             .clone()
             .or_else(|| defaults.cron_restart.clone()),
+        stdout_log_override: None,
+        stderr_log_override: None,
         disabled: app.disabled.unwrap_or(false),
     };
+
+    let merged_logs = merge_logs(defaults.logs.as_ref(), app.logs.as_ref());
+    let (stdout_override, stderr_override) = flatten_logs(&merged_logs);
+    resolved.stdout_log_override = stdout_override;
+    resolved.stderr_log_override = stderr_override;
 
     if let Some(env) = &app.env {
         for (key, value) in env {
@@ -715,6 +792,22 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     if let Some(cron_restart) = &profile.cron_restart {
         resolved.cron_restart = Some(cron_restart.clone());
     }
+    if let Some(logs) = &profile.logs {
+        if logs.stdout.is_some() {
+            resolved.stdout_log_override = logs.stdout.clone();
+        }
+        if logs.stderr.is_some() {
+            resolved.stderr_log_override = logs.stderr.clone();
+        }
+        if let Some(combined) = &logs.combined {
+            if logs.stdout.is_none() {
+                resolved.stdout_log_override = Some(combined.clone());
+            }
+            if logs.stderr.is_none() {
+                resolved.stderr_log_override = Some(combined.clone());
+            }
+        }
+    }
     Ok(())
 }
 
@@ -781,6 +874,25 @@ fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Option<String>> 
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+fn logs_from_overrides(stdout: Option<&PathBuf>, stderr: Option<&PathBuf>) -> Option<OxLogs> {
+    let logs = match (stdout, stderr) {
+        (Some(s1), Some(s2)) if s1 == s2 => OxLogs {
+            combined: Some(s1.clone()),
+            ..Default::default()
+        },
+        _ => OxLogs {
+            stdout: stdout.cloned(),
+            stderr: stderr.cloned(),
+            combined: None,
+        },
+    };
+    if logs.is_empty() {
+        None
+    } else {
+        Some(logs)
+    }
 }
 
 fn render_watch_output(enabled: bool, paths: &[PathBuf]) -> Option<WatchValueOut> {
@@ -861,6 +973,10 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             log_date_format: spec.log_date_format.clone(),
             unified_logs: spec.unified_logs,
             cron_restart: spec.cron_restart.clone(),
+            logs: logs_from_overrides(
+                spec.stdout_log_override.as_ref(),
+                spec.stderr_log_override.as_ref(),
+            ),
         });
     }
 
@@ -952,6 +1068,56 @@ NODE_ENV = "production"
     }
 
     #[test]
+    fn load_resolves_logs_section_relative_to_oxfile() {
+        let path = temp_file("oxfile-logs");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "worker"
+command = "sleep 1"
+
+[apps.logs]
+stdout = "./logs/worker.out.log"
+stderr = "./logs/worker.err.log"
+
+[[apps]]
+name = "api"
+command = "sleep 1"
+
+[apps.logs]
+combined = "./logs/api.log"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+
+        let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
+        let base = path.parent().expect("oxfile parent missing");
+        assert_eq!(specs.len(), 2);
+
+        let worker = &specs[0];
+        assert_eq!(
+            worker.stdout_log_override.as_ref(),
+            Some(&base.join("./logs/worker.out.log"))
+        );
+        assert_eq!(
+            worker.stderr_log_override.as_ref(),
+            Some(&base.join("./logs/worker.err.log"))
+        );
+
+        let api = &specs[1];
+        assert_eq!(
+            api.stdout_log_override.as_ref(),
+            Some(&base.join("./logs/api.log"))
+        );
+        assert_eq!(
+            api.stderr_log_override.as_ref(),
+            Some(&base.join("./logs/api.log"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn write_from_specs_renders_toml() {
         let path = temp_file("oxfile-write");
         let specs = vec![EcosystemProcessSpec {
@@ -999,6 +1165,8 @@ NODE_ENV = "production"
             log_date_format: None,
             unified_logs: true,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         }];
 
         write_from_specs(&path, &specs).expect("failed to write oxfile");

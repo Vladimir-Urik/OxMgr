@@ -55,6 +55,8 @@ pub struct EcosystemProcessSpec {
     pub log_date_format: Option<String>,
     pub unified_logs: bool,
     pub cron_restart: Option<String>,
+    pub stdout_log_override: Option<PathBuf>,
+    pub stderr_log_override: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -113,6 +115,9 @@ struct EcosystemApp {
     log_date_format: Option<String>,
     merge_logs: Option<bool>,
     cron_restart: Option<String>,
+    out_file: Option<PathBuf>,
+    error_file: Option<PathBuf>,
+    log_file: Option<PathBuf>,
     #[serde(flatten)]
     extra: HashMap<String, Value>,
 }
@@ -181,6 +186,8 @@ struct ResolvedSettings {
     log_date_format: Option<String>,
     unified_logs: bool,
     cron_restart: Option<String>,
+    stdout_log_override: Option<PathBuf>,
+    stderr_log_override: Option<PathBuf>,
 }
 
 /// Loads a PM2-style ecosystem file and normalises it into Oxmgr process
@@ -210,6 +217,20 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
         if let (Some(base), Some(cwd)) = (base_dir.as_deref(), spec.cwd.as_ref()) {
             if cwd.is_relative() {
                 spec.cwd = Some(base.join(cwd));
+            }
+        }
+        for slot in [&mut spec.stdout_log_override, &mut spec.stderr_log_override] {
+            if let Some(path) = slot.as_ref() {
+                let raw = path.to_str().ok_or_else(|| {
+                    anyhow::anyhow!("log path is not valid UTF-8: {}", path.display())
+                })?;
+                let expanded = crate::env_expand::expand_path(raw)
+                    .with_context(|| format!("failed to expand log path `{raw}`"))?;
+                let resolved = match base_dir.as_deref() {
+                    Some(base) if expanded.is_relative() => base.join(&expanded),
+                    _ => expanded,
+                };
+                *slot = Some(resolved);
             }
         }
         specs.push(spec);
@@ -305,6 +326,8 @@ impl EcosystemApp {
             log_date_format: self.log_date_format,
             unified_logs: self.merge_logs.unwrap_or(false),
             cron_restart: self.cron_restart,
+            stdout_log_override: self.out_file.clone().or_else(|| self.log_file.clone()),
+            stderr_log_override: self.error_file.clone().or_else(|| self.log_file.clone()),
         };
 
         if let Some(profile_name) = profile {
@@ -350,6 +373,8 @@ impl EcosystemApp {
             log_date_format: settings.log_date_format,
             unified_logs: settings.unified_logs,
             cron_restart: settings.cron_restart,
+            stdout_log_override: settings.stdout_log_override,
+            stderr_log_override: settings.stderr_log_override,
         })
     }
 

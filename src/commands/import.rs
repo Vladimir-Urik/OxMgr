@@ -352,6 +352,8 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
                 log_date_format: spec.log_date_format.clone(),
                 unified_logs: spec.unified_logs,
                 cron_restart: spec.cron_restart.clone(),
+                stdout_log_override: spec.stdout_log_override.clone(),
+                stderr_log_override: spec.stderr_log_override.clone(),
             });
         }
     }
@@ -586,6 +588,8 @@ mod tests {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         };
         let encoded = encode_bundle(&[crate::process::ManagedProcess {
             id: 1,

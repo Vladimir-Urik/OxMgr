@@ -112,6 +112,8 @@ async fn watch_delay_schedules_restart_until_due() {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         })
         .await
         .expect("initial process should start");

@@ -398,6 +398,8 @@ impl ProcessManager {
             log_date_format,
             unified_logs,
             cron_restart,
+            stdout_log_override,
+            stderr_log_override,
         } = spec;
 
         let (command, args) = parse_command_line(&command_line)?;
@@ -413,7 +415,16 @@ impl ProcessManager {
             None => self.generate_auto_name(&command),
         };
 
-        let logs = process_logs_for_mode(&self.config.log_dir, &resolved_name, unified_logs);
+        let logs = {
+            let mut base = process_logs_for_mode(&self.config.log_dir, &resolved_name, unified_logs);
+            if let Some(path) = stdout_log_override {
+                base.stdout = path;
+            }
+            if let Some(path) = stderr_log_override {
+                base.stderr = path;
+            }
+            base
+        };
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
 

@@ -13,6 +13,8 @@
 - Added `prepare_log_files` helper that handles log rotation and cleanup without keeping file handles open.
 - Enriched exit/crash events with `signal` (POSIX signal name, e.g. `"SIGSEGV"`), `uptime_secs` (how long the process ran), and `stderr_tail` (last ≤30 stderr lines — captures stack traces, panics, and tracebacks for any language).
 - Extended `process` object in all bus events with `command` (full command line) and `cwd` (working directory).
+- Added per-app `[apps.logs]` table in `oxfile.toml` (mirrored on `[defaults.logs]`) with `stdout`, `stderr`, and `combined` fields to customize log file destinations. Relative paths resolve against the oxfile directory and support `~`/`$VAR` expansion; when unset the daemon keeps its previous default of `<log_dir>/<name>.out.log` / `<name>.err.log` (or `<name>.log` with `unified_logs = true`).
+- PM2 ecosystem importer now recognises `out_file`, `error_file`, and `log_file` and maps them to the same stdout/stderr override pipeline.
 
 ### Fixed
 

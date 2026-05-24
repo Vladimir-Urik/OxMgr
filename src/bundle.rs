@@ -96,6 +96,10 @@ struct BundleService {
     unified_logs: bool,
     #[serde(default)]
     cron_restart: Option<String>,
+    #[serde(default)]
+    stdout_log_override: Option<PathBuf>,
+    #[serde(default)]
+    stderr_log_override: Option<PathBuf>,
 }
 
 /// Returns a filesystem-friendly default file name for a process bundle.
@@ -329,6 +333,8 @@ impl BundleService {
             log_date_format: process.log_date_format.clone(),
             unified_logs: process.unified_logs,
             cron_restart: process.cron_restart.clone(),
+            stdout_log_override: None,
+            stderr_log_override: None,
         }
     }
 
@@ -368,6 +374,8 @@ impl BundleService {
             log_date_format: self.log_date_format,
             unified_logs: self.unified_logs,
             cron_restart: self.cron_restart,
+            stdout_log_override: self.stdout_log_override,
+            stderr_log_override: self.stderr_log_override,
         }
     }
 }
@@ -607,6 +615,8 @@ mod tests {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         };
 
         let err = super::validate_service(&payload).expect_err("expected validation error");
@@ -650,6 +660,8 @@ mod tests {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         };
 
         let err = super::validate_service(&payload).expect_err("expected hash validation error");

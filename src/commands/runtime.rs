@@ -682,6 +682,8 @@ module.exports = {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         }
     }
 

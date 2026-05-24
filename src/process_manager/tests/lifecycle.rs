@@ -264,6 +264,8 @@ async fn reload_process_keeps_existing_pid_when_replacement_fails_readiness() {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         })
         .await
         .expect("initial process should start");
@@ -346,6 +348,8 @@ async fn reload_process_replaces_pid_when_replacement_becomes_ready() {
             log_date_format: None,
             unified_logs: false,
             cron_restart: None,
+            stdout_log_override: None,
+            stderr_log_override: None,
         })
         .await
         .expect("initial process should start");
