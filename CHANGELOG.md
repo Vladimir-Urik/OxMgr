@@ -17,12 +17,23 @@
 ### Fixed
 
 - Relative `cwd` values in `oxfile.toml` and PM2 ecosystem files are now resolved against the directory containing the config file, instead of the daemon's working directory. Absolute `cwd` values are unaffected.
+- `~`, `~/...`, `$VAR`, and `${VAR}` are now expanded in `env` values and `cwd` paths when loading `oxfile.toml` or PM2 ecosystem files. `$$` produces a literal `$`. Missing variables fail loudly with an error naming the variable rather than silently expanding to an empty string.
 
 ### Changed
 
 - `AppConfig` gains an `event_socket_path` field (default: `{base_dir}/events.sock`).
 - Daemon startup now spawns the event socket listener alongside the existing HTTP API and IPC listeners.
 - Both daemon shutdown paths (SIGTERM/SIGINT and IPC stop) emit a `daemon:shutdown` event before closing the socket.
+
+### Security
+
+- Updated `SECURITY.md` supported-version table: added `0.5.x` as a supported release line and dropped `0.3.x` from active support.
+
+### Dependencies
+
+- Bumped `tokio` from `1.52.1` to `1.52.3` (via `1.52.2`).
+- Bumped `sysinfo` from `0.38.4` to `0.39.2` (via `0.39.0`).
+- Bumped `nix` from `0.31.2` to `0.31.3`.
 
 ## v0.4.0 - 2026-04-26
 

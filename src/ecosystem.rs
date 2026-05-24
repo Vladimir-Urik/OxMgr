@@ -194,6 +194,19 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
     let mut specs = Vec::with_capacity(file.apps.len());
     for (idx, app) in file.apps.into_iter().enumerate() {
         let mut spec = app.into_spec(profile, idx as i32)?;
+        for (key, value) in spec.env.iter_mut() {
+            *value = crate::env_expand::expand(value)
+                .with_context(|| format!("failed to expand env value for `{key}`"))?;
+        }
+        if let Some(cwd) = spec.cwd.as_ref() {
+            let raw = cwd
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("cwd path is not valid UTF-8: {}", cwd.display()))?;
+            spec.cwd = Some(
+                crate::env_expand::expand_path(raw)
+                    .with_context(|| format!("failed to expand cwd `{raw}`"))?,
+            );
+        }
         if let (Some(base), Some(cwd)) = (base_dir.as_deref(), spec.cwd.as_ref()) {
             if cwd.is_relative() {
                 spec.cwd = Some(base.join(cwd));

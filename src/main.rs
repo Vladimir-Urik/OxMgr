@@ -11,6 +11,7 @@ mod commands;
 mod config;
 mod daemon;
 mod ecosystem;
+mod env_expand;
 mod errors;
 mod events;
 mod hash;

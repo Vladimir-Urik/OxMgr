@@ -321,6 +321,22 @@ struct OxAppOut {
     cron_restart: Option<String>,
 }
 
+fn expand_env_values(env: &mut HashMap<String, String>) -> Result<()> {
+    for (key, value) in env.iter_mut() {
+        *value = crate::env_expand::expand(value)
+            .with_context(|| format!("failed to expand env value for `{key}`"))?;
+    }
+    Ok(())
+}
+
+fn expand_path_value(path: &Path) -> Result<PathBuf> {
+    let raw = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("cwd path is not valid UTF-8: {}", path.display()))?;
+    crate::env_expand::expand_path(raw)
+        .with_context(|| format!("failed to expand cwd `{raw}`"))
+}
+
 fn resolve_relative_to(base: &Path, value: &Path) -> PathBuf {
     if value.is_absolute() {
         value.to_path_buf()
@@ -349,6 +365,10 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
         let mut resolved = resolve_app(&app, &defaults, profile, idx as i32)?;
         if resolved.disabled {
             continue;
+        }
+        expand_env_values(&mut resolved.env)?;
+        if let Some(cwd) = resolved.cwd.as_ref() {
+            resolved.cwd = Some(expand_path_value(cwd)?);
         }
         if let (Some(base), Some(cwd)) = (base_dir.as_deref(), resolved.cwd.as_ref()) {
             resolved.cwd = Some(resolve_relative_to(base, cwd));
@@ -1047,6 +1067,79 @@ command = "node server.js"
         )
         .expect("failed to parse profiles example with prod profile");
         assert!(!prod_specs.is_empty());
+    }
+
+    #[test]
+    fn load_with_profile_expands_env_and_cwd_tilde_and_vars() {
+        unsafe {
+            std::env::set_var("HOME", "/home/tester");
+            std::env::set_var("OXMGR_TEST_DATA", "shared");
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "oxfile-expand-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock failure")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).expect("failed to create temp dir");
+        let path = dir.join("oxfile.toml");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "api"
+command = "node server.js"
+cwd = "~/projects/api"
+
+[apps.env]
+DATA_DIR = "$HOME/data/${OXMGR_TEST_DATA}"
+LITERAL = "price=$$10"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+
+        let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(
+            specs[0].cwd,
+            Some(PathBuf::from("/home/tester/projects/api"))
+        );
+        assert_eq!(
+            specs[0].env.get("DATA_DIR").map(String::as_str),
+            Some("/home/tester/data/shared")
+        );
+        assert_eq!(
+            specs[0].env.get("LITERAL").map(String::as_str),
+            Some("price=$10")
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_with_profile_errors_on_missing_env_variable() {
+        unsafe {
+            std::env::remove_var("OXMGR_TEST_MISSING_VAR");
+        }
+        let path = temp_file("oxfile-expand-missing");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "api"
+command = "node server.js"
+
+[apps.env]
+BAD = "$OXMGR_TEST_MISSING_VAR/x"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+        let err = load_with_profile(&path, None).expect_err("expected error");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("OXMGR_TEST_MISSING_VAR"),
+            "error should mention the missing variable: {msg}"
+        );
+        let _ = fs::remove_file(path);
     }
 
     #[test]
