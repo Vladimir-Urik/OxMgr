@@ -42,7 +42,7 @@ url = "2.5"
 nix = { version = "0.31", features = ["signal", "process", "user"] }
 
 [dev-dependencies]
-serial_test = "3.2"
+serial_test = "3.5"
 
 [profile.release]
 opt-level = "s"
