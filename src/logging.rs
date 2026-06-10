@@ -2,7 +2,7 @@
 //! processes.
 
 use std::collections::VecDeque;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -76,7 +76,14 @@ pub fn prepare_log_files(logs: &ProcessLogs, policy: LogRotationPolicy) -> Resul
 
 /// Opens stdout and stderr log writers, performing rotation and retention
 /// cleanup first.
+///
+/// The daemon spawns processes via async log forwarding and only calls
+/// [`prepare_log_files`]; this synchronous writer path is retained for the
+/// rotation tests below.
+#[cfg(test)]
 pub fn open_log_writers(logs: &ProcessLogs, policy: LogRotationPolicy) -> Result<(File, File)> {
+    use std::fs::OpenOptions;
+
     if let Some(parent) = logs.stdout.parent() {
         ensure_private_dir(parent)?;
     }
@@ -142,7 +149,7 @@ fn ensure_private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(all(test, unix))]
 fn set_private_file_permissions(path: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -151,7 +158,7 @@ fn set_private_file_permissions(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(all(test, not(unix)))]
 fn set_private_file_permissions(_: &Path) -> Result<()> {
     Ok(())
 }
