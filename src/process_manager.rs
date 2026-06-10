@@ -163,11 +163,21 @@ fn exit_signal_name(status: &std::process::ExitStatus) -> Option<String> {
     use std::os::unix::process::ExitStatusExt;
     status.signal().map(|sig| {
         match sig {
-            1 => "SIGHUP", 2 => "SIGINT", 3 => "SIGQUIT",
-            4 => "SIGILL", 5 => "SIGTRAP", 6 => "SIGABRT",
-            7 => "SIGBUS", 8 => "SIGFPE", 9 => "SIGKILL",
-            10 => "SIGUSR1", 11 => "SIGSEGV", 12 => "SIGUSR2",
-            13 => "SIGPIPE", 14 => "SIGALRM", 15 => "SIGTERM",
+            1 => "SIGHUP",
+            2 => "SIGINT",
+            3 => "SIGQUIT",
+            4 => "SIGILL",
+            5 => "SIGTRAP",
+            6 => "SIGABRT",
+            7 => "SIGBUS",
+            8 => "SIGFPE",
+            9 => "SIGKILL",
+            10 => "SIGUSR1",
+            11 => "SIGSEGV",
+            12 => "SIGUSR2",
+            13 => "SIGPIPE",
+            14 => "SIGALRM",
+            15 => "SIGTERM",
             _ => return format!("SIG{sig}"),
         }
         .to_string()
@@ -416,7 +426,8 @@ impl ProcessManager {
         };
 
         let logs = {
-            let mut base = process_logs_for_mode(&self.config.log_dir, &resolved_name, unified_logs);
+            let mut base =
+                process_logs_for_mode(&self.config.log_dir, &resolved_name, unified_logs);
             if let Some(path) = stdout_log_override {
                 base.stdout = path;
             }
@@ -1145,15 +1156,15 @@ impl ProcessManager {
                         "failed to restart process {} immediately after exit: {}",
                         process_name, err
                     );
-                    let errored_info =
-                        if let Some(process) = self.processes.get_mut(&process_name) {
-                            process.status = ProcessStatus::Errored;
-                            process.desired_state = DesiredState::Stopped;
-                            process.last_health_error = Some(format!("restart failed: {err}"));
-                            Some(EventProcessInfo::from(process as &ManagedProcess))
-                        } else {
-                            None
-                        };
+                    let errored_info = if let Some(process) = self.processes.get_mut(&process_name)
+                    {
+                        process.status = ProcessStatus::Errored;
+                        process.desired_state = DesiredState::Stopped;
+                        process.last_health_error = Some(format!("restart failed: {err}"));
+                        Some(EventProcessInfo::from(process as &ManagedProcess))
+                    } else {
+                        None
+                    };
                     if let Some(info) = errored_info {
                         self.emit(BusEvent::process_errored(info));
                     }

@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 
 /// Expand `~` and `$VAR`/`${VAR}` references in `value`. Returns an error if a
 /// referenced variable is not present in the daemon's environment.
@@ -141,7 +141,10 @@ mod tests {
     fn expand_vars_errors_on_missing_variable() {
         let lookup = lookup_fixed(&[]);
         let err = expand_vars("$NOPE/x", &lookup).unwrap_err().to_string();
-        assert!(err.contains("NOPE"), "error should name the variable: {err}");
+        assert!(
+            err.contains("NOPE"),
+            "error should name the variable: {err}"
+        );
     }
 
     #[test]

@@ -491,16 +491,10 @@ async fn run_event_socket(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(
-            &socket_path,
-            std::fs::Permissions::from_mode(0o600),
-        );
+        let _ = std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600));
     }
 
-    info!(
-        "oxmgr event socket listening at {}",
-        socket_path.display()
-    );
+    info!("oxmgr event socket listening at {}", socket_path.display());
 
     loop {
         match listener.accept().await {

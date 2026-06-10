@@ -180,10 +180,7 @@ pub enum BusEvent {
     },
     /// Health check passed.
     #[serde(rename = "health:healthy")]
-    HealthHealthy {
-        at: u64,
-        process: EventProcessInfo,
-    },
+    HealthHealthy { at: u64, process: EventProcessInfo },
     /// Health check failed.
     #[serde(rename = "health:unhealthy")]
     HealthUnhealthy {
@@ -402,8 +399,8 @@ impl EventFilter {
     /// Returns `true` if `event` should be delivered to a client with this filter.
     pub fn matches(&self, event: &BusEvent) -> bool {
         let event_name = event.event_name();
-        let event_ok = self.subscribe.is_empty()
-            || self.subscribe.iter().any(|p| glob_matches(p, event_name));
+        let event_ok =
+            self.subscribe.is_empty() || self.subscribe.iter().any(|p| glob_matches(p, event_name));
         if !event_ok {
             return false;
         }
@@ -477,7 +474,14 @@ mod tests {
     #[test]
     fn filter_empty_subscribe_matches_all() {
         let f = EventFilter::default();
-        assert!(f.matches(&BusEvent::process_crashed(pinfo("api"), Some(1), None, 0, 3, vec![])));
+        assert!(f.matches(&BusEvent::process_crashed(
+            pinfo("api"),
+            Some(1),
+            None,
+            0,
+            3,
+            vec![]
+        )));
         assert!(f.matches(&BusEvent::log_out(pinfo("api"), "line".into())));
         assert!(f.matches(&BusEvent::daemon_shutdown()));
     }
@@ -488,7 +492,14 @@ mod tests {
             subscribe: vec!["process:*".into()],
             process: None,
         };
-        assert!(f.matches(&BusEvent::process_crashed(pinfo("api"), Some(1), None, 0, 3, vec![])));
+        assert!(f.matches(&BusEvent::process_crashed(
+            pinfo("api"),
+            Some(1),
+            None,
+            0,
+            3,
+            vec![]
+        )));
         assert!(f.matches(&BusEvent::process_online(pinfo("api"))));
         assert!(!f.matches(&BusEvent::log_out(pinfo("api"), "hello".into())));
         assert!(!f.matches(&BusEvent::health_healthy(pinfo("api"))));
@@ -510,8 +521,22 @@ mod tests {
             subscribe: vec![],
             process: Some("api".into()),
         };
-        assert!(f.matches(&BusEvent::process_crashed(pinfo("api"), Some(1), None, 0, 0, vec![])));
-        assert!(!f.matches(&BusEvent::process_crashed(pinfo("worker"), Some(1), None, 0, 0, vec![])));
+        assert!(f.matches(&BusEvent::process_crashed(
+            pinfo("api"),
+            Some(1),
+            None,
+            0,
+            0,
+            vec![]
+        )));
+        assert!(!f.matches(&BusEvent::process_crashed(
+            pinfo("worker"),
+            Some(1),
+            None,
+            0,
+            0,
+            vec![]
+        )));
         assert!(!f.matches(&BusEvent::log_out(pinfo("worker"), "line".into())));
     }
 
@@ -533,7 +558,14 @@ mod tests {
         assert!(f.matches(&BusEvent::log_out(pinfo("api"), "line".into())));
         assert!(f.matches(&BusEvent::log_err(pinfo("api"), "err".into())));
         assert!(!f.matches(&BusEvent::log_out(pinfo("worker"), "line".into())));
-        assert!(!f.matches(&BusEvent::process_crashed(pinfo("api"), Some(1), None, 0, 0, vec![])));
+        assert!(!f.matches(&BusEvent::process_crashed(
+            pinfo("api"),
+            Some(1),
+            None,
+            0,
+            0,
+            vec![]
+        )));
     }
 
     // --- event_name ---
@@ -568,8 +600,14 @@ mod tests {
             BusEvent::process_errored(pinfo("x")).event_name(),
             "process:errored"
         );
-        assert_eq!(BusEvent::log_out(pinfo("x"), "".into()).event_name(), "log:out");
-        assert_eq!(BusEvent::log_err(pinfo("x"), "".into()).event_name(), "log:err");
+        assert_eq!(
+            BusEvent::log_out(pinfo("x"), "".into()).event_name(),
+            "log:out"
+        );
+        assert_eq!(
+            BusEvent::log_err(pinfo("x"), "".into()).event_name(),
+            "log:err"
+        );
         assert_eq!(
             BusEvent::health_healthy(pinfo("x")).event_name(),
             "health:healthy"
@@ -598,7 +636,10 @@ mod tests {
             Some("SIGSEGV".into()),
             42,
             3,
-            vec!["Error: something".into(), "    at Object.<anonymous>".into()],
+            vec![
+                "Error: something".into(),
+                "    at Object.<anonymous>".into(),
+            ],
         );
         let json = serde_json::to_value(&event).expect("serialize failed");
         assert_eq!(json["event"], "process:crashed");

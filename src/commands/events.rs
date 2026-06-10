@@ -30,20 +30,24 @@ async fn run_unix(
     use tokio::net::UnixStream;
 
     let socket_path = &config.event_socket_path;
-    let mut stream = UnixStream::connect(socket_path)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to connect to event socket at {} (is the daemon running?)",
-                socket_path.display()
-            )
-        })?;
+    let mut stream = UnixStream::connect(socket_path).await.with_context(|| {
+        format!(
+            "failed to connect to event socket at {} (is the daemon running?)",
+            socket_path.display()
+        )
+    })?;
 
     // Send the filter as the first line.
-    let event_filter = EventFilter { subscribe: filter, process };
+    let event_filter = EventFilter {
+        subscribe: filter,
+        process,
+    };
     let mut payload = serde_json::to_vec(&event_filter).context("failed to encode filter")?;
     payload.push(b'\n');
-    stream.write_all(&payload).await.context("failed to send filter")?;
+    stream
+        .write_all(&payload)
+        .await
+        .context("failed to send filter")?;
 
     let (read_half, _write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
@@ -51,7 +55,10 @@ async fn run_unix(
 
     loop {
         line.clear();
-        let n = reader.read_line(&mut line).await.context("read from event socket failed")?;
+        let n = reader
+            .read_line(&mut line)
+            .await
+            .context("read from event socket failed")?;
         if n == 0 {
             break; // daemon closed the connection
         }
@@ -118,7 +125,10 @@ fn print_event(event: &BusEvent) {
             );
         }
         LogOut { process, data, .. } => {
-            println!("[{ts}] \x1b[2mlog:out\x1b[0m           {}  {}", process.name, data.line);
+            println!(
+                "[{ts}] \x1b[2mlog:out\x1b[0m           {}  {}",
+                process.name, data.line
+            );
         }
         LogErr { process, data, .. } => {
             println!(

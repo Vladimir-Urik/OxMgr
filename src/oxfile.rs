@@ -356,8 +356,7 @@ fn expand_path_value(path: &Path) -> Result<PathBuf> {
     let raw = path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("cwd path is not valid UTF-8: {}", path.display()))?;
-    crate::env_expand::expand_path(raw)
-        .with_context(|| format!("failed to expand cwd `{raw}`"))
+    crate::env_expand::expand_path(raw).with_context(|| format!("failed to expand cwd `{raw}`"))
 }
 
 fn resolve_relative_to(base: &Path, value: &Path) -> PathBuf {
