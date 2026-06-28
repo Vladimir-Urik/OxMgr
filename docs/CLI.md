@@ -111,15 +111,13 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 
 ## Inspect
 
-- `oxmgr list` (aliases: `oxmgr ls`, `oxmgr ps`)
+- `oxmgr list [--json]` (aliases: `oxmgr ls`, `oxmgr ps`)
 - `oxmgr status <name|id>`
 - `oxmgr logs <name|id> [-f] [--lines <n>]` (alias: `oxmgr log`)
 - `oxmgr logs all [--lines <n>]` — prints recent logs for every managed process at once; running `oxmgr logs` without a target prints usage help
 - `oxmgr ui [--interval-ms <n>]`
 
-`list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health.
-
-`status` includes detailed metadata including watch, cluster mode, restart policy, crash-loop cutoff, limits, command, and log paths.
+`list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health. Use `--json` to emit as a JSON array of objects.
 
 `ui` supports keyboard and mouse controls:
 

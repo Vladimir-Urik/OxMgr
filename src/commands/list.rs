@@ -1,4 +1,6 @@
-use anyhow::Result;
+use std::io::Write;
+
+use anyhow::{Context, Result};
 
 use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest};
@@ -7,11 +9,25 @@ use crate::ui;
 
 use super::common::expect_ok;
 
-pub(crate) async fn run(config: &AppConfig) -> Result<()> {
+pub(crate) async fn run(config: &AppConfig, json: bool) -> Result<()> {
     let response = send_request(&config.daemon_addr, &IpcRequest::List).await?;
     let response = expect_ok(response)?;
-    print_process_table(response.processes);
 
+    if json {
+        print_processes_json(response.processes)?;
+    } else {
+        print_process_table(response.processes);
+    }
+
+    Ok(())
+}
+
+fn print_processes_json(mut processes: Vec<ManagedProcess>) -> Result<()> {
+    processes.sort_by_key(|process| process.id);
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    serde_json::to_writer(&mut out, &processes).context("failed to serialize process list")?;
+    writeln!(out).context("failed to write JSON output")?;
     Ok(())
 }
 

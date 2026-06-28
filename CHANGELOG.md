@@ -6,6 +6,7 @@
 
 - Added a Unix domain socket event bus (`events.sock`) so external tools can subscribe to real-time process lifecycle, log, and health events without polling the HTTP API.
 - Added `BusEvent` — a tagged NDJSON enum covering `process:started`, `process:online`, `process:stopped`, `process:restarting`, `process:errored`, `process:crashed`, `process:exited`, `log:out`, `log:err`, `health:healthy`, `health:unhealthy`, and `daemon:shutdown`.
+- Added `--json` flag to `oxmgr list` that serializes the managed-process list to a JSON array via `serde`, instead of the human-readable table. Empty lists emit `[]`. Each entry reflects the full `ManagedProcess` schema (id, name, command, args, status, pid, cpu_percent, memory_bytes, restart_count, cluster_mode, health_status, etc.). Useful for scripting and piping to tools like `jq`.
 - Added `oxmgr events` CLI command to stream events from the daemon socket, with `--filter`/`-f` glob patterns, `--process`/`-p` name filter, and `--json` raw output flag.
 - Added `EventFilter` subscription protocol: client sends one JSON filter object within 500 ms of connecting, then receives a stream of matching NDJSON events.
 - Added `SDK.md` describing the NDJSON wire protocol, all event types, TypeScript type definitions, a reference Node.js client implementation, and reconnect/error-handling patterns.
@@ -199,7 +200,6 @@ This release focuses on Arch Linux distribution support and release automation f
 
 **Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.5...v0.1.6
 
-
 ## v0.1.5 - 2026-03-06
 
 This release focuses on stronger diagnostics, better Oxfile editor tooling, a more usable terminal UI, and internal maintenance improvements.
@@ -260,15 +260,14 @@ This release focuses on stronger diagnostics, better Oxfile editor tooling, a mo
 
 - No core runtime/process-manager behavior changes were introduced in this release; changes are focused on packaging, distribution, documentation, and dependency refreshes.
 
-
 ### What's Changed
-* Bump dirs from 5.0.1 to 6.0.0 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/10
-* Bump toml from 1.0.3+spec-1.1.0 to 1.0.4+spec-1.1.0 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/9
-* Bump sysinfo from 0.38.2 to 0.38.3 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/8
-* Bump tokio from 1.49.0 to 1.50.0 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/7
+
+- Bump dirs from 5.0.1 to 6.0.0 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/10
+- Bump toml from 1.0.3+spec-1.1.0 to 1.0.4+spec-1.1.0 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/9
+- Bump sysinfo from 0.38.2 to 0.38.3 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/8
+- Bump tokio from 1.49.0 to 1.50.0 by @dependabot[bot] in https://github.com/Vladimir-Urik/OxMgr/pull/7
 
 **Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.3...v0.1.4
-
 
 ## v0.1.3 - 2026-03-04
 
@@ -301,7 +300,6 @@ This release focuses on stronger diagnostics, better Oxfile editor tooling, a mo
 - Added unit and end-to-end coverage for ecosystem JS parsing, profile overrides, watch validation, readiness-aware reload success and failure paths, delayed watch restarts, and Windows HTTP metrics behavior.
 
 **Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.2...v0.1.3
-
 
 ## v0.1.2 - 2026-03-03
 
@@ -342,32 +340,30 @@ This release focuses on observability, benchmark publishing, and project mainten
 
 **Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.1...v0.1.2
 
-
-
 ## v0.1.1 - 2026-03-01
 
 This release focuses on restart behavior fixes, benchmark coverage, and documentation improvements.
 
 ### Fixed
+
 - Fixed crash auto-restart behavior: `--restart-delay 0` now truly means immediate restart after an unexpected exit, with no hidden minimum delay.
 - Improved daemon restart scheduling so pending restarts are handled more precisely.
 - Added regression coverage for crash recovery and PID replacement, including end-to-end tests.
 
 ### Benchmarks
+
 - Added an `oxmgr` vs `pm2` benchmark harness.
 - Added a GitHub Actions workflow for scheduled and manual benchmark runs.
 - Added `BENCHMARK.md` with the latest published benchmark snapshot.
 
 ### Documentation
+
 - Added a new architecture overview.
 - Added benchmark documentation and reproducible benchmark workflow docs.
 - Clarified CLI and usage docs around `--restart-delay 0`.
 - Expanded inline documentation across core modules.
 
-
 **Full Changelog**: https://github.com/Vladimir-Urik/OxMgr/compare/v0.1.0...v0.1.1
-
-
 
 ## v0.1.0 - 2026-02-28
 

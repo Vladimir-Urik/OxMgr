@@ -82,7 +82,11 @@ pub enum Commands {
     Delete { target: String },
     #[command(visible_aliases = ["ls", "ps"])]
     /// List all managed processes and their current runtime status.
-    List,
+    List {
+        /// Emit the process list as a JSON array instead of the human-readable table.
+        #[arg(long)]
+        json: bool,
+    },
     /// Open the interactive terminal user interface.
     Ui {
         #[arg(long, default_value_t = 800)]
@@ -552,10 +556,24 @@ mod tests {
     #[test]
     fn clap_parses_list_aliases_ls_and_ps() {
         let ls = Cli::try_parse_from(["oxmgr", "ls"]).expect("expected ls alias parsing success");
-        assert!(matches!(ls.command, Commands::List));
+        match ls.command {
+            Commands::List { json } => assert!(!json, "json should default to false"),
+            _ => panic!("expected list subcommand"),
+        }
 
         let ps = Cli::try_parse_from(["oxmgr", "ps"]).expect("expected ps alias parsing success");
-        assert!(matches!(ps.command, Commands::List));
+        assert!(matches!(ps.command, Commands::List { json: false }));
+    }
+
+    #[test]
+    fn clap_parses_list_json_flag() {
+        let cli = Cli::try_parse_from(["oxmgr", "ls", "--json"])
+            .expect("expected ls --json parsing success");
+        assert!(matches!(cli.command, Commands::List { json: true }));
+
+        let cli = Cli::try_parse_from(["oxmgr", "list", "--json"])
+            .expect("expected list --json parsing success");
+        assert!(matches!(cli.command, Commands::List { json: true }));
     }
 
     #[test]

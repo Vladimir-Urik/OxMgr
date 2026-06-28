@@ -1765,6 +1765,105 @@ fn e2e_list_empty_prints_no_managed_processes() {
 
 #[test]
 #[serial]
+fn e2e_list_json_emits_array_of_processes() {
+    if !should_run_e2e("e2e_list_json_emits_array_of_processes") {
+        return;
+    }
+
+    let env = TestEnv::new("list-json");
+
+    // Empty environment: --json must emit a valid empty JSON array and exit cleanly.
+    let empty = env.run(&["ls", "--json"]);
+    assert!(
+        empty.status.success(),
+        "ls --json failed on empty env: {}",
+        String::from_utf8_lossy(&empty.stderr)
+    );
+    let empty_stdout = String::from_utf8_lossy(&empty.stdout);
+    let empty_value: serde_json::Value =
+        serde_json::from_str(empty_stdout.trim()).expect("expected valid JSON for empty list");
+    assert!(
+        empty_value.is_array(),
+        "expected JSON array for empty list, got:\n{empty_stdout}"
+    );
+    assert!(
+        empty_value.as_array().unwrap().is_empty(),
+        "expected empty JSON array, got:\n{empty_stdout}"
+    );
+
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(25),
+        "--name".to_string(),
+        "json-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+        "--stop-timeout".to_string(),
+        "1".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    wait_for_pid(&env, "json-app", Duration::from_secs(8))
+        .expect("expected json-app pid after startup");
+
+    let list = env.run(&["ls", "--json"]);
+    assert!(
+        list.status.success(),
+        "ls --json failed: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let processes: Vec<serde_json::Value> =
+        serde_json::from_str(&String::from_utf8_lossy(&list.stdout))
+            .expect("expected stdout to be a JSON array of processes");
+
+    let json_app = processes
+        .iter()
+        .find(|p| p.get("name").and_then(|v| v.as_str()) == Some("json-app"))
+        .unwrap_or_else(|| panic!("json-app missing from JSON output:\n{processes:?}"));
+    for field in [
+        "id",
+        "name",
+        "command",
+        "status",
+        "pid",
+        "cpu_percent",
+        "memory_bytes",
+        "restart_count",
+        "cluster_mode",
+        "health_status",
+    ] {
+        assert!(
+            json_app.get(field).is_some(),
+            "JSON process record missing field `{field}`: {json_app}"
+        );
+    }
+    assert_eq!(
+        json_app["name"].as_str(),
+        Some("json-app"),
+        "unexpected name field: {json_app}"
+    );
+
+    // Plain `ls` (no --json) still renders the human-readable table, not JSON.
+    let table = env.run(&["ls"]);
+    assert!(
+        table.status.success(),
+        "ls table failed: {}",
+        String::from_utf8_lossy(&table.stderr)
+    );
+    let table_stdout = String::from_utf8_lossy(&table.stdout);
+    assert!(
+        table_stdout.contains("NAME") && table_stdout.contains("json-app"),
+        "expected human-readable table headers and process name, got:\n{table_stdout}"
+    );
+
+    let _ = env.run(&["delete", "json-app"]);
+}
+
+#[test]
+#[serial]
 fn e2e_stop_clears_pid_and_marks_process_stopped() {
     if !should_run_e2e("e2e_stop_clears_pid_and_marks_process_stopped") {
         return;
