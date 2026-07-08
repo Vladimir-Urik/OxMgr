@@ -34,26 +34,58 @@ function targetTriple() {
   return map[key] || null;
 }
 
-function detectLinuxLibc() {
+const MIN_GLIBC = [2, 39];
+
+function parseGlibcVersion(text) {
+  const match = /(\d+)\.(\d+)/.exec(text || "");
+  return match ? [Number(match[1]), Number(match[2])] : null;
+}
+
+function versionGte(a, b) {
+  return a[0] !== b[0] ? a[0] > b[0] : a[1] >= b[1];
+}
+
+// Returns a [major, minor] glibc version, the string "musl", or null (unknown).
+function detectGlibc() {
   const report = typeof process.report?.getReport === "function" ? process.report.getReport() : null;
   const runtime = report?.header?.glibcVersionRuntime;
   if (runtime) {
-    return "glibc";
+    return parseGlibcVersion(runtime) || [0, 0];
   }
 
   const getconf = spawnSync("getconf", ["GNU_LIBC_VERSION"], { encoding: "utf8" });
-  const getconfOutput = `${getconf.stdout || ""}\n${getconf.stderr || ""}`.toLowerCase();
-  if (getconf.status === 0 && getconfOutput.includes("glibc")) {
-    return "glibc";
+  if (getconf.status === 0 && `${getconf.stdout || ""}`.toLowerCase().includes("glibc")) {
+    return parseGlibcVersion(getconf.stdout) || [0, 0];
   }
 
   const ldd = spawnSync("ldd", ["--version"], { encoding: "utf8" });
-  const lddOutput = `${ldd.stdout || ""}\n${ldd.stderr || ""}`.toLowerCase();
-  if (lddOutput.includes("musl")) {
+  const lddOutput = `${ldd.stdout || ""}\n${ldd.stderr || ""}`;
+  const lower = lddOutput.toLowerCase();
+  if (lower.includes("musl")) {
     return "musl";
   }
-  if (lddOutput.includes("glibc") || lddOutput.includes("gnu libc")) {
-    return "glibc";
+  if (lower.includes("glibc") || lower.includes("gnu libc") || lower.includes("gnu c library")) {
+    return parseGlibcVersion(lddOutput) || [0, 0];
+  }
+
+  return null;
+}
+
+function detectLinuxLibc() {
+  const glibc = detectGlibc();
+  if (glibc === "musl") {
+    return "musl";
+  }
+  if (Array.isArray(glibc)) {
+    // Use the gnu build only when glibc is new enough; otherwise the binary
+    // would fail at load time with `GLIBC_x.yy not found`.
+    if (versionGte(glibc, MIN_GLIBC)) {
+      return "glibc";
+    }
+    console.log(
+      `Detected glibc ${glibc.join(".")}, which is older than the ${MIN_GLIBC.join(".")} required by the gnu build; using the static musl binary instead.`
+    );
+    return "musl";
   }
 
   // Prefer the portable static build when libc is unknown.

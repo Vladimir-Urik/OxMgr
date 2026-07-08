@@ -6,7 +6,7 @@
 
 - Added a Unix domain socket event bus (`events.sock`) so external tools can subscribe to real-time process lifecycle, log, and health events without polling the HTTP API.
 - Added `BusEvent` — a tagged NDJSON enum covering `process:started`, `process:online`, `process:stopped`, `process:restarting`, `process:errored`, `process:crashed`, `process:exited`, `log:out`, `log:err`, `health:healthy`, `health:unhealthy`, and `daemon:shutdown`.
-- Added `--json` flag to `oxmgr list` that serializes the managed-process list to a JSON array via `serde`, instead of the human-readable table. Empty lists emit `[]`. Each entry reflects the full `ManagedProcess` schema (id, name, command, args, status, pid, cpu_percent, memory_bytes, restart_count, cluster_mode, health_status, etc.). Useful for scripting and piping to tools like `jq`.
+- Added `--json` flag to `oxmgr list` (alias `oxmgr ls`) that serializes the managed-process list to a JSON array via `serde`, instead of the human-readable table. Empty lists emit `[]`. Each entry reflects the full `ManagedProcess` schema (id, name, command, args, status, pid, cpu_percent, memory_bytes, restart_count, cluster_mode, health_status, etc.). Useful for scripting and piping to tools like `jq`. Thanks to @kvndrsslr for their first contribution in [#66](https://github.com/Vladimir-Urik/OxMgr/pull/66).
 - Added `oxmgr events` CLI command to stream events from the daemon socket, with `--filter`/`-f` glob patterns, `--process`/`-p` name filter, and `--json` raw output flag.
 - Added `EventFilter` subscription protocol: client sends one JSON filter object within 500 ms of connecting, then receives a stream of matching NDJSON events.
 - Added `SDK.md` describing the NDJSON wire protocol, all event types, TypeScript type definitions, a reference Node.js client implementation, and reconnect/error-handling patterns.
@@ -34,9 +34,18 @@
 
 ### Dependencies
 
-- Bumped `tokio` from `1.52.1` to `1.52.3` (via `1.52.2`).
-- Bumped `sysinfo` from `0.38.4` to `0.39.2` (via `0.39.0`).
-- Bumped `nix` from `0.31.2` to `0.31.3`.
+- Bumped `tokio` from `1.52.1` to `1.52.3` (via `1.52.2`) by @dependabot[bot] in [#46](https://github.com/Vladimir-Urik/OxMgr/pull/46) and [#52](https://github.com/Vladimir-Urik/OxMgr/pull/52).
+- Bumped `sysinfo` from `0.38.4` to `0.39.5` (via `0.39.0`, `0.39.2`, `0.39.3`) by @dependabot[bot] in [#45](https://github.com/Vladimir-Urik/OxMgr/pull/45), [#55](https://github.com/Vladimir-Urik/OxMgr/pull/55), [#61](https://github.com/Vladimir-Urik/OxMgr/pull/61), and [#67](https://github.com/Vladimir-Urik/OxMgr/pull/67).
+- Bumped `nix` from `0.31.2` to `0.31.3` by @dependabot[bot] in [#54](https://github.com/Vladimir-Urik/OxMgr/pull/54).
+- Bumped `anyhow` from `1.0.102` to `1.0.103` by @dependabot[bot] in [#68](https://github.com/Vladimir-Urik/OxMgr/pull/68).
+- Bumped `chrono` from `0.4.44` to `0.4.45` by @dependabot[bot] in [#60](https://github.com/Vladimir-Urik/OxMgr/pull/60).
+- Bumped `serde_json` from `1.0.149` to `1.0.150` by @dependabot[bot] in [#57](https://github.com/Vladimir-Urik/OxMgr/pull/57).
+- Bumped `regex` from `1.12.3` to `1.12.4` by @dependabot[bot] in [#62](https://github.com/Vladimir-Urik/OxMgr/pull/62).
+- Bumped `serial_test` from `3.4.0` to `3.5.0` by @dependabot[bot] in [#59](https://github.com/Vladimir-Urik/OxMgr/pull/59).
+
+### New Contributors
+
+- @kvndrsslr made their first contribution in [#66](https://github.com/Vladimir-Urik/OxMgr/pull/66).
 
 ## v0.4.0 - 2026-04-26
 

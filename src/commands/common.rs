@@ -15,7 +15,26 @@ pub(crate) fn expect_ok(response: IpcResponse) -> Result<IpcResponse> {
     }
 }
 
+const CONFIG_EXTENSIONS: &[&str] = &["toml", "js", "cjs", "mjs", "json"];
+
+fn looks_like_config_target(target: &str) -> bool {
+    if target.contains('/') || target.contains('\\') {
+        return true;
+    }
+    Path::new(target)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            CONFIG_EXTENSIONS
+                .iter()
+                .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+        })
+}
+
 pub(crate) fn maybe_load_named_targets_from_config(target: &str) -> Result<Option<Vec<String>>> {
+    if !looks_like_config_target(target) {
+        return Ok(None);
+    }
     let path = PathBuf::from(target);
     if !path.exists() {
         return Ok(None);
@@ -120,7 +139,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        expand_specs_with_deterministic_names, expect_ok, maybe_load_named_targets_from_config,
+        expand_specs_with_deterministic_names, expect_ok, looks_like_config_target,
+        maybe_load_named_targets_from_config,
     };
     use crate::ecosystem::EcosystemProcessSpec;
     use crate::ipc::IpcResponse;
@@ -223,6 +243,46 @@ instances = 2
         assert_eq!(targets, vec!["web", "worker-0", "worker-1"]);
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn bare_process_names_are_not_treated_as_config_targets() {
+        for name in ["api", "246", "web-worker", "my.app", "api.bak"] {
+            assert!(
+                !looks_like_config_target(name),
+                "{name} should be treated as a process name, not a config target"
+            );
+        }
+    }
+
+    #[test]
+    fn config_file_paths_are_treated_as_config_targets() {
+        for target in [
+            "oxfile.toml",
+            "OXFILE.TOML",
+            "ecosystem.config.js",
+            "ecosystem.config.cjs",
+            "ecosystem.config.mjs",
+            "ecosystem.config.json",
+            "./oxfile.toml",
+            "configs/prod/oxfile.toml",
+            "sub/dir",
+        ] {
+            assert!(
+                looks_like_config_target(target),
+                "{target} should be treated as a config target"
+            );
+        }
+    }
+
+    #[test]
+    fn maybe_load_named_targets_from_config_passes_bare_names_through() {
+        let result = maybe_load_named_targets_from_config("api")
+            .expect("bare name resolution should not error");
+        assert!(
+            result.is_none(),
+            "expected bare name to fall through, got {result:?}"
+        );
     }
 
     fn temp_file(prefix: &str) -> std::path::PathBuf {
