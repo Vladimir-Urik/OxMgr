@@ -160,16 +160,19 @@ mod tests {
         assert_eq!(expand_vars("amount $5", &lookup).unwrap(), "amount $5");
     }
 
+    fn expected_home() -> String {
+        dirs::home_dir()
+            .expect("home directory")
+            .to_str()
+            .expect("utf-8 home directory")
+            .to_string()
+    }
+
     #[test]
     fn expand_tilde_replaces_leading_tilde_only() {
-        // SAFETY: set_var is unsafe in newer Rust because it mutates global env
-        // state. Tests in this module are single-threaded with respect to
-        // these specific keys.
-        unsafe {
-            std::env::set_var("HOME", "/home/tester");
-        }
-        assert_eq!(expand_tilde("~").unwrap(), "/home/tester");
-        assert_eq!(expand_tilde("~/folder").unwrap(), "/home/tester/folder");
+        let home = expected_home();
+        assert_eq!(expand_tilde("~").unwrap(), home);
+        assert_eq!(expand_tilde("~/folder").unwrap(), format!("{home}/folder"));
         // Tilde in the middle stays literal.
         assert_eq!(expand_tilde("/foo/~bar").unwrap(), "/foo/~bar");
         // `~user` form is not expanded.
@@ -178,10 +181,16 @@ mod tests {
 
     #[test]
     fn expand_combines_tilde_and_vars() {
+        // SAFETY: set_var is unsafe in newer Rust because it mutates global env
+        // state. Tests in this module are single-threaded with respect to
+        // these specific keys.
         unsafe {
-            std::env::set_var("HOME", "/home/tester");
             std::env::set_var("SUB", "data");
         }
-        assert_eq!(expand("~/${SUB}/cache").unwrap(), "/home/tester/data/cache");
+        let home = expected_home();
+        assert_eq!(
+            expand("~/${SUB}/cache").unwrap(),
+            format!("{home}/data/cache")
+        );
     }
 }

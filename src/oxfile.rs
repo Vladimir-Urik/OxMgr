@@ -1242,6 +1242,7 @@ command = "node server.js"
             std::env::set_var("HOME", "/home/tester");
             std::env::set_var("OXMGR_TEST_DATA", "shared");
         }
+        let home = dirs::home_dir().expect("home directory");
         let dir = std::env::temp_dir().join(format!(
             "oxfile-expand-{}",
             SystemTime::now()
@@ -1267,10 +1268,7 @@ LITERAL = "price=$$10"
 
         let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
         assert_eq!(specs.len(), 1);
-        assert_eq!(
-            specs[0].cwd,
-            Some(PathBuf::from("/home/tester/projects/api"))
-        );
+        assert_eq!(specs[0].cwd, Some(home.join("projects/api")));
         assert_eq!(
             specs[0].env.get("DATA_DIR").map(String::as_str),
             Some("/home/tester/data/shared")
@@ -1320,25 +1318,32 @@ BAD = "$OXMGR_TEST_MISSING_VAR/x"
         ));
         fs::create_dir_all(&dir).expect("failed to create temp dir");
         let path = dir.join("oxfile.toml");
-        let payload = r#"
-version = 1
-
-[[apps]]
-name = "api"
-command = "node server.js"
-cwd = "./services/api"
-
-[[apps]]
-name = "abs"
-command = "node abs.js"
-cwd = "/srv/abs"
-"#;
-        fs::write(&path, payload).expect("failed to write oxfile fixture");
+        // An absolute cwd must be left untouched; "absolute" is platform-specific
+        // (`/srv/abs` is not absolute on Windows), so pick a valid one per OS.
+        // The value is written as a TOML literal string (single quotes) so the
+        // Windows backslashes are not treated as escape sequences.
+        let abs_cwd = if cfg!(windows) {
+            r"C:\srv\abs"
+        } else {
+            "/srv/abs"
+        };
+        let payload = format!(
+            "version = 1\n\n\
+             [[apps]]\n\
+             name = \"api\"\n\
+             command = \"node server.js\"\n\
+             cwd = \"./services/api\"\n\n\
+             [[apps]]\n\
+             name = \"abs\"\n\
+             command = \"node abs.js\"\n\
+             cwd = '{abs_cwd}'\n"
+        );
+        fs::write(&path, &payload).expect("failed to write oxfile fixture");
 
         let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
         assert_eq!(specs.len(), 2);
         assert_eq!(specs[0].cwd, Some(dir.join("services/api")));
-        assert_eq!(specs[1].cwd, Some(PathBuf::from("/srv/abs")));
+        assert_eq!(specs[1].cwd, Some(PathBuf::from(abs_cwd)));
 
         let _ = fs::remove_dir_all(dir);
     }
