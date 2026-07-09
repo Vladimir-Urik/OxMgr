@@ -21,6 +21,10 @@
 
 - Relative `cwd` values in `oxfile.toml` and PM2 ecosystem files are now resolved against the directory containing the config file, instead of the daemon's working directory. Absolute `cwd` values are unaffected.
 - `~`, `~/...`, `$VAR`, and `${VAR}` are now expanded in `env` values and `cwd` paths when loading `oxfile.toml` or PM2 ecosystem files. `$$` produces a literal `$`. Missing variables fail loudly with an error naming the variable rather than silently expanding to an empty string.
+- `oxmgr stop`/`restart`/`delete`/`start`/`reload` with a bare process name no longer fail with `config target is not a file` when a file or directory of the same name exists in the current directory. Lifecycle targets are now treated as config files only when they carry a config extension (`toml`/`js`/`cjs`/`mjs`/`json`) or a path separator; bare tokens are always resolved as process names/ids ([#58](https://github.com/Vladimir-Urik/OxMgr/issues/58)).
+- npm installer now extracts release archives with `tar` (bsdtar ships in Windows 10/11 and on macOS/Linux) instead of shelling out to PowerShell's `Expand-Archive`, fixing `npm install -g oxmgr` failures on PowerShell 7 caused by `Microsoft.PowerShell.Archive` module autoload errors. A PowerShell fallback (with an explicit `Import-Module`) is kept for older Windows without `tar` ([#50](https://github.com/Vladimir-Urik/OxMgr/issues/50)).
+- npm installer now selects the static musl binary on Linux systems whose glibc is older than the version required by the prebuilt gnu build (e.g. Debian 12, Ubuntu 22.04), instead of installing a gnu binary that fails to load with `GLIBC_x.yy not found`.
+- Fixed Windows build failures under `cargo clippy -- -D warnings` by gating the Unix-only event-bus imports and subscription-filter code so they no longer trip `unused_imports`/`dead_code` on non-Unix targets.
 
 ### Changed
 

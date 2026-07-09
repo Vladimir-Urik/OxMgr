@@ -16,7 +16,9 @@ use tracing::{error, info, warn};
 
 use crate::config::AppConfig;
 use crate::errors::OxmgrError;
-use crate::events::{BusEvent, EventFilter};
+use crate::events::BusEvent;
+#[cfg(unix)]
+use crate::events::EventFilter;
 use crate::ipc::{read_json_line, send_request, write_json_line, IpcRequest, IpcResponse};
 use crate::logging::ProcessLogs;
 use crate::process::ManagedProcess;

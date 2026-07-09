@@ -22,6 +22,7 @@ pub struct AppConfig {
     pub log_dir: PathBuf,
     pub log_rotation: LogRotationPolicy,
     /// Unix socket path for the streaming event bus (Unix only).
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub event_socket_path: PathBuf,
 }
 

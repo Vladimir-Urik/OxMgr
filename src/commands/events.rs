@@ -1,6 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::config::AppConfig;
+#[cfg(unix)]
 use crate::events::{BusEvent, EventFilter};
 
 pub(crate) async fn run(
@@ -26,6 +27,7 @@ async fn run_unix(
     filter: Vec<String>,
     json: bool,
 ) -> Result<()> {
+    use anyhow::Context;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 

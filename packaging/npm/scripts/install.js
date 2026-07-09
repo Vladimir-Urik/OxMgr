@@ -173,6 +173,41 @@ function ensureSuccess(result, command) {
   }
 }
 
+function extractArchive(archivePath, destDir, ext) {
+  const tarArgs =
+    ext === "zip"
+      ? ["-xf", archivePath, "-C", destDir]
+      : ["-xzf", archivePath, "-C", destDir];
+  const tar = spawnSync("tar", tarArgs, { stdio: "inherit" });
+
+  if (tar.status === 0) {
+    return;
+  }
+
+  const tarMissing = tar.error && tar.error.code === "ENOENT";
+  if (ext === "zip" && (tarMissing || process.platform === "win32")) {
+    extractZipWithPowerShell(archivePath, destDir);
+    return;
+  }
+
+  if (tarMissing) {
+    throw new Error("tar is required to extract the release archive but was not found on PATH");
+  }
+  throw new Error(`tar failed with exit code ${tar.status}`);
+}
+
+function extractZipWithPowerShell(archivePath, destDir) {
+  const command =
+    "Import-Module Microsoft.PowerShell.Archive -ErrorAction SilentlyContinue; " +
+    `Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force`;
+  const unzip = spawnSync(
+    "powershell",
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { stdio: "inherit" }
+  );
+  ensureSuccess(unzip, "Expand-Archive");
+}
+
 async function main() {
   const triple = targetTriple();
   if (!triple) {
@@ -211,23 +246,7 @@ async function main() {
     throw new Error(`Checksum mismatch for ${archiveName}`);
   }
 
-  if (triple.ext === "zip") {
-    const unzip = spawnSync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-Command",
-        `Expand-Archive -Path '${archivePath}' -DestinationPath '${vendorDir}' -Force`
-      ],
-      { stdio: "inherit" }
-    );
-    ensureSuccess(unzip, "Expand-Archive");
-  } else {
-    const untar = spawnSync("tar", ["-xzf", archivePath, "-C", vendorDir], {
-      stdio: "inherit"
-    });
-    ensureSuccess(untar, "tar");
-  }
+  extractArchive(archivePath, vendorDir, triple.ext);
 
   const installedPath = path.join(vendorDir, binName);
   if (!fs.existsSync(installedPath)) {
