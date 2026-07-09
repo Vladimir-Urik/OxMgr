@@ -16,6 +16,8 @@ You use it to:
 - Watch files and restart on changes (dev workflow)
 - Do zero-downtime reloads with health checks
 - Auto-update services via git pull or webhook
+- Stream real-time lifecycle/log/health events over a local socket (`oxmgr events`)
+- Emit machine-readable output for scripting (`oxmgr list --json`)
 
 Install: `npm install -g oxmgr` or see [oxmgr releases](https://github.com/Vladimir-Urik/OxMgr/releases).
 
@@ -29,12 +31,19 @@ oxmgr start "node server.js" --name api --restart always
 
 # List all services
 oxmgr list          # aliases: ls, ps
+oxmgr list --json   # machine-readable JSON array (empty list => [])
 
 # Check one service
 oxmgr status api
 
 # Tail logs
 oxmgr logs api -f
+
+# Stream live events from the daemon event bus
+oxmgr events                          # all events, human-readable
+oxmgr events -f "process:*" -f log:err  # filter by event glob (repeatable)
+oxmgr events -p api                   # only events for process "api"
+oxmgr events --json                   # raw NDJSON output
 
 # Stop / restart / reload
 oxmgr stop api
@@ -58,6 +67,8 @@ oxmgr apply ./oxfile.toml --env prod
 ## Config File: `oxfile.toml`
 
 The recommended way to manage services. One file, multiple services, repeatable deploys.
+
+> **Paths in config:** Relative `cwd` values resolve against the directory containing the config file (not the daemon's working directory). `~`, `~/...`, `$VAR`, and `${VAR}` are expanded in `cwd` paths and `env` values; `$$` is a literal `$`. A missing variable fails loudly with an error naming it, rather than expanding to an empty string.
 
 ### Minimal config
 
@@ -242,6 +253,22 @@ command = "python worker.py"
 disabled = true                     # skipped by apply
 ```
 
+### Custom log files
+
+```toml
+[[apps]]
+name = "api"
+command = "node server.js"
+
+[apps.logs]
+stdout = "/var/log/api/out.log"
+stderr = "/var/log/api/err.log"
+# or send both streams to one file:
+# combined = "~/logs/api.log"
+```
+
+`[apps.logs]` (also settable on `[defaults.logs]`) overrides where stdout/stderr are written. Relative paths resolve against the oxfile directory and support `~`/`$VAR` expansion. `combined` routes both streams to a single file; explicit `stdout`/`stderr` win over `combined`. When unset, the daemon keeps its default `<log_dir>/<name>.out.log` / `<name>.err.log` (or `<name>.log` with `unified_logs = true`). PM2 ecosystem files map `out_file`, `error_file`, and `log_file` onto the same overrides.
+
 ### Git pull + webhook auto-update
 
 ```toml
@@ -261,6 +288,40 @@ curl -X POST http://localhost:<port>/pull/api \
 ```
 
 Only reloads/restarts if the commit changed.
+
+---
+
+## Event Bus (streaming)
+
+The daemon exposes a Unix domain socket (`events.sock`, default `{base_dir}/events.sock`, configurable via `event_socket_path`) that streams real-time events as NDJSON — one JSON object per line. Use it to react to process lifecycle, logs, and health without polling.
+
+```bash
+# Human-readable
+oxmgr events
+
+# Subscribe to specific event globs (repeatable), raw JSON for tooling
+oxmgr events -f "process:*" -f "health:*" --json | jq .
+
+# Only one process
+oxmgr events -p api
+```
+
+Each line looks like:
+
+```json
+{"event":"process:crashed","at":1714567890,"process":{"name":"api","command":"node server.js","cwd":"/srv/api"},"data":{"signal":"SIGSEGV","uptime_secs":42,"stderr_tail":["...stack trace..."]}}
+```
+
+Event names:
+
+- Lifecycle: `process:started`, `process:online`, `process:restarting`, `process:stopped`, `process:exited`, `process:errored`, `process:crashed`
+- Logs: `log:out`, `log:err` (every stdout/stderr line)
+- Health: `health:healthy`, `health:unhealthy`
+- Daemon: `daemon:shutdown` (emitted on both SIGTERM/SIGINT and IPC stop, before the socket closes)
+
+Every event's `process` object carries `command` (full command line) and `cwd`. Exit/crash events are enriched with `signal` (POSIX signal name), `uptime_secs`, and `stderr_tail` (last ≤30 stderr lines — captures panics, tracebacks, stack traces for any language).
+
+**Subscription protocol (for custom clients):** connect to the socket and send one JSON `EventFilter` object within 500 ms; you then receive the matching NDJSON stream. `oxmgr events` does this for you.
 
 ---
 
@@ -307,6 +368,15 @@ Only reloads/restarts if the commit changed.
 | `git_repo` | string | — | Git remote for `oxmgr pull` |
 | `git_ref` | string | — | Branch/tag/ref to pull |
 | `pull_secret` | string | — | Webhook auth secret |
+| `unified_logs` | bool | `false` | Merge stdout/stderr into one default file |
+
+### `[apps.logs]` / `[defaults.logs]`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `stdout` | string | `<log_dir>/<name>.out.log` | stdout destination; `~`/`$VAR` + relative-to-oxfile |
+| `stderr` | string | `<log_dir>/<name>.err.log` | stderr destination |
+| `combined` | string | — | Route both streams here; `stdout`/`stderr` override it |
 
 ---
 
@@ -320,3 +390,8 @@ Only reloads/restarts if the commit changed.
 - `env` tables are always merged (not replaced) across the `defaults` → `app` → `profile` layers.
 - `--prune` flag on `apply` removes processes from the daemon that are no longer in the config.
 - `apply` is idempotent — safe to run in CI/CD on every deploy. Unchanged apps are left untouched.
+- Relative `cwd` resolves against the config file's directory, not the daemon's cwd — so `oxmgr apply` gives the same result regardless of where you run it from.
+- A missing `$VAR` in `cwd`/`env` is a hard error (names the variable); it does not silently become empty. Use `$$` for a literal `$`.
+- `oxmgr events` needs a running daemon; it streams from `events.sock` (Unix socket) — not the HTTP API. The event bus is Unix-only (Linux/macOS).
+- `log:out`/`log:err` events fire for every log line regardless of `log_date_format`; a chatty process makes a chatty stream — filter with `-f`/`-p`.
+- `[apps.logs].combined` and explicit `stdout`/`stderr` can coexist; the specific stream override wins over `combined`.
