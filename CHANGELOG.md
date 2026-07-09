@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 - 2026-07-09
 
 ### Added
 
@@ -9,7 +9,6 @@
 - Added `--json` flag to `oxmgr list` (alias `oxmgr ls`) that serializes the managed-process list to a JSON array via `serde`, instead of the human-readable table. Empty lists emit `[]`. Each entry reflects the full `ManagedProcess` schema (id, name, command, args, status, pid, cpu_percent, memory_bytes, restart_count, cluster_mode, health_status, etc.). Useful for scripting and piping to tools like `jq`. Thanks to @kvndrsslr for their first contribution in [#66](https://github.com/Vladimir-Urik/OxMgr/pull/66).
 - Added `oxmgr events` CLI command to stream events from the daemon socket, with `--filter`/`-f` glob patterns, `--process`/`-p` name filter, and `--json` raw output flag.
 - Added `EventFilter` subscription protocol: client sends one JSON filter object within 500 ms of connecting, then receives a stream of matching NDJSON events.
-- Added `SDK.md` describing the NDJSON wire protocol, all event types, TypeScript type definitions, a reference Node.js client implementation, and reconnect/error-handling patterns.
 - Unified stdout/stderr log forwarding into a single generic `forward_log_pipe` function; log lines are now always piped and emitted as `log:out`/`log:err` events regardless of `log_date_format`.
 - Added `prepare_log_files` helper that handles log rotation and cleanup without keeping file handles open.
 - Enriched exit/crash events with `signal` (POSIX signal name, e.g. `"SIGSEGV"`), `uptime_secs` (how long the process ran), and `stderr_tail` (last ≤30 stderr lines — captures stack traces, panics, and tracebacks for any language).
