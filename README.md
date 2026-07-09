@@ -173,10 +173,11 @@ The project is developed under the open-source patronage of [Empellio](https://e
 
 ## Star History
 
+
 <a href="https://www.star-history.com/?repos=Vladimir-Urik%2FOxMgr&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Vladimir-Urik/OxMgr&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Vladimir-Urik/OxMgr&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Vladimir-Urik/OxMgr&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Vladimir-Urik/OxMgr&type=date&theme=dark&legend=top-left&sealed_token=Mfct7NOpErmiOGiI0Yq6yxsyxPXTkv1dxj4ypDwjdESSMN_yPazaW36Po6u7ABTgxmQJo5AASxKB4Iwtkm_JYnYFC2xw7tSihpUx5163tR7Pb5IonpWPIg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Vladimir-Urik/OxMgr&type=date&legend=top-left&sealed_token=Mfct7NOpErmiOGiI0Yq6yxsyxPXTkv1dxj4ypDwjdESSMN_yPazaW36Po6u7ABTgxmQJo5AASxKB4Iwtkm_JYnYFC2xw7tSihpUx5163tR7Pb5IonpWPIg" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Vladimir-Urik/OxMgr&type=date&legend=top-left&sealed_token=Mfct7NOpErmiOGiI0Yq6yxsyxPXTkv1dxj4ypDwjdESSMN_yPazaW36Po6u7ABTgxmQJo5AASxKB4Iwtkm_JYnYFC2xw7tSihpUx5163tR7Pb5IonpWPIg" />
  </picture>
 </a>
