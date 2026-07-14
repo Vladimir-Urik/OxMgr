@@ -22,7 +22,7 @@ pub(crate) async fn run(
     };
 
     if target == "all" {
-        return run_all(config, lines).await;
+        return run_all(config, follow, lines).await;
     }
 
     let response = send_request(&config.daemon_addr, &IpcRequest::Logs { target }).await?;
@@ -39,7 +39,7 @@ pub(crate) async fn run(
     Ok(())
 }
 
-async fn run_all(config: &AppConfig, lines: usize) -> Result<()> {
+async fn run_all(config: &AppConfig, follow: bool, lines: usize) -> Result<()> {
     let response = send_request(&config.daemon_addr, &IpcRequest::List).await?;
     let response = expect_ok(response)?;
 
@@ -59,7 +59,49 @@ async fn run_all(config: &AppConfig, lines: usize) -> Result<()> {
         }
     }
 
+    if follow {
+        let logs_list: Vec<ProcessLogs> = response
+            .processes
+            .iter()
+            .map(|p| ProcessLogs {
+                stdout: p.stdout_log.clone(),
+                stderr: p.stderr_log.clone(),
+            })
+            .collect();
+        follow_all(logs_list).await;
+    }
+
     Ok(())
+}
+
+async fn follow_all(logs_list: Vec<ProcessLogs>) {
+    println!("\nFollowing all logs (Ctrl-C to stop)...");
+    let mut handles = Vec::new();
+
+    for logs in logs_list {
+        if logs.stdout == logs.stderr {
+            let path = logs.stdout.clone();
+            handles.push(tokio::spawn(async move {
+                follow_file(path, "unified", false).await
+            }));
+        } else {
+            let stdout_path = logs.stdout.clone();
+            let stderr_path = logs.stderr.clone();
+            handles.push(tokio::spawn(async move {
+                follow_file(stdout_path, "stdout", true).await
+            }));
+            handles.push(tokio::spawn(async move {
+                follow_file(stderr_path, "stderr", true).await
+            }));
+        }
+    }
+
+    let _ = tokio::signal::ctrl_c().await;
+
+    for handle in handles {
+        handle.abort();
+        let _ = handle.await;
+    }
 }
 
 fn print_logs_help() {
