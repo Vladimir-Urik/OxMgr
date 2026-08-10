@@ -85,6 +85,16 @@ pub enum DesiredState {
     Stopped,
 }
 
+impl std::fmt::Display for DesiredState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            DesiredState::Running => "running",
+            DesiredState::Stopped => "stopped",
+        };
+        write!(f, "{value}")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
