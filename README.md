@@ -104,6 +104,37 @@ oxmgr ui
 
 Inside `oxmgr ui`, use `/` for live search, `f` to cycle status filters, and `o` to cycle sort order.
 
+### Web dashboard
+
+With the daemon running (`oxmgr daemon run`), open the web dashboard in your
+browser:
+
+```bash
+open http://127.0.0.1:46001
+```
+
+The dashboard shows process status, CPU/RAM usage, health, and log tails, and
+lets you stop, restart, or reload processes from the browser. Override the API
+bind address with the `OXMGR_API_ADDR` environment variable (see
+[src/config.rs](./src/config.rs)).
+
+![OxMgr web dashboard preview](./docs/screenshots/dashboard.png)
+
+### Docker demo
+
+A ready-to-run demo image ships with a web dashboard and an example config:
+
+```bash
+docker compose up --build
+# open http://localhost:46001
+# the example managed web service is at http://localhost:8080
+```
+
+The `docker-compose.yaml` seeds the daemon with `docker/oxfile.example.toml`
+(three demo services: a web responder, a log ticker, and one that crashes so
+you can see error handling), and persists state in a named volume. See the
+[Dockerfile](./Dockerfile) for image layout and environment overrides.
+
 Use a config file for repeatable setups:
 
 ```toml
