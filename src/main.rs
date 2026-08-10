@@ -21,6 +21,7 @@ mod logging;
 mod oxfile;
 mod process;
 mod process_manager;
+mod signal;
 mod storage;
 mod ui;
 
