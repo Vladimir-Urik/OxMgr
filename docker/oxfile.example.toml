@@ -1,0 +1,20 @@
+version = 1
+
+[defaults]
+restart_policy = "always"
+
+[[apps]]
+name = "web-demo"
+command = "sh -c 'while true; do printf \"HTTP/1.1 200 OK\\nContent-Type: text/plain\\nContent-Length: 12\\n\\nHello World!\" | nc -l -p 8080; done'"
+namespace = "demo"
+
+[[apps]]
+name = "worker-tick"
+command = "sh -c 'while true; do echo \"Tick: $(date)\"; sleep 5; done'"
+namespace = "demo"
+
+[[apps]]
+name = "bad-worker"
+command = "sh -c 'echo \"Something failed at $(date)\" >&2; exit 1'"
+restart_policy = "on_failure"
+namespace = "failure-worker"
