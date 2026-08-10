@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::str;
 
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -28,6 +30,10 @@ const SVG_CONTENT_TYPE: &str = "image/svg+xml; charset=utf-8";
 /// Build version injected at compile time by `build.rs` (mirrors the CLI).
 const BUILD_VERSION: &str = env!("OXMGR_BUILD_VERSION");
 
+/// Env vars that configure dashboard Basic Auth (see `dashboard_auth`).
+const ENV_DASHBOARD_USER: &str = "OXMGR_DASHBOARD_USER";
+const ENV_DASHBOARD_PASS: &str = "OXMGR_DASHBOARD_PASS";
+
 /// Renders the dashboard HTML shell with the embedded CSS and JS injected.
 fn render_dashboard_html() -> String {
     DASHBOARD_HTML
@@ -48,8 +54,8 @@ fn render_dashboard_html() -> String {
 /// user provides both a username and a password, e.g.:
 ///   OXMGR_DASHBOARD_USER=admin OXMGR_DASHBOARD_PASS=s3cret
 fn dashboard_auth() -> Option<(String, String)> {
-    let user = std::env::var("OXMGR_DASHBOARD_USER").ok()?;
-    let pass = std::env::var("OXMGR_DASHBOARD_PASS").ok()?;
+    let user = std::env::var(ENV_DASHBOARD_USER).ok()?;
+    let pass = std::env::var(ENV_DASHBOARD_PASS).ok()?;
     if user.trim().is_empty() || pass.is_empty() {
         return None;
     }
@@ -71,7 +77,10 @@ fn auth_ok(headers: &std::collections::HashMap<String, String>) -> bool {
     else {
         return false;
     };
-    let Ok(decoded) = base64_decode(encoded.trim()) else {
+    let Ok(decoded) = STANDARD.decode(encoded.trim()) else {
+        return false;
+    };
+    let Ok(decoded) = String::from_utf8(decoded) else {
         return false;
     };
     if let Some((user, pass)) = decoded.split_once(':') {
@@ -79,31 +88,6 @@ fn auth_ok(headers: &std::collections::HashMap<String, String>) -> bool {
     } else {
         false
     }
-}
-
-/// Minimal base64 decoder for Basic-auth credentials. Returns a 401 response
-/// wrapper when decoding fails so callers can answer uniformly.
-fn base64_decode(input: &str) -> Result<String, ()> {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-    let mut buf: u32 = 0;
-    let mut bits: u8 = 0;
-    for byte in input.bytes() {
-        if byte == b'=' {
-            break;
-        }
-        let value = match ALPHABET.iter().position(|&c| c == byte) {
-            Some(idx) => idx as u32,
-            None => return Err(()),
-        };
-        buf = (buf << 6) | value;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
-        }
-    }
-    String::from_utf8(out).map_err(|_| ())
 }
 
 /// A `401 Unauthorized` response with a `WWW-Authenticate` challenge, used to
@@ -195,7 +179,7 @@ async fn handle_log_stream(
         return write_http_response(stream, &HttpResponse::error(404, "service not found")).await;
     };
 
-    let stream_type = query.get("stream").map(String::as_str).unwrap_or("stdout");
+    let stream_type = query.get("stream").map_or("stdout", String::as_str);
     let log_path = match stream_type {
         "stderr" | "error" => process.stderr_log,
         _ => process.stdout_log,
@@ -217,7 +201,7 @@ async fn handle_log_stream(
     let mut file = tokio::fs::File::open(&log_path).await?;
     file.seek(std::io::SeekFrom::End(0)).await?;
 
-    let mut buffer = Vec::new();
+    let mut buffer = Vec::default();
     loop {
         buffer.clear();
         let bytes_read = file.read_to_end(&mut buffer).await?;
@@ -231,7 +215,7 @@ async fn handle_log_stream(
             }
             stream.flush().await?;
         } else {
-            let current_pos = file.seek(std::io::SeekFrom::Current(0)).await?;
+            let current_pos = file.stream_position().await?;
             if let Ok(meta) = tokio::fs::metadata(&log_path).await {
                 if meta.len() < current_pos {
                     file = tokio::fs::File::open(&log_path).await?;
@@ -325,7 +309,7 @@ async fn execute_api_snapshot_get(
             .collect();
         return HttpResponse::json(
             200,
-            serde_json::to_value(redacted).unwrap_or_else(|_| serde_json::Value::Array(Vec::new())),
+            serde_json::to_value(redacted).unwrap_or_else(|_| serde_json::Value::Array(Vec::default())),
         );
     }
 
@@ -351,7 +335,7 @@ async fn execute_api_snapshot_get(
             let Some(process) = snapshot.get_process(&name).await else {
                 return HttpResponse::error(404, "service not found");
             };
-            let stream = query.get("stream").map(String::as_str).unwrap_or("stdout");
+            let stream = query.get("stream").map_or("stdout", String::as_str);
             let lines = query
                 .get("lines")
                 .and_then(|value| value.parse::<usize>().ok())
@@ -467,7 +451,7 @@ fn split_path_and_query(path: &str) -> (&str, std::collections::HashMap<String, 
                 .into_owned()
                 .collect(),
         ),
-        None => (path, std::collections::HashMap::new()),
+        None => (path, HashMap::default()),
     }
 }
 
@@ -722,7 +706,7 @@ impl HttpResponse {
             status_code,
             content_type: JSON_CONTENT_TYPE,
             body: HttpBody::Json(body),
-            headers: std::collections::HashMap::new(),
+            headers: HashMap::default(),
         }
     }
 
@@ -731,7 +715,7 @@ impl HttpResponse {
             status_code,
             content_type,
             body: HttpBody::Text(body.into()),
-            headers: std::collections::HashMap::new(),
+            headers: HashMap::default(),
         }
     }
 
@@ -740,8 +724,8 @@ impl HttpResponse {
         Self {
             status_code,
             content_type: TEXT_PLAIN_CONTENT_TYPE,
-            body: HttpBody::Text(String::new()),
-            headers: std::collections::HashMap::new(),
+            body: HttpBody::Text(String::default()),
+            headers: HashMap::default(),
         }
     }
 }
@@ -776,7 +760,7 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         .context("malformed webhook request headers")?;
     let head = &raw[..header_end];
 
-    let mut lines = head.split("\r\n");
+    let mut lines = head.lines();
     let request_line = lines
         .next()
         .context("missing webhook request line")?
@@ -792,7 +776,7 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         .context("missing webhook request path")?
         .to_string();
 
-    let mut headers = std::collections::HashMap::new();
+        let mut headers = HashMap::default();
     for line in lines {
         if let Some((name, value)) = line.split_once(':') {
             headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());

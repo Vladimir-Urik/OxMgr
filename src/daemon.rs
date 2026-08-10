@@ -92,7 +92,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     // Registered once, before the loop: SIGTERM is what `docker stop` and
     // service supervisors send, and as PID 1 the daemon gets no default
     // disposition, so it must handle the signal explicitly or be SIGKILLed.
-    let mut shutdown_signals = ShutdownListener::new();
+    let mut shutdown_signals = ShutdownListener::default();
 
     info!("oxmgr daemon started at {}", config.daemon_addr);
     info!("oxmgr webhook API started at {}", config.api_addr);
@@ -597,6 +597,11 @@ mod tests {
         handle_api_client, render_prometheus_metrics, restart_sleep_deadline, DaemonSnapshot,
         HttpBody, HttpRequest, DISABLED_RESTART_SLEEP_SECS, PROMETHEUS_CONTENT_TYPE,
     };
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    const ENV_DASHBOARD_USER: &str = "OXMGR_DASHBOARD_USER";
+    const ENV_DASHBOARD_PASS: &str = "OXMGR_DASHBOARD_PASS";
+
     use crate::config::AppConfig;
     use crate::hash::sha256_hex;
     use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
@@ -623,7 +628,7 @@ mod tests {
         HttpRequest {
             method: method.to_string(),
             path: path.to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
         }
     }
 
@@ -639,50 +644,14 @@ mod tests {
         }
     }
 
-    fn base64_basic(user: &str, pass: &str) -> String {
-        use base64_basic_helper::*;
-        encode(user, pass)
-    }
-
-    mod base64_basic_helper {
-        // Minimal base64 encoder for test credentials.
-        const TABLE: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        pub fn encode(user: &str, pass: &str) -> String {
-            let input = format!("{user}:{pass}");
-            let bytes = input.as_bytes();
-            let mut out = String::new();
-            for chunk in bytes.chunks(3) {
-                let b0 = chunk[0] as u32;
-                let b1 = chunk.get(1).copied().map(|b| b as u32);
-                let b2 = chunk.get(2).copied().map(|b| b as u32);
-                out.push(TABLE[((b0 >> 2) & 0x3f) as usize] as char);
-                let c1 = ((b0 & 0x03) << 4) | (b1.map_or(0, |b| (b >> 4) & 0x0f));
-                out.push(TABLE[c1 as usize] as char);
-                match b1 {
-                    Some(b1) => {
-                        let c2 = ((b1 & 0x0f) << 2) | (b2.map_or(0, |b| (b >> 6) & 0x03));
-                        out.push(TABLE[c2 as usize] as char);
-                    }
-                    None => out.push('='),
-                }
-                match b2 {
-                    Some(b2) => out.push(TABLE[(b2 & 0x3f) as usize] as char),
-                    None => out.push('='),
-                }
-            }
-            out
-        }
-    }
-
     #[tokio::test]
     async fn dashboard_api_requires_basic_auth_when_configured() {
         // Serialize with other tests that mutate env vars to avoid clobbering.
         let _guard = env_mutex().lock().expect("env lock");
-        let old_user = std::env::var("OXMGR_DASHBOARD_USER").ok();
-        let old_pass = std::env::var("OXMGR_DASHBOARD_PASS").ok();
-        std::env::set_var("OXMGR_DASHBOARD_USER", "admin");
-        std::env::set_var("OXMGR_DASHBOARD_PASS", "s3cret");
+        let old_user = std::env::var(ENV_DASHBOARD_USER).ok();
+        let old_pass = std::env::var(ENV_DASHBOARD_PASS).ok();
+        std::env::set_var(ENV_DASHBOARD_USER, "admin");
+        std::env::set_var(ENV_DASHBOARD_PASS, "s3cret");
 
         // Without credentials -> 401 + WWW-Authenticate challenge.
         let denied = authorize_request(&http_req("GET", "/"))
@@ -698,20 +667,20 @@ mod tests {
         assert_eq!(denied_api.status_code, 401);
 
         // Wrong credentials -> 401.
-        let mut wrong = HashMap::new();
+        let mut wrong = HashMap::default();
         wrong.insert(
             "authorization".to_string(),
-            format!("Basic {}", base64_basic("admin", "wrong")),
+            format!("Basic {}", STANDARD.encode("admin:wrong")),
         );
         let wrong_resp = authorize_request(&http_req_with_headers("GET", "/api/processes", wrong))
             .expect("api should require auth when configured");
         assert_eq!(wrong_resp.status_code, 401);
 
         // Correct credentials -> None (passes middleware).
-        let mut ok_headers = HashMap::new();
+        let mut ok_headers = HashMap::default();
         ok_headers.insert(
             "authorization".to_string(),
-            format!("Basic {}", base64_basic("admin", "s3cret")),
+            format!("Basic {}", STANDARD.encode("admin:s3cret")),
         );
         let ok = authorize_request(&http_req_with_headers("GET", "/api/processes", ok_headers));
         assert!(ok.is_none(), "correct credentials should pass middleware");
@@ -725,13 +694,13 @@ mod tests {
         assert!(pull.is_none(), "/pull/* should not require basic auth");
 
         // Restore env.
-        restore_env("OXMGR_DASHBOARD_USER", old_user);
-        restore_env("OXMGR_DASHBOARD_PASS", old_pass);
+        restore_env(ENV_DASHBOARD_USER, old_user);
+        restore_env(ENV_DASHBOARD_PASS, old_pass);
     }
 
     #[tokio::test]
     async fn snapshot_api_serves_dashboard_html_at_root() {
-        let snapshot = snapshot_with_processes(Vec::new());
+        let snapshot = snapshot_with_processes(Vec::default());
         let response = execute_snapshot_api_request(&http_req("GET", "/"), &snapshot)
             .await
             .expect("root should be served from snapshot");
@@ -819,7 +788,7 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_api_logs_unknown_process_returns_404() {
-        let snapshot = snapshot_with_processes(Vec::new());
+        let snapshot = snapshot_with_processes(Vec::default());
         let response = execute_snapshot_api_request(
             &http_req("GET", "/api/processes/nope/logs?lines=10"),
             &snapshot,
@@ -839,7 +808,7 @@ mod tests {
         let response =
             execute_api_request(http_req("POST", "/api/processes/api/stop"), &mut manager).await;
         assert_eq!(response.status_code, 200);
-        assert_eq!(json_body(&response)["ok"], true);
+        assert!(json_body(&response)["ok"].as_bool().unwrap_or(false));
         assert_eq!(json_body(&response)["message"], "stop 1 process(es)");
 
         let process = manager
@@ -918,7 +887,7 @@ mod tests {
         let request = HttpRequest {
             method: "GET".to_string(),
             path: "/pull/api".to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -934,7 +903,7 @@ mod tests {
         let request = HttpRequest {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -1015,7 +984,7 @@ mod tests {
         let request = HttpRequest {
             method: "GET".to_string(),
             path: "/metrics".to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
         };
 
         let response = execute_snapshot_api_request(&request, &snapshot)

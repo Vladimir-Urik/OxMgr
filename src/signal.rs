@@ -22,36 +22,6 @@ pub struct ShutdownListener {
 }
 
 impl ShutdownListener {
-    /// Registers the signal handlers.
-    ///
-    /// A handler that cannot be installed is left as `None` and simply never
-    /// fires, so a partial failure degrades instead of taking the daemon down.
-    #[cfg(unix)]
-    pub fn new() -> Self {
-        use tokio::signal::unix::{signal, SignalKind};
-
-        let sigterm = match signal(SignalKind::terminate()) {
-            Ok(stream) => Some(stream),
-            Err(err) => {
-                tracing::warn!("failed to install SIGTERM handler: {err}");
-                None
-            }
-        };
-        let sigint = match signal(SignalKind::interrupt()) {
-            Ok(stream) => Some(stream),
-            Err(err) => {
-                tracing::warn!("failed to install SIGINT handler: {err}");
-                None
-            }
-        };
-        Self { sigterm, sigint }
-    }
-
-    #[cfg(not(unix))]
-    pub fn new() -> Self {
-        Self {}
-    }
-
     /// Resolves once a shutdown signal arrives, yielding the signal name for
     /// logging. Waits forever when no handler could be installed.
     #[cfg(unix)]
@@ -84,15 +54,42 @@ impl ShutdownListener {
 }
 
 impl Default for ShutdownListener {
+    /// Registers the signal handlers.
+    ///
+    /// A handler that cannot be installed is left as `None` and simply never
+    /// fires, so a partial failure degrades instead of taking the daemon down.
     fn default() -> Self {
-        Self::new()
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+
+            let sigterm = signal(SignalKind::terminate()).map_or_else(
+                |err| {
+                    tracing::warn!("failed to install SIGTERM handler: {err}");
+                    None
+                },
+                Some,
+            );
+            let sigint = signal(SignalKind::interrupt()).map_or_else(
+                |err| {
+                    tracing::warn!("failed to install SIGINT handler: {err}");
+                    None
+                },
+                Some,
+            );
+            Self { sigterm, sigint }
+        }
+        #[cfg(not(unix))]
+        {
+            Self {}
+        }
     }
 }
 
 /// One-shot helper for call sites that only need to await a single shutdown
 /// signal rather than poll inside a loop.
 pub async fn wait_for_shutdown_signal() -> &'static str {
-    ShutdownListener::new().recv().await
+    ShutdownListener::default().recv().await
 }
 
 #[cfg(all(test, unix))]
@@ -120,7 +117,7 @@ mod tests {
     #[tokio::test]
     async fn listener_receives_sigterm() {
         let _guard = signal_mutex().lock().await;
-        let mut listener = ShutdownListener::new();
+        let mut listener = ShutdownListener::default();
 
         // Raise after the handler is installed, otherwise the default
         // disposition would terminate the test process.
@@ -135,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn listener_receives_sigint() {
         let _guard = signal_mutex().lock().await;
-        let mut listener = ShutdownListener::new();
+        let mut listener = ShutdownListener::default();
 
         kill(Pid::this(), Signal::SIGINT).expect("failed to raise SIGINT");
 
@@ -150,7 +147,7 @@ mod tests {
         // Must hold the same lock: signals are process-wide, so without it this
         // test races the cases above and observes their SIGTERM/SIGINT.
         let _guard = signal_mutex().lock().await;
-        let mut listener = ShutdownListener::new();
+        let mut listener = ShutdownListener::default();
         let result = tokio::time::timeout(Duration::from_millis(200), listener.recv()).await;
         assert!(
             result.is_err(),

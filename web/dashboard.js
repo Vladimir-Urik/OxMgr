@@ -35,24 +35,24 @@
   };
 
   // --- tiny utils ---
-  const esc = (s) => {
-    const d = document.createElement("div");
-    d.textContent = s == null ? "" : String(s);
-    return d.innerHTML;
+  const esc = (str) => {
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
   };
-  const bytes = (b) => {
-    b = Number(b) || 0;
-    const u = ["B", "KB", "MB", "GB"];
-    let i = 0;
-    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-    return (i ? b.toFixed(i > 1 ? 1 : 0) : b) + " " + u[i];
+  const bytes = (bytesVal) => {
+    bytesVal = Number(bytesVal) || 0;
+    const units = ["B", "KB", "MB", "GB"];
+    let idx = 0;
+    while (bytesVal >= 1024 && idx < units.length - 1) { bytesVal /= 1024; idx++; }
+    return `${idx ? bytesVal.toFixed(idx > 1 ? 1 : 0) : bytesVal} ${units[idx]}`;
   };
-  const uptime = (p) => {
-    if (!["running", "restarting"].includes(p.status) || !p.last_started_at) return "–";
-    const s = Math.max(0, Math.floor(Date.now() / 1000) - p.last_started_at);
-    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
-      m = Math.floor((s % 3600) / 60), sec = s % 60;
-    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  const uptime = (proc) => {
+    if (!["running", "restarting"].includes(proc.status) || !proc.last_started_at) return "–";
+    const secs = Math.max(0, Math.floor(Date.now() / 1000) - proc.last_started_at);
+    const days = Math.floor(secs / 86400), hours = Math.floor((secs % 86400) / 3600),
+      mins = Math.floor((secs % 3600) / 60), sec = secs % 60;
+    return days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${mins}m` : mins > 0 ? `${mins}m ${sec}s` : `${sec}s`;
   };
 
   // --- debounced spinner ---
@@ -78,15 +78,15 @@
     const res = await fetch(path, opts);
     const isJson = (res.headers.get("content-type") || "").includes("json");
     const data = isJson ? await res.json().catch(() => null) : await res.text();
-    if (!res.ok) throw new Error((data && data.message) || `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
     return data;
   }
 
   const act = async (target, action, btn) => {
     btn?.classList.add("busy");
     try {
-      const d = await api(`/api/processes/${encodeURIComponent(target)}/${action}`, { method: "POST" });
-      el.hint.textContent = d?.message || `${action} ok`;
+      const data = await api(`/api/processes/${encodeURIComponent(target)}/${action}`, { method: "POST" });
+      el.hint.textContent = data?.message || `${action} ok`;
     } catch (e) {
       banner.show(`Action ${action} on ${target} failed: ${e.message}`);
     } finally {
@@ -97,23 +97,22 @@
   // --- rendering ---
   const filtered = () => {
     const term = state.search.trim().toLowerCase();
-    return state.processes.filter((p) =>
-      (!state.group || (p.namespace || "") === state.group) &&
-      (!term || p.name.toLowerCase().includes(term) || String(p.id).includes(term) || String(p.status || "").includes(term))
+    return state.processes.filter((proc) =>
+      (!state.group || (proc.namespace || "") === state.group) &&
+      (!term || proc.name.toLowerCase().includes(term) || String(proc.id).includes(term) || String(proc.status || "").includes(term))
     );
   };
 
   const groupOptions = () => {
-    const groups = [...new Set(state.processes.map((p) => p.namespace).filter(Boolean))].sort();
+    const groups = [...new Set(state.processes.map((proc) => proc.namespace).filter(Boolean))].sort();
     const cur = el.group.value;
-    el.group.innerHTML = '<option value="">All groups</option>' +
-      groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
+    el.group.innerHTML = `<option value="">All groups</option>${groups.map((grp) => `<option value="${esc(grp)}">${esc(grp)}</option>`).join("")}`;
     el.group.value = groups.includes(cur) ? cur : "";
     state.group = el.group.value;
   };
 
   const stats = () => {
-    const by = state.processes.reduce((acc, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc; }, {});
+    const by = state.processes.reduce((acc, proc) => { acc[proc.status] = (acc[proc.status] || 0) + 1; return acc; }, {});
     const chip = (label, count, cls) => `<span class="stat ${cls}"><b>${count}</b> ${label}</span>`;
     el.stats.innerHTML =
       chip("total", state.processes.length, "") +
@@ -124,30 +123,30 @@
       chip("errored", by.errored || 0, "bad");
   };
 
-  const row = (p) => {
-    const running = p.status === "running";
-    const action = (label, action, disabled, cls) => {
-      const b = document.createElement("button");
-      b.className = "small" + (cls ? " " + cls : "");
-      b.textContent = label;
-      b.disabled = !!disabled;
-      b.dataset.target = p.name;
-      b.dataset.action = action;
-      return b;
+  const row = (proc) => {
+    const running = proc.status === "running";
+    const action = (label, cmd, disabled, cls) => {
+      const btn = document.createElement("button");
+      btn.className = `small${cls ? ` ${cls}` : ""}`;
+      btn.textContent = label;
+      btn.disabled = Boolean(disabled);
+      btn.dataset.target = proc.name;
+      btn.dataset.action = cmd;
+      return btn;
     };
     const tr = document.createElement("tr");
     tr.className = "clickable";
-    tr.dataset.name = p.name;
+    tr.dataset.name = proc.name;
     tr.innerHTML = `
-      <td><span class="badge"><span class="dot ${esc(p.status)}"></span>${esc(p.status || "unknown")}</span></td>
-      <td class="name-cell">${esc(p.name)}</td>
-      <td class="num">${p.id}</td>
-      <td class="num">${p.pid ?? "–"}</td>
-      <td>${uptime(p)}</td>
-      <td class="num">${Number(p.cpu_percent || 0).toFixed(1)}</td>
-      <td class="num">${bytes(p.memory_bytes)}</td>
-      <td class="num">${p.restart_count ?? 0}</td>
-      <td><span class="health ${esc(p.health_status || "unknown")}">${esc(p.health_status || "unknown")}</span></td>
+      <td><span class="badge"><span class="dot ${esc(proc.status)}"></span>${esc(proc.status || "unknown")}</span></td>
+      <td class="name-cell">${esc(proc.name)}</td>
+      <td class="num">${proc.id}</td>
+      <td class="num">${proc.pid ?? "–"}</td>
+      <td>${uptime(proc)}</td>
+      <td class="num">${Number(proc.cpu_percent || 0).toFixed(1)}</td>
+      <td class="num">${bytes(proc.memory_bytes)}</td>
+      <td class="num">${proc.restart_count ?? 0}</td>
+      <td><span class="health ${esc(proc.health_status || "unknown")}">${esc(proc.health_status || "unknown")}</span></td>
       <td class="actions"></td>`;
     const cell = $(".actions", tr);
     cell.append(
@@ -175,14 +174,14 @@
     el.empty.style.display = visible.length ? "none" : "block";
     const frag = document.createDocumentFragment();
     const groups = new Map();
-    visible.forEach((p) => {
-      const key = p.namespace || "default";
+    visible.forEach((proc) => {
+      const key = proc.namespace || "default";
       if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(p);
+      groups.get(key).push(proc);
     });
     groups.forEach((members, key) => {
       frag.appendChild(groupRow(key, members.length));
-      members.forEach((p) => frag.appendChild(row(p)));
+      members.forEach((proc) => frag.appendChild(row(proc)));
     });
     el.tbody.replaceChildren(frag);
   };
@@ -202,7 +201,7 @@
         banner.hide();
         groupOptions();
         render();
-        el.hint.textContent = "updated " + new Date().toLocaleTimeString();
+        el.hint.textContent = `updated ${new Date().toLocaleTimeString()}`;
       } catch (e) { console.error("SSE parse error", e); }
     };
     procES.onerror = () => spin.hide(el.spinner, "proc");
@@ -210,6 +209,24 @@
 
   // --- logs (SSE) ---
   let logES = null;
+  const setStreamSeg = () =>
+    el.logSeg.querySelectorAll("button").forEach((btn) => btn.classList.toggle("active", btn.dataset.stream === state.logStream));
+  const stopLogSSE = () => { logES?.close(); logES = null; spin.hide(el.logSpinner, "log"); };
+  const startLogSSE = () => {
+    stopLogSSE();
+    el.logPre.textContent = "";
+    spin.show(el.logSpinner, "log");
+    logES = new EventSource(`/api/processes/${encodeURIComponent(state.logTarget)}/logs/stream?stream=${encodeURIComponent(state.logStream)}`);
+    logES.onmessage = (ev) => {
+      spin.hide(el.logSpinner, "log");
+      el.logPre.className = ["stderr", "error"].includes(state.logStream) ? "stderr" : "";
+      if (ev.data) {
+        el.logPre.textContent += `${ev.data}\n`;
+        el.logBody.scrollTop = el.logBody.scrollHeight;
+      }
+    };
+    logES.onerror = () => spin.hide(el.logSpinner, "log");
+  };
   const openLogs = (name, stream = "stdout") => {
     Object.assign(state, { logTarget: name, logStream: stream, logActive: true });
     el.logTitle.textContent = `Logs — ${name}`;
@@ -224,51 +241,33 @@
     Object.assign(state, { logActive: false, logTarget: null });
     stopLogSSE();
   };
-  const setStreamSeg = () =>
-    el.logSeg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.stream === state.logStream));
-  const startLogSSE = () => {
-    stopLogSSE();
-    el.logPre.textContent = "";
-    spin.show(el.logSpinner, "log");
-    logES = new EventSource(`/api/processes/${encodeURIComponent(state.logTarget)}/logs/stream?stream=${encodeURIComponent(state.logStream)}`);
-    logES.onmessage = (ev) => {
-      spin.hide(el.logSpinner, "log");
-      el.logPre.className = ["stderr", "error"].includes(state.logStream) ? "stderr" : "";
-      if (ev.data) {
-        el.logPre.textContent += ev.data + "\n";
-        el.logBody.scrollTop = el.logBody.scrollHeight;
-      }
-    };
-    logES.onerror = () => spin.hide(el.logSpinner, "log");
-  };
-  const stopLogSSE = () => { logES?.close(); logES = null; spin.hide(el.logSpinner, "log"); };
 
   // --- detail modal ---
   const detailGrid = (rows) => rows.map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v ?? "-")}</div>`).join("");
   const openDetail = (name) => {
-    const p = state.processes.find((x) => x.name === name);
-    if (!p) return;
+    const proc = state.processes.find((candidate) => candidate.name === name);
+    if (!proc) return;
     const section = (title, rows) => `<div class="detail-section"><h3>${esc(title)}</h3><div class="detail-grid">${detailGrid(rows)}</div></div>`;
     const base = [
-      ["ID", p.id], ["Name", p.name], ["Namespace", p.namespace], ["Status", p.status],
-      ["Desired", p.desired_state], ["PID", p.pid], ["Uptime", uptime(p)],
-      ["Restarts", `${p.restart_count}/${p.max_restarts}`], ["CPU", `${(Number(p.cpu_percent) || 0).toFixed(1)}%`],
-      ["Memory", bytes(p.memory_bytes)],
-      ["Command", `${p.command} ${p.args.join(" ")}`], ["CWD", p.cwd],
+      ["ID", proc.id], ["Name", proc.name], ["Namespace", proc.namespace], ["Status", proc.status],
+      ["Desired", proc.desired_state], ["PID", proc.pid], ["Uptime", uptime(proc)],
+      ["Restarts", `${proc.restart_count}/${proc.max_restarts}`], ["CPU", `${(Number(proc.cpu_percent) || 0).toFixed(1)}%`],
+      ["Memory", bytes(proc.memory_bytes)],
+      ["Command", `${proc.command} ${proc.args.join(" ")}`], ["CWD", proc.cwd],
     ];
-    el.detailTitle.textContent = `Process Detail — ${p.name}`;
+    el.detailTitle.textContent = `Process Detail — ${proc.name}`;
     el.detailBody.innerHTML =
       section("Overview", base) +
-      section("Paths", [["Stdout Log", p.stdout_log], ["Stderr Log", p.stderr_log]]) +
-      section("Environment", Object.entries(p.env || {}).length ? Object.entries(p.env) : [["(redacted)", "–"]]) +
-      (p.resource_limits ? section("Resource Limits", [
-        ["Max Memory", p.resource_limits.max_memory_mb ? `${p.resource_limits.max_memory_mb} MB` : "-"],
-        ["Max CPU", p.resource_limits.max_cpu_percent != null ? `${p.resource_limits.max_cpu_percent}%` : "-"],
+      section("Paths", [["Stdout Log", proc.stdout_log], ["Stderr Log", proc.stderr_log]]) +
+      section("Environment", Object.entries(proc.env || {}).length ? Object.entries(proc.env) : [["(redacted)", "–"]]) +
+      (proc.resource_limits ? section("Resource Limits", [
+        ["Max Memory", proc.resource_limits.max_memory_mb ? `${proc.resource_limits.max_memory_mb} MB` : "-"],
+        ["Max CPU", proc.resource_limits.max_cpu_percent != null ? `${proc.resource_limits.max_cpu_percent}%` : "-"],
       ]) : "") +
-      (p.health_check ? section("Health Check", [
-        ["Command", p.health_check.command],
-        ["Interval", `${p.health_check.interval_secs}s / timeout ${p.health_check.timeout_secs}s`],
-        ["Max Failures", p.health_check.max_failures],
+      (proc.health_check ? section("Health Check", [
+        ["Command", proc.health_check.command],
+        ["Interval", `${proc.health_check.interval_secs}s / timeout ${proc.health_check.timeout_secs}s`],
+        ["Max Failures", proc.health_check.max_failures],
       ]) : "");
     el.detailOverlay.classList.add("open");
   };
@@ -295,9 +294,9 @@
   $("#log-close").addEventListener("click", closeLogs);
   $("#log-refresh").addEventListener("click", startLogSSE);
   el.logSeg.addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-stream]");
-    if (!b) return;
-    state.logStream = b.dataset.stream;
+    const btn = e.target.closest("button[data-stream]");
+    if (!btn) return;
+    state.logStream = btn.dataset.stream;
     setStreamSeg();
     startLogSSE();
   });
@@ -309,6 +308,6 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) procSSE(); });
 
   // --- boot ---
-  $("#addr").textContent = "http://" + location.host;
+  $("#addr").textContent = `http://${location.host}`;
   procSSE();
 })();
