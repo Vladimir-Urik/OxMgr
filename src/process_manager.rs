@@ -496,6 +496,7 @@ impl ProcessManager {
             unified_logs,
             cron_restart,
             next_cron_restart: None,
+            last_error: None,
         };
         process.refresh_config_fingerprint();
 
@@ -507,6 +508,7 @@ impl ProcessManager {
         let pid = self.spawn_child_with_readiness(&mut process).await?;
         process.pid = Some(pid);
         process.status = ProcessStatus::Running;
+        process.last_error = None; // Clear last error on successful start
         process.next_health_check = process
             .health_check
             .as_ref()
@@ -1117,10 +1119,16 @@ impl ProcessManager {
                 process.health_status = HealthStatus::Unknown;
                 process.health_failures = 0;
                 process.next_health_check = None;
-                process.last_health_error = Some(format!(
+                let error_msg = format!(
                     "crash loop detected after {} auto restarts in 5 minutes; manual restart required",
                     process.crash_restart_limit
-                ));
+                );
+                process.last_health_error = Some(error_msg.clone());
+                process.last_error = Some(if stderr_tail.is_empty() {
+                    error_msg
+                } else {
+                    format!("{}\n\nLast stderr:\n{}", error_msg, stderr_tail.join("\n"))
+                });
                 self.emit(BusEvent::process_errored(EventProcessInfo::from(&process)));
                 self.processes.insert(process.name.clone(), process);
                 self.save()?;
@@ -1160,7 +1168,9 @@ impl ProcessManager {
                     {
                         process.status = ProcessStatus::Errored;
                         process.desired_state = DesiredState::Stopped;
-                        process.last_health_error = Some(format!("restart failed: {err}"));
+                        let error_msg = format!("restart failed: {err}");
+                        process.last_health_error = Some(error_msg.clone());
+                        process.last_error = Some(error_msg);
                         Some(EventProcessInfo::from(process as &ManagedProcess))
                     } else {
                         None
@@ -1193,6 +1203,15 @@ impl ProcessManager {
         process.next_health_check = None;
         if !matches!(process.status, ProcessStatus::Restarting) {
             reset_auto_restart_state(&mut process);
+        }
+
+        // Set last_error with stderr tail for crash diagnostics
+        if matches!(
+            process.status,
+            ProcessStatus::Crashed | ProcessStatus::Errored
+        ) && !stderr_tail.is_empty()
+        {
+            process.last_error = Some(stderr_tail.join("\n"));
         }
 
         match process.status {
