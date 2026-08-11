@@ -34,13 +34,30 @@ use self::text::truncate;
 #[cfg(test)]
 use self::text::visible_len;
 use super::common::expect_ok;
+use crate::cli::UiCommand;
 
 mod layout;
 mod logs;
 mod render;
 mod text;
+mod web;
 
-pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
+pub(crate) async fn run(
+    config: &AppConfig,
+    command: Option<UiCommand>,
+    interval_ms: u64,
+) -> Result<()> {
+    match command {
+        Some(UiCommand::Web {
+            port,
+            bind,
+            no_open,
+        }) => web::run(config, &bind, port, no_open).await,
+        Some(UiCommand::Tui) | None => run_tui(config, interval_ms).await,
+    }
+}
+
+async fn run_tui(config: &AppConfig, interval_ms: u64) -> Result<()> {
     let refresh_interval = Duration::from_millis(interval_ms.clamp(200, 5000));
     let _guard = TerminalGuard::enter()?;
 
