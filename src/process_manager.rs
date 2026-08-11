@@ -30,8 +30,9 @@ use self::health::execute_health_check;
 #[cfg(test)]
 use self::restart::CRASH_RESTART_WINDOW_SECS;
 use self::restart::{
-    compute_restart_delay_secs, crash_loop_limit_reached, maybe_reset_backoff_attempt,
-    now_epoch_secs, record_auto_restart, reset_auto_restart_state,
+    can_auto_restart, clear_health_state, compute_restart_delay_secs, crash_loop_limit_reached,
+    exit_event_matches_process, mark_restarting, maybe_reset_backoff_attempt, now_epoch_secs,
+    record_auto_restart, reset_auto_restart_state, terminal_exit_status,
 };
 #[cfg(all(test, unix))]
 use self::runtime::graceful_wait_before_force_kill;
@@ -1069,154 +1070,201 @@ impl ProcessManager {
             return Ok(());
         };
 
-        if let Some(active_pid) = process.pid {
-            if active_pid != event.pid {
-                return Ok(());
-            }
-        } else if process.desired_state == DesiredState::Running {
+        if !exit_event_matches_process(&process, &event) {
             return Ok(());
         }
 
+        let now = now_epoch_secs();
+        let uptime = uptime_secs_since(process.last_started_at);
+        self.clear_runtime_state(&mut process, &event, now);
+        let stderr_tail = self.take_stderr_tail(&process.name);
+
+        if process.desired_state == DesiredState::Stopped {
+            return self.finish_requested_stop(process);
+        }
+
+        let exited_successfully = event.success && !event.wait_error;
+        if can_auto_restart(&process, &event, exited_successfully) {
+            return self
+                .handle_auto_restart(process, &event, now, uptime, stderr_tail)
+                .await;
+        }
+
+        self.finish_terminal_exit(process, &event, exited_successfully, uptime, stderr_tail)
+    }
+
+    /// Clears pid, watch, metric, and cgroup bookkeeping for a process that is
+    /// no longer running.
+    fn clear_runtime_state(
+        &mut self,
+        process: &mut ManagedProcess,
+        event: &ProcessExitEvent,
+        now: u64,
+    ) {
         process.pid = None;
         self.watch_fingerprints.remove(&process.name);
         self.pending_watch_restarts.remove(&process.name);
         self.scheduled_restarts.remove(&process.name);
-        cleanup_process_cgroup(&mut process);
+        cleanup_process_cgroup(process);
         process.cpu_percent = 0.0;
         process.memory_bytes = 0;
         process.last_exit_code = event.exit_code;
-        let now = now_epoch_secs();
         process.last_stopped_at = Some(now);
+    }
 
-        let uptime = uptime_secs_since(process.last_started_at);
-        let stderr_tail = self
-            .stderr_buffers
-            .get(&process.name)
+    /// Drains the buffered stderr tail used to annotate crash diagnostics.
+    fn take_stderr_tail(&self, name: &str) -> Vec<String> {
+        self.stderr_buffers
+            .get(name)
             .map(drain_stderr_buf)
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
-        if process.desired_state == DesiredState::Stopped {
-            process.status = ProcessStatus::Stopped;
-            process.restart_backoff_attempt = 0;
-            process.health_status = HealthStatus::Unknown;
-            process.next_health_check = None;
-            reset_auto_restart_state(&mut process);
-            self.processes.insert(process.name.clone(), process);
-            self.save()?;
-            return Ok(());
-        }
-
-        let exited_successfully = event.success && !event.wait_error;
-        let can_restart = !event.wait_error
-            && process.restart_policy.should_restart(exited_successfully)
-            && process.restart_count < process.max_restarts;
-
-        if can_restart {
-            if crash_loop_limit_reached(&mut process, now) {
-                process.status = ProcessStatus::Errored;
-                process.desired_state = DesiredState::Stopped;
-                process.restart_backoff_attempt = 0;
-                process.health_status = HealthStatus::Unknown;
-                process.health_failures = 0;
-                process.next_health_check = None;
-                let error_msg = format!(
-                    "crash loop detected after {} auto restarts in 5 minutes; manual restart required",
-                    process.crash_restart_limit
-                );
-                process.last_health_error = Some(error_msg.clone());
-                process.last_error = Some(if stderr_tail.is_empty() {
-                    error_msg
-                } else {
-                    format!("{}\n\nLast stderr:\n{}", error_msg, stderr_tail.join("\n"))
-                });
-                self.emit(BusEvent::process_errored(EventProcessInfo::from(&process)));
-                self.processes.insert(process.name.clone(), process);
-                self.save()?;
-                return Ok(());
-            }
-
-            maybe_reset_backoff_attempt(&mut process);
-            let restart_delay = compute_restart_delay_secs(&process);
-            record_auto_restart(&mut process, now);
-            process.status = ProcessStatus::Restarting;
-            process.restart_count = process.restart_count.saturating_add(1);
-            process.restart_backoff_attempt = process.restart_backoff_attempt.saturating_add(1);
-            process.health_status = HealthStatus::Unknown;
-            process.health_failures = 0;
-            process.next_health_check = process
-                .health_check
-                .as_ref()
-                .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
-            let process_name = process.name.clone();
-            self.emit(BusEvent::process_restarting(
-                EventProcessInfo::from(&process),
-                event.exit_code,
-                event.signal.clone(),
-                uptime,
-                process.restart_count,
-                restart_delay,
-            ));
-            self.processes.insert(process_name.clone(), process.clone());
-
-            if restart_delay == 0 {
-                if let Err(err) = self.spawn_existing(&process_name).await {
-                    error!(
-                        "failed to restart process {} immediately after exit: {}",
-                        process_name, err
-                    );
-                    let errored_info = if let Some(process) = self.processes.get_mut(&process_name)
-                    {
-                        process.status = ProcessStatus::Errored;
-                        process.desired_state = DesiredState::Stopped;
-                        let error_msg = format!("restart failed: {err}");
-                        process.last_health_error = Some(error_msg.clone());
-                        process.last_error = Some(error_msg);
-                        Some(EventProcessInfo::from(process as &ManagedProcess))
-                    } else {
-                        None
-                    };
-                    if let Some(info) = errored_info {
-                        self.emit(BusEvent::process_errored(info));
-                    }
-                    self.save()?;
-                }
-                return Ok(());
-            }
-
-            self.scheduled_restarts.insert(
-                process_name,
-                TokioInstant::now() + Duration::from_secs(restart_delay),
-            );
-            self.save()?;
-            return Ok(());
-        }
-
-        process.status = if event.wait_error {
-            ProcessStatus::Errored
-        } else if exited_successfully {
-            ProcessStatus::Stopped
-        } else {
-            ProcessStatus::Crashed
-        };
+    /// Finalizes a process that exited because a stop was requested.
+    fn finish_requested_stop(&mut self, mut process: ManagedProcess) -> Result<()> {
+        process.status = ProcessStatus::Stopped;
         process.restart_backoff_attempt = 0;
         process.health_status = HealthStatus::Unknown;
         process.next_health_check = None;
-        if !matches!(process.status, ProcessStatus::Restarting) {
-            reset_auto_restart_state(&mut process);
+        reset_auto_restart_state(&mut process);
+        self.processes.insert(process.name.clone(), process);
+        self.save()
+    }
+
+    /// Restarts a process after an unexpected exit, unless it is crash looping.
+    async fn handle_auto_restart(
+        &mut self,
+        mut process: ManagedProcess,
+        event: &ProcessExitEvent,
+        now: u64,
+        uptime: u64,
+        stderr_tail: Vec<String>,
+    ) -> Result<()> {
+        if crash_loop_limit_reached(&mut process, now) {
+            return self.finish_crash_loop(process, stderr_tail);
         }
 
-        // Set last_error with stderr tail for crash diagnostics
-        if matches!(
+        maybe_reset_backoff_attempt(&mut process);
+        let restart_delay = compute_restart_delay_secs(&process);
+        record_auto_restart(&mut process, now);
+        mark_restarting(&mut process);
+
+        let process_name = process.name.clone();
+        self.emit(BusEvent::process_restarting(
+            EventProcessInfo::from(&process),
+            event.exit_code,
+            event.signal.clone(),
+            uptime,
+            process.restart_count,
+            restart_delay,
+        ));
+        self.processes.insert(process_name.clone(), process);
+
+        if restart_delay == 0 {
+            return self.respawn_now(&process_name).await;
+        }
+
+        self.scheduled_restarts.insert(
+            process_name,
+            TokioInstant::now() + Duration::from_secs(restart_delay),
+        );
+        self.save()
+    }
+
+    /// Parks a crash-looping process in the errored state so it requires a
+    /// manual restart.
+    fn finish_crash_loop(
+        &mut self,
+        mut process: ManagedProcess,
+        stderr_tail: Vec<String>,
+    ) -> Result<()> {
+        process.status = ProcessStatus::Errored;
+        process.desired_state = DesiredState::Stopped;
+        process.restart_backoff_attempt = 0;
+        clear_health_state(&mut process);
+
+        let error_msg = format!(
+            "crash loop detected after {} auto restarts in 5 minutes; manual restart required",
+            process.crash_restart_limit
+        );
+        process.last_health_error = Some(error_msg.clone());
+        process.last_error = Some(if stderr_tail.is_empty() {
+            error_msg
+        } else {
+            format!("{}\n\nLast stderr:\n{}", error_msg, stderr_tail.join("\n"))
+        });
+
+        self.emit(BusEvent::process_errored(EventProcessInfo::from(&process)));
+        self.processes.insert(process.name.clone(), process);
+        self.save()
+    }
+
+    /// Respawns a process immediately, marking it errored when the spawn fails.
+    async fn respawn_now(&mut self, name: &str) -> Result<()> {
+        let Err(err) = self.spawn_existing(name).await else {
+            return Ok(());
+        };
+
+        error!(
+            "failed to restart process {} immediately after exit: {}",
+            name, err
+        );
+
+        let errored_info = self.processes.get_mut(name).map(|process| {
+            process.status = ProcessStatus::Errored;
+            process.desired_state = DesiredState::Stopped;
+            let error_msg = format!("restart failed: {err}");
+            process.last_health_error = Some(error_msg.clone());
+            process.last_error = Some(error_msg);
+            EventProcessInfo::from(process as &ManagedProcess)
+        });
+        if let Some(info) = errored_info {
+            self.emit(BusEvent::process_errored(info));
+        }
+        self.save()
+    }
+
+    /// Finalizes a process that exited and will not be restarted, emitting the
+    /// matching lifecycle event.
+    fn finish_terminal_exit(
+        &mut self,
+        mut process: ManagedProcess,
+        event: &ProcessExitEvent,
+        exited_successfully: bool,
+        uptime: u64,
+        stderr_tail: Vec<String>,
+    ) -> Result<()> {
+        process.status = terminal_exit_status(event, exited_successfully);
+        process.restart_backoff_attempt = 0;
+        process.health_status = HealthStatus::Unknown;
+        process.next_health_check = None;
+        reset_auto_restart_state(&mut process);
+
+        let failed = matches!(
             process.status,
             ProcessStatus::Crashed | ProcessStatus::Errored
-        ) && !stderr_tail.is_empty()
-        {
+        );
+        // Attach the stderr tail so crash diagnostics survive the exit.
+        if failed && !stderr_tail.is_empty() {
             process.last_error = Some(stderr_tail.join("\n"));
         }
 
+        self.emit_terminal_exit_event(&process, event, uptime, stderr_tail);
+        self.processes.insert(process.name.clone(), process);
+        self.save()
+    }
+
+    /// Emits the crashed, exited, or errored event for a terminal exit.
+    fn emit_terminal_exit_event(
+        &self,
+        process: &ManagedProcess,
+        event: &ProcessExitEvent,
+        uptime: u64,
+        stderr_tail: Vec<String>,
+    ) {
         match process.status {
             ProcessStatus::Crashed => self.emit(BusEvent::process_crashed(
-                EventProcessInfo::from(&process),
+                EventProcessInfo::from(process),
                 event.exit_code,
                 event.signal.clone(),
                 uptime,
@@ -1224,7 +1272,7 @@ impl ProcessManager {
                 stderr_tail,
             )),
             ProcessStatus::Stopped => self.emit(BusEvent::process_exited(
-                EventProcessInfo::from(&process),
+                EventProcessInfo::from(process),
                 event.exit_code,
                 event.signal.clone(),
                 uptime,
@@ -1232,14 +1280,10 @@ impl ProcessManager {
                 vec![],
             )),
             ProcessStatus::Errored => {
-                self.emit(BusEvent::process_errored(EventProcessInfo::from(&process)))
+                self.emit(BusEvent::process_errored(EventProcessInfo::from(process)))
             }
             _ => {}
         }
-
-        self.processes.insert(process.name.clone(), process);
-        self.save()?;
-        Ok(())
     }
 
     /// Stops every managed process as part of daemon shutdown.
