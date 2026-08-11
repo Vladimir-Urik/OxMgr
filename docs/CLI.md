@@ -115,9 +115,13 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - `oxmgr status <name|id>`
 - `oxmgr logs <name|id> [-f] [--lines <n>]` (alias: `oxmgr log`)
 - `oxmgr logs all [--lines <n>]` — prints recent logs for every managed process at once; running `oxmgr logs` without a target prints usage help
-- `oxmgr ui [--interval-ms <n>]`
+- `oxmgr ui [--interval-ms <n>]` — terminal UI (default)
+- `oxmgr ui tui` — explicitly open terminal UI
+- `oxmgr ui web [--port <n>] [--bind <addr>] [--no-open]` — open web dashboard in browser
 
 `list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health. Use `--json` to emit as a JSON array of objects.
+
+### Terminal UI (`oxmgr ui` / `oxmgr ui tui`)
 
 `ui` supports keyboard and mouse controls:
 
@@ -135,7 +139,20 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - mouse wheel scrolls selection
 - `q` quits
 
-Full UI behavior and panel layout: [Terminal UI Guide](./UI.md).
+### Web Dashboard (`oxmgr ui web`)
+
+Opens the daemon's built-in web dashboard in your default browser:
+
+```bash
+oxmgr ui web                    # opens http://127.0.0.1:46001
+oxmgr ui web --no-open          # print URL without opening browser
+```
+
+Features: real-time process list, live log streaming via SSE, process control, Prometheus metrics.
+
+For authentication setup, API endpoints, and configuration details, see the [Web Dashboard section in UI.md](./UI.md#web-dashboard).
+
+Full UI behavior and panel layout: [UI Guide](./UI.md).
 Foreground runtime details: [Runtime Mode (pm2-runtime style)](./RUNTIME.md).
 
 ## Config Commands
@@ -203,3 +220,5 @@ Daemon HTTP API:
 - Header: `X-Oxmgr-Secret: <secret>` (or `Authorization: Bearer <secret>`)
 - Daemon bind address: `OXMGR_API_ADDR` (default high localhost port)
 - Metrics response format: Prometheus text exposition
+
+Dashboard authentication and API endpoints are documented in the [Web Dashboard section of UI.md](./UI.md#web-dashboard).
