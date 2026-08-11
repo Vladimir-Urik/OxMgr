@@ -88,9 +88,45 @@ impl OxLogs {
     }
 }
 
+/// HTTP server configuration section (supervisord-compatible).
+///
+/// Example:
+/// ```toml
+/// [http_server]
+/// port = "127.0.0.1:46001"
+/// username = "admin"
+/// password = "changeme"
+/// interval_ms = 1000
+/// ```
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct OxHttpServer {
+    /// TCP address to bind (e.g. "127.0.0.1:46001" or ":46001" for all interfaces).
+    pub port: Option<String>,
+    /// Username for Basic Auth (optional).
+    pub username: Option<String>,
+    /// Password for Basic Auth. Supports plain text, {SHA256}, or {SHA512} prefixes.
+    pub password: Option<String>,
+    /// Dashboard refresh interval in milliseconds (default 2000, clamped to 200..10000).
+    pub interval_ms: Option<u64>,
+    /// Custom label to display in dashboard header (e.g. "PRODUCTION", "DEVELOPMENT").
+    pub label: Option<String>,
+    /// Label color as CSS color value (e.g. "#ef4444", "red", "rgb(239,68,68)").
+    pub label_color: Option<String>,
+}
+
+/// Full result of parsing an oxfile, including global config sections.
+#[derive(Debug, Clone)]
+pub struct OxfileResult {
+    /// Process specifications from `[[apps]]`.
+    pub specs: Vec<EcosystemProcessSpec>,
+    /// Optional `[http_server]` configuration.
+    pub http_server: Option<OxHttpServer>,
+}
+
 #[derive(Debug, Deserialize)]
 struct Oxfile {
     version: Option<u32>,
+    http_server: Option<OxHttpServer>,
     defaults: Option<OxDefaults>,
     apps: Vec<OxApp>,
 }
@@ -482,6 +518,27 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
     }
 
     Ok(result)
+}
+
+/// Loads an `oxfile.toml` and returns the full result including `[http_server]` config.
+///
+/// This is the comprehensive loader that includes all global configuration sections.
+/// Use `load_with_profile` if you only need the process specifications.
+pub fn load_full(path: &Path, profile: Option<&str>) -> Result<OxfileResult> {
+    let payload = fs::read_to_string(path)
+        .with_context(|| format!("failed to read oxfile at {}", path.display()))?;
+    let parsed: Oxfile = toml::from_str(&payload).context("failed to parse oxfile.toml")?;
+
+    if let Some(version) = parsed.version {
+        if version != 1 {
+            anyhow::bail!("unsupported oxfile version: {}", version);
+        }
+    }
+
+    let http_server = parsed.http_server.clone();
+    let specs = load_with_profile(path, profile)?;
+
+    Ok(OxfileResult { specs, http_server })
 }
 
 fn resolve_app(

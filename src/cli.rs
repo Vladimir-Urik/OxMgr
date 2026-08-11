@@ -87,8 +87,11 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Open the interactive terminal user interface.
+    /// Open the interactive user interface (terminal or web).
     Ui {
+        #[command(subcommand)]
+        command: Option<UiCommand>,
+        /// Refresh interval in milliseconds (for terminal UI).
         #[arg(long, default_value_t = 800)]
         interval_ms: u64,
     },
@@ -274,6 +277,25 @@ pub enum DaemonCommand {
     Run,
     /// Ask a running daemon to stop gracefully.
     Stop,
+}
+
+#[derive(Debug, Subcommand)]
+/// Subcommands for the UI command.
+pub enum UiCommand {
+    /// Open the terminal-based interactive dashboard (default).
+    Tui,
+    /// Open the web dashboard in the default browser.
+    Web {
+        /// Port to bind the web server to.
+        #[arg(long, default_value_t = 46001)]
+        port: u16,
+        /// Address to bind to.
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+        /// Skip opening the browser automatically.
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
