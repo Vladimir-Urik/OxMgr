@@ -180,11 +180,7 @@ async fn handle_delete_confirm_key(
             }
             ctl.redraw();
         }
-        KeyCode::Right
-        | KeyCode::Down
-        | KeyCode::Tab
-        | KeyCode::Char('l')
-        | KeyCode::Char('j') => {
+        KeyCode::Right | KeyCode::Down | KeyCode::Tab | KeyCode::Char('l') | KeyCode::Char('j') => {
             if let Some(confirm) = state.delete_confirm.as_mut() {
                 confirm.selected = DeleteConfirmChoice::Delete;
             }
@@ -303,11 +299,7 @@ fn handle_menu_key(key: KeyEvent, state: &mut DashboardState, ctl: &mut LoopCont
             state.esc_menu_selected = EscMenuChoice::Resume;
             ctl.redraw();
         }
-        KeyCode::Right
-        | KeyCode::Down
-        | KeyCode::Tab
-        | KeyCode::Char('l')
-        | KeyCode::Char('j') => {
+        KeyCode::Right | KeyCode::Down | KeyCode::Tab | KeyCode::Char('l') | KeyCode::Char('j') => {
             state.esc_menu_selected = EscMenuChoice::Quit;
             ctl.redraw();
         }
