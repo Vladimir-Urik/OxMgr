@@ -348,7 +348,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("oxmgr-task-{nonce}-用户 O'Brien & $tools"));
-        std::fs::create_dir(&dir).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
         let executable = dir.join("probe.exe");
         let source = dir.join("probe.rs");
         std::fs::write(
