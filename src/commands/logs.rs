@@ -22,7 +22,7 @@ pub(crate) async fn run(
     };
 
     if target == "all" {
-        return run_all(config, lines).await;
+        return run_all(config, follow, lines).await;
     }
 
     let response = send_request(&config.daemon_addr, &IpcRequest::Logs { target }).await?;
@@ -39,7 +39,7 @@ pub(crate) async fn run(
     Ok(())
 }
 
-async fn run_all(config: &AppConfig, lines: usize) -> Result<()> {
+async fn run_all(config: &AppConfig, follow: bool, lines: usize) -> Result<()> {
     let response = send_request(&config.daemon_addr, &IpcRequest::List).await?;
     let response = expect_ok(response)?;
 
@@ -59,7 +59,64 @@ async fn run_all(config: &AppConfig, lines: usize) -> Result<()> {
         }
     }
 
+    if follow {
+        let targets: Vec<(String, ProcessLogs)> = response
+            .processes
+            .into_iter()
+            .map(|p| {
+                (
+                    p.name,
+                    ProcessLogs {
+                        stdout: p.stdout_log,
+                        stderr: p.stderr_log,
+                    },
+                )
+            })
+            .collect();
+        follow_all(targets).await;
+    }
+
     Ok(())
+}
+
+fn follow_prefix(process_name: &str, stream: Option<&str>) -> String {
+    match stream {
+        Some(stream) => format!("{process_name}:{stream}"),
+        None => process_name.to_string(),
+    }
+}
+
+async fn follow_all(targets: Vec<(String, ProcessLogs)>) {
+    println!("\nFollowing all logs (Ctrl-C to stop)...");
+    let mut handles = Vec::new();
+
+    for (name, logs) in targets {
+        if logs.stdout == logs.stderr {
+            let path = logs.stdout.clone();
+            let prefix = follow_prefix(&name, None);
+            handles.push(tokio::spawn(async move {
+                follow_file(path, Some(prefix)).await
+            }));
+        } else {
+            let stdout_path = logs.stdout.clone();
+            let stderr_path = logs.stderr.clone();
+            let stdout_prefix = follow_prefix(&name, Some("stdout"));
+            let stderr_prefix = follow_prefix(&name, Some("stderr"));
+            handles.push(tokio::spawn(async move {
+                follow_file(stdout_path, Some(stdout_prefix)).await
+            }));
+            handles.push(tokio::spawn(async move {
+                follow_file(stderr_path, Some(stderr_prefix)).await
+            }));
+        }
+    }
+
+    let _ = tokio::signal::ctrl_c().await;
+
+    for handle in handles {
+        handle.abort();
+        let _ = handle.await;
+    }
 }
 
 fn print_logs_help() {
@@ -113,8 +170,7 @@ async fn follow_logs(logs: ProcessLogs) -> Result<()> {
 
     if logs.stdout == logs.stderr {
         let unified_path = logs.stdout.clone();
-        let mut unified_task =
-            tokio::spawn(async move { follow_file(unified_path, "unified", false).await });
+        let mut unified_task = tokio::spawn(async move { follow_file(unified_path, None).await });
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = &mut unified_task => {}
@@ -128,9 +184,9 @@ async fn follow_logs(logs: ProcessLogs) -> Result<()> {
     let stderr_path = logs.stderr.clone();
 
     let mut stdout_task =
-        tokio::spawn(async move { follow_file(stdout_path, "stdout", true).await });
+        tokio::spawn(async move { follow_file(stdout_path, Some("stdout".to_string())).await });
     let mut stderr_task =
-        tokio::spawn(async move { follow_file(stderr_path, "stderr", true).await });
+        tokio::spawn(async move { follow_file(stderr_path, Some("stderr".to_string())).await });
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
@@ -146,7 +202,7 @@ async fn follow_logs(logs: ProcessLogs) -> Result<()> {
     Ok(())
 }
 
-async fn follow_file(path: PathBuf, label: &'static str, prefix_label: bool) -> Result<()> {
+async fn follow_file(path: PathBuf, prefix: Option<String>) -> Result<()> {
     if !path.exists() {
         std::fs::File::create(&path)
             .with_context(|| format!("failed to create {}", path.display()))?;
@@ -166,8 +222,8 @@ async fn follow_file(path: PathBuf, label: &'static str, prefix_label: bool) -> 
         if bytes_read > 0 {
             let text = String::from_utf8_lossy(&buffer);
             for line in text.lines() {
-                if prefix_label {
-                    println!("[{label}] {line}");
+                if let Some(prefix) = &prefix {
+                    println!("[{prefix}] {line}");
                 } else {
                     println!("{line}");
                 }
@@ -253,5 +309,12 @@ mod tests {
         let sections = ordered_log_sections(&logs);
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0], logs.stdout.as_path());
+    }
+
+    #[test]
+    fn follow_prefix_formats_unified_and_split() {
+        assert_eq!(super::follow_prefix("web", None), "web");
+        assert_eq!(super::follow_prefix("web", Some("stdout")), "web:stdout");
+        assert_eq!(super::follow_prefix("web", Some("stderr")), "web:stderr");
     }
 }

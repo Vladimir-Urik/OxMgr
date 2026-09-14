@@ -34,6 +34,7 @@ oxmgr status api
 oxmgr logs api
 oxmgr log api -f
 oxmgr logs all          # print recent logs for every process at once
+oxmgr logs all -f       # follow logs for all processes concurrently (prefixed with [name])
 oxmgr ui
 ```
 
