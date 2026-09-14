@@ -114,7 +114,7 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - `oxmgr list [--json]` (aliases: `oxmgr ls`, `oxmgr ps`)
 - `oxmgr status <name|id>`
 - `oxmgr logs <name|id> [-f] [--lines <n>]` (alias: `oxmgr log`)
-- `oxmgr logs all [--lines <n>]` — prints recent logs for every managed process at once; running `oxmgr logs` without a target prints usage help
+- `oxmgr logs all [-f] [--lines <n>]` — prints recent logs for every managed process at once; with `-f` (`--follow`), concurrently streams live logs across all processes prefixed with `[<name>]` (unified logs) or `[<name>:stdout]` / `[<name>:stderr]` (split logs); running `oxmgr logs` without a target prints usage help
 - `oxmgr ui [--interval-ms <n>]`
 
 `list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health. Use `--json` to emit as a JSON array of objects.

@@ -99,6 +99,7 @@ Inspect and operate it:
 oxmgr list
 oxmgr status api
 oxmgr logs api -f
+oxmgr logs all -f
 oxmgr ui
 ```
 

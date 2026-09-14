@@ -38,6 +38,7 @@ oxmgr status api
 
 # Tail logs
 oxmgr logs api -f
+oxmgr logs all -f                       # tail all processes concurrently with [name] prefix
 
 # Stream live events from the daemon event bus
 oxmgr events                          # all events, human-readable
