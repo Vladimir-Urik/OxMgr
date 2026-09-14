@@ -83,20 +83,13 @@ pub(crate) fn run(system: InitSystem, config: &AppConfig) -> Result<()> {
             println!("launchctl kickstart -k gui/$(id -u)/io.oxmgr.daemon");
         }
         InitSystem::TaskScheduler => {
-            let task_name = "OxmgrDaemon";
-            println!("Create a scheduled task (at user logon) with:");
+            let executable = executable.to_string_lossy().replace('\'', "''");
+            println!("Install and start a hidden scheduled task (at user logon) from PowerShell:");
             println!();
-            println!(
-                "schtasks /Create /F /SC ONLOGON /TN {} /TR \"\\\"{}\\\" daemon run\"",
-                task_name,
-                executable.display()
-            );
-            println!();
-            println!("Start it immediately:");
-            println!("schtasks /Run /TN {}", task_name);
+            println!("& '{executable}' service install --system task-scheduler");
             println!();
             println!("Delete it later if needed:");
-            println!("schtasks /Delete /F /TN {}", task_name);
+            println!("& '{executable}' service uninstall --system task-scheduler");
         }
         InitSystem::Auto => unreachable!("auto should have been resolved"),
     }
