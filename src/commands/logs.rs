@@ -170,8 +170,7 @@ async fn follow_logs(logs: ProcessLogs) -> Result<()> {
 
     if logs.stdout == logs.stderr {
         let unified_path = logs.stdout.clone();
-        let mut unified_task =
-            tokio::spawn(async move { follow_file(unified_path, None).await });
+        let mut unified_task = tokio::spawn(async move { follow_file(unified_path, None).await });
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
             _ = &mut unified_task => {}
