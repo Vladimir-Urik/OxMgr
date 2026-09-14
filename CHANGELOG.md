@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased (branch windows-job-objects)
+
+### Added
+
+- On Windows, every managed process is now assigned to a dedicated Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, guaranteeing that no descendant can outlive its managed root or the daemon. This closes orphan-process gaps that `taskkill /T` alone cannot cover: children of a crashed application, descendants re-parented after an intermediate process exits, processes spawned mid-kill, and trees left behind when the daemon itself is force-killed. After a root exits, surviving descendants get up to `stop_timeout_secs` to finish before the job is terminated; the exit event (and any restart) is deferred until the sweep completes so a new instance never races leftovers for ports or files. If job creation or assignment fails (e.g. nested-job restrictions), oxmgr logs a warning and falls back to the previous `taskkill`-based cleanup.
+
 ## v0.5.0 - 2026-07-09
 
 ### Added

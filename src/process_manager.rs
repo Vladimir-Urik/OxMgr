@@ -58,6 +58,8 @@ use crate::storage::{load_state, save_state, PersistedState};
 
 mod git;
 mod health;
+#[cfg(windows)]
+mod job;
 mod restart;
 mod runtime;
 mod spawn;
@@ -1388,6 +1390,26 @@ impl ProcessManager {
             .with_context(|| format!("failed to spawn {}", process.command))?;
         let pid = child.id().context("spawned child has no pid")?;
 
+        // Bind the child's process tree to a kill-on-close job object so no
+        // descendant can outlive the managed process (or the daemon itself).
+        // Failure degrades to taskkill-only cleanup rather than aborting the
+        // spawn, e.g. on hosts where the daemon runs inside a job that
+        // disallows nesting.
+        #[cfg(windows)]
+        let job = match job::JobObject::create().and_then(|job| {
+            job.assign(&child)?;
+            Ok(job)
+        }) {
+            Ok(job) => Some(job),
+            Err(err) => {
+                warn!(
+                    "failed to attach process {} to a job object; orphaned child cleanup will rely on taskkill only: {}",
+                    process.name, err
+                );
+                None
+            }
+        };
+
         let process_info = EventProcessInfo::from(process as &ManagedProcess);
         // Refresh pid in the info we pass to log pipes (process.pid set after spawn).
         let process_info = EventProcessInfo {
@@ -1446,6 +1468,8 @@ impl ProcessManager {
 
         let tx = self.exit_tx.clone();
         let name = process.name.clone();
+        #[cfg(windows)]
+        let survivor_grace = Duration::from_secs(process.stop_timeout_secs.max(1));
         tokio::spawn(async move {
             let event = match child.wait().await {
                 Ok(status) => ProcessExitEvent {
@@ -1468,6 +1492,14 @@ impl ProcessManager {
                     }
                 }
             };
+
+            // Sweep children that outlived the root (crash or partial
+            // taskkill) before reporting the exit, so a restart never races
+            // against leftovers still holding ports or files.
+            #[cfg(windows)]
+            if let Some(job) = job {
+                job.reap_survivors(&event.name, survivor_grace).await;
+            }
 
             let _ = tx.send(event);
         });
