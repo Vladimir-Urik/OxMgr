@@ -648,6 +648,7 @@ mod tests {
             unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
+            last_error: None,
         }])
         .expect("failed to encode test bundle");
         fs::write(&path, encoded).expect("failed to write test bundle");

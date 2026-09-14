@@ -62,7 +62,10 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         Commands::Pull { target } => pull::run(config, target).await,
         Commands::Delete { target } => delete::run(config, target).await,
         Commands::List { json } => list::run(config, json).await,
-        Commands::Ui { interval_ms } => ui::run(config, interval_ms).await,
+        Commands::Ui {
+            command,
+            interval_ms,
+        } => ui::run(config, command, interval_ms).await,
         Commands::Status { target } => status::run(config, target).await,
         Commands::Logs {
             target,

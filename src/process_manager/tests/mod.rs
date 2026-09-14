@@ -88,6 +88,7 @@ fn fixture_process() -> ManagedProcess {
         unified_logs: false,
         cron_restart: None,
         next_cron_restart: None,
+        last_error: None,
     }
 }
 

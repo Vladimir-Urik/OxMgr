@@ -732,6 +732,7 @@ mod tests {
             unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
+            last_error: None,
         }
     }
 }

@@ -85,6 +85,16 @@ pub enum DesiredState {
     Stopped,
 }
 
+impl std::fmt::Display for DesiredState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            DesiredState::Running => "running",
+            DesiredState::Stopped => "stopped",
+        };
+        write!(f, "{value}")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -273,6 +283,9 @@ pub struct ManagedProcess {
     pub next_health_check: Option<u64>,
     #[serde(default)]
     pub last_health_error: Option<String>,
+    /// Last error message from crash or failed start (stderr tail).
+    #[serde(default)]
+    pub last_error: Option<String>,
     #[serde(default)]
     pub wait_ready: bool,
     #[serde(default = "default_ready_timeout_secs")]
@@ -646,6 +659,7 @@ mod tests {
             unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
+            last_error: None,
         }
     }
 

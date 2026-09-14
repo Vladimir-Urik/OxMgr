@@ -1,0 +1,35 @@
+version = 1
+
+# HTTP server configuration (supervisord-compatible).
+# Enables Basic Auth for the web dashboard and API endpoints.
+# Passwords support plain text, {SHA256}, or {SHA512} prefixes.
+[http_server]
+port = "0.0.0.0:46001"
+username = "admin"
+# Plain text password for demo. In production, use hashed:
+password = "changeme"
+# Dashboard refresh interval in milliseconds (default 2000, range 200-10000)
+interval_ms = 1000
+# Custom environment label displayed in dashboard header
+label = "DEVELOPMENT"
+# Label color as CSS value (hex, rgb, or named color)
+label_color = "#eab308"
+
+[defaults]
+restart_policy = "always"
+
+[[apps]]
+name = "web-demo"
+command = "sh -c 'while true; do printf \"HTTP/1.1 200 OK\\nContent-Type: text/plain\\nContent-Length: 12\\n\\nHello World!\" | nc -l -p 8080; done'"
+namespace = "demo"
+
+[[apps]]
+name = "worker-tick"
+command = "sh -c 'while true; do echo \"Tick: $(date)\"; sleep 5; done'"
+namespace = "demo"
+
+[[apps]]
+name = "bad-worker"
+command = "sh -c 'echo \"Something failed at $(date)\" >&2; exit 1'"
+restart_policy = "on_failure"
+namespace = "failure-worker"

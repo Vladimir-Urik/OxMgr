@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OxMgr Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=JetBrains Mono:wght@400;700&family=Space Grotesk:wght@400;500;600;700&family=Space Mono:wght@400;700&family=Figtree:wght@400;500;600&display=swap">
+  <!--
+    This file is a template, not a standalone page. The daemon substitutes the
+    OXMGR_STYLES, OXMGR_SCRIPT and OXMGR_VERSION placeholders below when it
+    serves GET / (see render_dashboard_html in src/daemon/http.rs):
+    dashboard.css and dashboard.js are inlined so the whole dashboard loads in
+    one request with no extra round trips.
+  -->
+  <style>{{OXMGR_STYLES}}</style>
+</head>
+<body>
+  <header>
+    <h1><span>ox</span>mgr <span class="version">v{{OXMGR_VERSION}}</span></h1>
+    <span class="env-label" id="env-label"></span>
+    <span class="addr" id="addr"></span>
+    <div class="spacer"></div>
+    <div class="stats" id="stats"></div>
+  </header>
+  <main>
+    <div class="error-banner" id="error-banner"></div>
+    <div class="toolbar">
+      <button id="refresh-btn" class="primary">Refresh</button>
+      <button id="stop-all-btn">Stop All</button>
+      <button id="restart-all-btn">Restart All</button>
+      <input type="search" id="search-input" placeholder="Search name or id…" autocomplete="off">
+      <select id="group-select">
+        <option value="">All groups</option>
+      </select>
+      <span class="spinner" id="refresh-spinner"></span>
+      <span class="hint" id="updated-hint"></span>
+    </div>
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Name</th>
+          <th class="num">ID</th>
+          <th class="num">PID</th>
+          <th>Uptime</th>
+          <th class="num">CPU%</th>
+          <th class="num">RAM</th>
+          <th class="num">Restarts</th>
+          <th>Health</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty-state" style="display:none">No managed processes. Start one with
+      <code>oxmgr start &lt;command&gt;</code>.
+    </div>
+  </main>
+
+  <div class="log-overlay" id="log-overlay">
+    <div class="log-panel">
+      <div class="log-head">
+        <h2 id="log-title">Logs</h2>
+        <div class="spacer"></div>
+        <div class="seg" id="log-stream-seg">
+          <button data-stream="stdout" class="active">stdout</button>
+          <button data-stream="stderr">stderr</button>
+          <button data-stream="error">error</button>
+        </div>
+        <button id="log-refresh" class="small">Refresh</button>
+        <button id="log-close" class="small">Close</button>
+      </div>
+      <div class="log-body" id="log-body">
+        <pre></pre>
+      </div>
+      <div class="log-foot">
+        <span class="spinner" id="log-spinner"></span>
+        <span id="log-meta"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail overlay -->
+  <div class="log-overlay" id="detail-overlay">
+    <div class="detail-panel">
+      <div class="log-head">
+        <h2 id="detail-title">Process Detail</h2>
+        <div class="spacer"></div>
+        <button id="detail-close" class="small">Close</button>
+      </div>
+      <div class="detail-body" id="detail-body"></div>
+    </div>
+  </div>
+
+  <!-- Confirm overlay -->
+  <div class="log-overlay" id="confirm-overlay">
+    <div class="confirm-panel">
+      <div class="confirm-icon">⚠</div>
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" class="small">Cancel</button>
+        <button id="confirm-ok" class="small danger">Confirm</button>
+      </div>
+    </div>
+  </div>
+  <script>{{OXMGR_SCRIPT}}</script>
+</body>
+</html>
