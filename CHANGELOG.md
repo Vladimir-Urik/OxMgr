@@ -1,10 +1,30 @@
 # Changelog
 
-## Unreleased (branch windows-job-objects)
+## Unreleased
 
 ### Added
 
-- On Windows, every managed process is now assigned to a dedicated Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, guaranteeing that no descendant can outlive its managed root or the daemon. This closes orphan-process gaps that `taskkill /T` alone cannot cover: children of a crashed application, descendants re-parented after an intermediate process exits, processes spawned mid-kill, and trees left behind when the daemon itself is force-killed. After a root exits, surviving descendants get up to `stop_timeout_secs` to finish before the job is terminated; the exit event (and any restart) is deferred until the sweep completes so a new instance never races leftovers for ports or files. If job creation or assignment fails (e.g. nested-job restrictions), oxmgr logs a warning and falls back to the previous `taskkill`-based cleanup.
+- On Windows, every managed process is now assigned to a dedicated Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, guaranteeing that no descendant can outlive its managed root or the daemon. This closes orphan-process gaps that `taskkill /T` alone cannot cover: children of a crashed application, descendants re-parented after an intermediate process exits, processes spawned mid-kill, and trees left behind when the daemon itself is force-killed. After a root exits, surviving descendants get up to `stop_timeout_secs` to finish before the job is terminated; the exit event (and any restart) is deferred until the sweep completes so a new instance never races leftovers for ports or files. If job creation or assignment fails (e.g. nested-job restrictions), oxmgr logs a warning and falls back to the previous `taskkill`-based cleanup. Thanks to @rckok for their contribution in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).
+- Added `--follow` (`-f`) flag support to `oxmgr logs all` (and `oxmgr log all`), streaming live logs concurrently across all managed processes in the background. Each log line is prefixed with the process name (`[<name>]` for unified logs, `[<name>:stdout]` / `[<name>:stderr]` for split logs) so outputs from different services can be distinguished easily. Initial support contributed by @johndoe75 in [#51](https://github.com/Vladimir-Urik/OxMgr/pull/51).
+
+### Dependencies
+
+- Added `windows-sys` `0.61` (with `Win32_Foundation`, `Win32_Security`, `Win32_System_JobObjects`) for Windows targets in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).
+- Bumped `dirs` from `6.0.0` to `7.0.0` by @dependabot[bot] in [#94](https://github.com/Vladimir-Urik/OxMgr/pull/94).
+- Bumped `clap` from `4.6.1` to `4.6.5` (via `4.6.2`) by @dependabot[bot] in [#76](https://github.com/Vladimir-Urik/OxMgr/pull/76) and [#87](https://github.com/Vladimir-Urik/OxMgr/pull/87).
+- Bumped `tokio` from `1.52.3` to `1.53.1` (via `1.52.4`) by @dependabot[bot] in [#79](https://github.com/Vladimir-Urik/OxMgr/pull/79) and [#83](https://github.com/Vladimir-Urik/OxMgr/pull/83).
+- Bumped `toml` from `1.1.2+spec-1.1.0` to `1.1.5+spec-1.1.0` (via `1.1.3+spec-1.1.0`) by @dependabot[bot] in [#77](https://github.com/Vladimir-Urik/OxMgr/pull/77) and [#95](https://github.com/Vladimir-Urik/OxMgr/pull/95).
+- Bumped `serde` from `1.0.228` to `1.0.229` by @dependabot[bot] in [#84](https://github.com/Vladimir-Urik/OxMgr/pull/84).
+- Bumped `serde_json` from `1.0.150` to `1.0.151` by @dependabot[bot] in [#81](https://github.com/Vladimir-Urik/OxMgr/pull/81).
+- Bumped `regex` from `1.12.4` to `1.13.1` by @dependabot[bot] in [#78](https://github.com/Vladimir-Urik/OxMgr/pull/78).
+- Bumped `anyhow` from `1.0.103` to `1.0.104` by @dependabot[bot] in [#80](https://github.com/Vladimir-Urik/OxMgr/pull/80).
+- Bumped `sysinfo` from `0.39.5` to `0.39.6` by @dependabot[bot] in [#72](https://github.com/Vladimir-Urik/OxMgr/pull/72).
+- Bumped `serial_test` from `3.5.0` to `4.0.1` by @dependabot[bot] in [#86](https://github.com/Vladimir-Urik/OxMgr/pull/86).
+
+### New Contributors
+
+- @johndoe75 made their first contribution in [#51](https://github.com/Vladimir-Urik/OxMgr/pull/51).
+- @rckok made their first contribution in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).
 
 ## v0.5.0 - 2026-07-09
 
