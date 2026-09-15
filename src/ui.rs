@@ -20,8 +20,22 @@ fn colors_enabled() -> bool {
             return false;
         }
 
-        io::stdout().is_terminal()
+        io::stdout().is_terminal() && console_supports_ansi()
     })
+}
+
+/// Windows consoles only interpret escape sequences once virtual terminal
+/// processing is enabled: Windows Terminal turns it on by default, the classic
+/// conhost window does not. Enabling it here keeps colours working there, and
+/// falls back to plain text when the console refuses.
+#[cfg(windows)]
+fn console_supports_ansi() -> bool {
+    crossterm::ansi_support::supports_ansi()
+}
+
+#[cfg(not(windows))]
+fn console_supports_ansi() -> bool {
+    true
 }
 
 fn paint(value: &str, code: &str) -> String {
