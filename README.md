@@ -31,7 +31,6 @@ Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchm
 - Config-driven file watch with ignore patterns and restart debounce
 - Log tailing, log rotation, and per-process stdout/stderr logs
 - Readiness-aware reloads using health checks
-- Git pull and webhook-driven update workflow
 - Interactive terminal UI with live search, status filters, and CPU/RAM/restart sorting
 - Import and export bundles with `.oxpkg`
 - Service installation for `systemd`, `launchd`, and Windows Task Scheduler
@@ -152,8 +151,6 @@ Useful links:
 - [CLI Reference](./docs/CLI.md)
 - [Terminal UI Guide](./docs/UI.md)
 - [Runtime Mode (pm2-runtime style)](./docs/RUNTIME.md)
-- [Pull, Webhook, and Metrics Guide](./docs/PULL_WEBHOOK.md)
-- [Deployment Guide](./docs/DEPLOY.md)
 - [Service Bundles](./docs/BUNDLES.md)
 - [Benchmark Guide](./docs/BENCHMARKS.md)
 - [Examples](./docs/examples)

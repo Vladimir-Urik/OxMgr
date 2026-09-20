@@ -1,0 +1,122 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "目标平台"
+        required: true
+        type: choice
+        options:
+          - linux
+          - macos
+          - windows
+          - freebsd
+        default: linux
+      architecture:
+        description: "目标架构"
+        required: true
+        type: choice
+        options:
+          - x86_64
+          - aarch64
+        default: x86_64
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ inputs.platform }}-${{ inputs.architecture }})
+    runs-on: ${{ inputs.platform == 'linux' && inputs.architecture == 'aarch64' && 'ubuntu-24.04-arm' || inputs.platform == 'linux' && 'ubuntu-latest' || inputs.platform == 'macos' && inputs.architecture == 'x86_64' && 'macos-15-intel' || inputs.platform == 'macos' && 'macos-14' || inputs.platform == 'freebsd' && 'ubuntu-latest' || 'windows-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.platform }}/${{ inputs.architecture }}" in
+            linux/x86_64) target="x86_64-unknown-linux-gnu" ;;
+            linux/aarch64) target="aarch64-unknown-linux-gnu" ;;
+            macos/x86_64) target="x86_64-apple-darwin" ;;
+            macos/aarch64) target="aarch64-apple-darwin" ;;
+            windows/x86_64) target="x86_64-pc-windows-msvc" ;;
+            windows/aarch64) target="aarch64-pc-windows-msvc" ;;
+            freebsd/x86_64) target="x86_64-unknown-freebsd" ;;
+            freebsd/aarch64) target="aarch64-unknown-freebsd" ;;
+            *) echo "unsupported platform/architecture" >&2; exit 1 ;;
+          esac
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ steps.target.outputs.target }}
+
+      - name: Build binary (Unix)
+        if: runner.os != 'Windows' && inputs.platform != 'freebsd'
+        shell: bash
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          VERSION: ${{ steps.target.outputs.version }}
+          OXMGR_BUILD_VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          set -euo pipefail
+          cargo build --release --target "$TARGET"
+          mkdir -p build-artifacts
+          asset="oxmgr-manual-${VERSION}-${TARGET}.tar.gz"
+          cp "target/${TARGET}/release/oxmgr" build-artifacts/oxmgr
+          tar -czf "build-artifacts/${asset}" -C build-artifacts oxmgr
+          rm build-artifacts/oxmgr
+          shasum -a 256 "build-artifacts/${asset}" > "build-artifacts/${asset}.sha256"
+
+      - name: Build binary (FreeBSD)
+        if: inputs.platform == 'freebsd'
+        uses: vmactions/freebsd-vm@v1
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          VERSION: ${{ steps.target.outputs.version }}
+          OXMGR_BUILD_VERSION: ${{ steps.target.outputs.version }}
+        with:
+          release: 14.3
+          arch: ${{ inputs.architecture }}
+          usesh: true
+          copyback: true
+          envs: TARGET,VERSION,OXMGR_BUILD_VERSION
+          prepare: pkg install -y rust
+          run: |
+            set -euo pipefail
+            cargo build --release
+            mkdir -p build-artifacts
+            asset="oxmgr-manual-${VERSION}-${TARGET}.tar.gz"
+            cp target/release/oxmgr build-artifacts/oxmgr
+            tar -czf "build-artifacts/${asset}" -C build-artifacts oxmgr
+            rm build-artifacts/oxmgr
+            sha256 -q "build-artifacts/${asset}" > "build-artifacts/${asset}.sha256"
+            printf "  %s\\n" "$asset" >> "build-artifacts/${asset}.sha256"
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          VERSION: ${{ steps.target.outputs.version }}
+          OXMGR_BUILD_VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          cargo build --release --target "$env:TARGET"
+          New-Item -ItemType Directory -Path build-artifacts -Force | Out-Null
+          $asset = "oxmgr-manual-$env:VERSION-$env:TARGET.zip"
+          Compress-Archive -Path "target/$env:TARGET/release/oxmgr.exe" -DestinationPath "build-artifacts/$asset" -Force
+          $hash = (Get-FileHash "build-artifacts/$asset" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $asset" | Out-File "build-artifacts/$asset.sha256" -Encoding utf8NoBOM
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxmgr-${{ steps.target.outputs.target }}
+          path: build-artifacts/*
+          if-no-files-found: error

@@ -27,13 +27,11 @@ Quick Command Map
   Runtime:
     runtime, list/ls/ps, status, ui, logs/log
   Lifecycle:
-    start, stop, restart/rs, reload, pull, delete/rm
+    start, stop, restart/rs, reload, delete/rm
   Config:
     import, export, apply, validate, convert
   Platform:
     service, startup, daemon, doctor
-  Deploy:
-    deploy
 
 Compatibility Aliases
   list    -> ls, ps
@@ -75,8 +73,6 @@ pub enum Commands {
     #[command(visible_alias = "rl")]
     /// Reload a managed process with minimal downtime when possible.
     Reload { target: String },
-    /// Pull updates from the configured Git repository and apply them when changed.
-    Pull { target: Option<String> },
     #[command(visible_alias = "rm")]
     /// Delete a managed process and its persisted metadata.
     Delete { target: String },
@@ -148,15 +144,6 @@ pub enum Commands {
         #[arg(long, value_delimiter = ',')]
         only: Vec<String>,
     },
-    /// Execute PM2-style deployment commands from a deploy configuration.
-    Deploy {
-        #[arg(long, short = 'c')]
-        config: Option<PathBuf>,
-        #[arg(long, default_value_t = false)]
-        force: bool,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
     /// Run local environment and installation diagnostics.
     Doctor,
     /// Stream live events from the daemon event bus.
@@ -208,8 +195,8 @@ pub struct StartCommand {
     #[arg(long, value_enum, default_value_t = RestartArg::OnFailure)]
     pub restart: RestartArg,
     #[arg(long, default_value_t = 10)]
-    pub max_restarts: u32,
-    #[arg(long, default_value_t = 3)]
+    pub max_restarts: i64,
+    #[arg(long, default_value_t = 0)]
     pub crash_restart_limit: u32,
     #[arg(long)]
     pub cwd: Option<PathBuf>,
@@ -618,85 +605,6 @@ mod tests {
                 assert_eq!(lines, 100);
             }
             _ => panic!("expected logs subcommand"),
-        }
-    }
-
-    #[test]
-    fn clap_parses_pull_with_and_without_target() {
-        let all =
-            Cli::try_parse_from(["oxmgr", "pull"]).expect("expected pull parsing without target");
-        match all.command {
-            Commands::Pull { target } => assert!(target.is_none()),
-            _ => panic!("expected pull subcommand"),
-        }
-
-        let one = Cli::try_parse_from(["oxmgr", "pull", "api"])
-            .expect("expected pull parsing with target");
-        match one.command {
-            Commands::Pull { target } => assert_eq!(target.as_deref(), Some("api")),
-            _ => panic!("expected pull subcommand"),
-        }
-    }
-
-    #[test]
-    fn clap_parses_deploy_with_positional_tokens() {
-        let cli = Cli::try_parse_from([
-            "oxmgr",
-            "deploy",
-            "ecosystem.config.js",
-            "production",
-            "setup",
-        ])
-        .expect("expected deploy parsing success");
-
-        match cli.command {
-            Commands::Deploy {
-                config,
-                force,
-                args,
-            } => {
-                assert!(config.is_none());
-                assert!(!force);
-                assert_eq!(
-                    args,
-                    vec![
-                        "ecosystem.config.js".to_string(),
-                        "production".to_string(),
-                        "setup".to_string()
-                    ]
-                );
-            }
-            _ => panic!("expected deploy subcommand"),
-        }
-    }
-
-    #[test]
-    fn clap_parses_deploy_with_config_flag_and_force() {
-        let cli = Cli::try_parse_from([
-            "oxmgr",
-            "deploy",
-            "--config",
-            "ecosystem.config.js",
-            "--force",
-            "production",
-            "update",
-        ])
-        .expect("expected deploy parsing success");
-
-        match cli.command {
-            Commands::Deploy {
-                config,
-                force,
-                args,
-            } => {
-                assert_eq!(
-                    config,
-                    Some(std::path::PathBuf::from("ecosystem.config.js"))
-                );
-                assert!(force);
-                assert_eq!(args, vec!["production".to_string(), "update".to_string()]);
-            }
-            _ => panic!("expected deploy subcommand"),
         }
     }
 

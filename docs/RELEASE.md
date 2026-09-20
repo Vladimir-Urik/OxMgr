@@ -25,6 +25,8 @@ Release publish jobs execute only for the canonical repository:
   - `x86_64-apple-darwin`
   - `aarch64-apple-darwin`
   - `x86_64-pc-windows-msvc`
+  - `x86_64-unknown-freebsd`
+  - `aarch64-unknown-freebsd`
 - Build Debian packages (`oxmgr_<version>_amd64.deb`, `oxmgr_<version>_arm64.deb`) from the Linux musl binaries
 - Publish GitHub Release assets + `SHA256SUMS`
 - Optionally sign release assets (`.asc`) with GPG
@@ -33,6 +35,8 @@ Release publish jobs execute only for the canonical repository:
 - Update Scoop bucket manifest when Scoop secrets are set
 - Update the `oxmgr-bin` AUR package when `AUR_SSH_PRIVATE_KEY` is set
 - Publish APT repository index to `gh-pages/apt` (optionally signed `Release.gpg` / `InRelease`)
+
+FreeBSD 目标通过独立的 FreeBSD 虚拟机构建矩阵生成发布制品。当前 FreeBSD 主要提供二进制构建和发布支持；服务安装、开机启动以及 Linux 专属的 cgroup 资源控制仍按平台能力限制处理。
 
 ## Required repository settings
 

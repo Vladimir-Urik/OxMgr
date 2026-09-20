@@ -26,7 +26,6 @@ Use it to run, supervise, reload, and monitor long-running services on Linux, ma
 - Health checks with automatic restart on repeated failures
 - Log tailing, log rotation, and per-process stdout/stderr logs
 - Best-effort zero-downtime reloads
-- Git pull and webhook-driven update workflow
 - Import and export bundles with `.oxpkg`
 - Service installation for `systemd`, `launchd`, and Windows Task Scheduler
 
@@ -125,15 +124,13 @@ Useful links:
 
 ## Documentation
 
-- [Documentation Index](./docs/README.md)
-- [Installation Guide](./docs/install.md)
-- [User Guide](./docs/USAGE.md)
-- [CLI Reference](./docs/CLI.md)
-- [Terminal UI Guide](./docs/UI.md)
-- [Pull and Webhook Guide](./docs/PULL_WEBHOOK.md)
-- [Deployment Guide](./docs/DEPLOY.md)
-- [Service Bundles](./docs/BUNDLES.md)
-- [Examples](./docs/examples)
+- [Documentation Index](../../docs/README.md)
+- [Installation Guide](../../docs/install.md)
+- [User Guide](../../docs/USAGE.md)
+- [CLI Reference](../../docs/CLI.md)
+- [Terminal UI Guide](../../docs/UI.md)
+- [Service Bundles](../../docs/BUNDLES.md)
+- [Examples](../../docs/examples)
 
 ## Contributing
 

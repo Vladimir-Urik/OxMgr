@@ -35,10 +35,7 @@ Contains one implementation module per top-level command. These modules translat
 
 ### `src/daemon.rs`
 
-Runs the foreground daemon event loop. The daemon listens on:
-
-- a localhost TCP IPC endpoint for CLI requests
-- a localhost HTTP endpoint for authenticated pull webhooks and Prometheus scraping
+Runs the foreground daemon event loop. The daemon listens on a localhost TCP IPC endpoint for CLI requests.
 
 The daemon serialises state changes through a single manager command channel, which keeps lifecycle transitions predictable.
 
@@ -118,7 +115,6 @@ The CLI and daemon communicate using newline-delimited JSON messages over localh
 Before process data is returned to the CLI, Oxmgr redacts sensitive values such as:
 
 - environment variables
-- stored pull-webhook secret hashes
 
 This keeps status responses useful without leaking secrets through normal tooling.
 

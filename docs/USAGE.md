@@ -20,7 +20,7 @@ Useful start options:
 
 Crash-loop behavior:
 
-- By default Oxmgr stops auto-restarting a service after `3` auto restarts inside `5` minutes.
+- By default the 5-minute crash-loop cutoff is disabled (`crash_restart_limit = 0`).
 - Manual `start`, `restart`, and `reload` reset that counter.
 - Set `--crash-restart-limit 0` to disable the cutoff.
 - Leave `--restart-delay` at `0` to restart immediately after an unexpected exit.
@@ -50,7 +50,6 @@ oxmgr stop api
 oxmgr restart api
 oxmgr rs api
 oxmgr reload api
-oxmgr pull api
 oxmgr delete api
 oxmgr rm api
 oxmgr stop ./oxfile.toml
@@ -107,7 +106,6 @@ oxmgr import https://example.com/api.oxpkg --sha256 <checksum>
 - Move: `j/k` or arrows
 - New process: `n`
 - Stop / Restart / Reload: `s` / `r` / `l`
-- Pull selected: `p`
 - Tail preview: `t`
 - Help: `?`
 - Menu: `Esc`
@@ -130,7 +128,7 @@ oxmgr help
 oxmgr <command> --help
 ```
 
-`oxmgr help` is grouped by runtime, lifecycle, config, platform, and deploy commands.
+`oxmgr help` is grouped by runtime, lifecycle, config, and platform commands.
 
 ## 9) Foreground Runtime (Docker / Kubernetes)
 

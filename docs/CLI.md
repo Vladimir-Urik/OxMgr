@@ -18,7 +18,6 @@ Lifecycle operations:
 - `oxmgr stop <name|id|config>` / `oxmgr stop all`
 - `oxmgr restart <name|id|config>` / `oxmgr restart all` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
-- `oxmgr pull [name|id]`
 - `oxmgr delete <name|id|config>` (alias: `oxmgr rm`) / `oxmgr delete all`
 
 Configuration workflow:
@@ -36,8 +35,8 @@ Common options:
 
 - `--name <name>`
 - `--restart <always|on-failure|never>` (default: `on-failure`)
-- `--max-restarts <n>` (default: `10`)
-- `--crash-restart-limit <n>` (default: `3`, `0` disables the 5-minute crash-loop cutoff)
+- `--max-restarts <n>` (default: `10`; `-1` means unlimited automatic restarts)
+- `--crash-restart-limit <n>` (default: `0`, which disables the 5-minute crash-loop cutoff)
 - `--cwd <path>`
 - `--env KEY=VALUE` (repeatable)
 - `--watch` (watch working directory and restart on file changes)
@@ -99,15 +98,10 @@ Supported config files:
 - `oxmgr stop all` — stops every managed process at once
 - `oxmgr restart <name|id|config>` / `oxmgr restart all` (alias: `oxmgr rs`)
 - `oxmgr reload <name|id>`
-- `oxmgr pull [name|id]`
 - `oxmgr delete <name|id|config>` (alias: `oxmgr rm`)
 - `oxmgr delete all` / `oxmgr rm all` — terminates and removes every managed process
 
 When `config` points to an `oxfile.toml` or PM2 ecosystem file, Oxmgr resolves all named apps in that file and applies the lifecycle action to each expanded process name.
-
-`pull` updates from configured git repository and reloads/restarts the service only when commit changed.
-
-Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBHOOK.md).
 
 ## Inspect
 
@@ -127,7 +121,6 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - `s` stop selected
 - `r` restart selected
 - `l` reload selected
-- `p` pull selected
 - `t` preview latest log line
 - `g` / `Space` refresh now
 - `?` help overlay
@@ -158,34 +151,6 @@ Import source notes:
 
 Bundle details: [Service Bundles](./BUNDLES.md).
 
-## Deploy Commands
-
-PM2-style invocation:
-
-- `oxmgr deploy <config_file> <environment> <command>`
-
-Alternative:
-
-- `oxmgr deploy <environment> <command>`
-- `oxmgr deploy --config <file> <environment> <command>`
-
-Commands:
-
-- `setup`
-- `update`
-- `revert [n]`
-- `current|curr`
-- `previous|prev`
-- `list`
-- `exec|run "<cmd>"`
-- `<ref>` (deploy explicit git ref/tag/branch)
-
-Flags:
-
-- `--force` (for `update` / `<ref>`)
-
-Full deployment configuration details: [Deployment Guide](./DEPLOY.md).
-
 ## Service and Daemon
 
 - `oxmgr doctor`
@@ -194,12 +159,4 @@ Full deployment configuration details: [Deployment Guide](./DEPLOY.md).
 - `oxmgr daemon run`
 - `oxmgr daemon stop`
 
-`doctor` checks filesystem layout, state-file readability, daemon IPC reachability, webhook API metrics, service-manager integration, cgroup prerequisites, git pull/webhook setup, and log-rotation policy.
-
-Daemon HTTP API:
-
-- `POST /pull/<name|id>`
-- `GET /metrics`
-- Header: `X-Oxmgr-Secret: <secret>` (or `Authorization: Bearer <secret>`)
-- Daemon bind address: `OXMGR_API_ADDR` (default high localhost port)
-- Metrics response format: Prometheus text exposition
+`doctor` checks filesystem layout, state-file readability, daemon IPC reachability, service-manager integration, cgroup prerequisites, and log-rotation policy.

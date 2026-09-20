@@ -24,8 +24,6 @@ pub enum IpcRequest {
     Restart { target: String },
     /// Reload a process by name or numeric identifier.
     Reload { target: String },
-    /// Pull Git updates for one process or for every eligible process.
-    Pull { target: Option<String> },
     /// Delete a process by name or numeric identifier.
     Delete { target: String },
     /// List all managed processes.

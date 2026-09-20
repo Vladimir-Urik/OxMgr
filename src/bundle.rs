@@ -49,7 +49,7 @@ struct BundleService {
     #[serde(default)]
     pre_reload_cmd: Option<String>,
     restart_policy: RestartPolicy,
-    max_restarts: u32,
+    max_restarts: i64,
     crash_restart_limit: u32,
     #[serde(default)]
     cwd: Option<PathBuf>,
@@ -78,12 +78,6 @@ struct BundleService {
     namespace: Option<String>,
     #[serde(default)]
     resource_limits: Option<ResourceLimits>,
-    #[serde(default)]
-    git_repo: Option<String>,
-    #[serde(default)]
-    git_ref: Option<String>,
-    #[serde(default)]
-    pull_secret_hash: Option<String>,
     #[serde(default)]
     reuse_port: bool,
     #[serde(default)]
@@ -324,9 +318,6 @@ impl BundleService {
             cluster_instances: process.cluster_instances.map(|value| value.max(1)),
             namespace: process.namespace.clone(),
             resource_limits: process.resource_limits.clone(),
-            git_repo: process.git_repo.clone(),
-            git_ref: process.git_ref.clone(),
-            pull_secret_hash: process.pull_secret_hash.clone(),
             reuse_port: process.reuse_port,
             wait_ready: process.wait_ready,
             ready_timeout_secs: process.ready_timeout_secs,
@@ -365,9 +356,6 @@ impl BundleService {
             },
             namespace: self.namespace,
             resource_limits: self.resource_limits,
-            git_repo: self.git_repo,
-            git_ref: self.git_ref,
-            pull_secret_hash: self.pull_secret_hash,
             reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs.max(1),
@@ -504,12 +492,6 @@ fn validate_service(service: &BundleService) -> Result<()> {
             anyhow::bail!("service '{}' has invalid cluster_instances 0", service.name);
         }
     }
-    if let Some(secret_hash) = service.pull_secret_hash.as_deref() {
-        if secret_hash.len() != 64 || !secret_hash.bytes().all(|ch| ch.is_ascii_hexdigit()) {
-            anyhow::bail!("service '{}' has invalid pull_secret_hash", service.name);
-        }
-    }
-
     Ok(())
 }
 
@@ -558,12 +540,6 @@ mod tests {
         assert_eq!(spec.max_restarts, 10);
         assert_eq!(spec.crash_restart_limit, 3);
         assert!(spec.watch);
-        assert_eq!(spec.git_repo.as_deref(), Some("git@github.com:org/api.git"));
-        assert_eq!(spec.git_ref.as_deref(), Some("main"));
-        assert_eq!(
-            spec.pull_secret_hash.as_deref(),
-            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        );
     }
 
     #[test]
@@ -606,9 +582,6 @@ mod tests {
             cluster_instances: None,
             namespace: None,
             resource_limits: None,
-            git_repo: None,
-            git_ref: None,
-            pull_secret_hash: None,
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
@@ -624,48 +597,6 @@ mod tests {
             err.to_string().contains("invalid env key"),
             "unexpected error: {err}"
         );
-    }
-
-    #[test]
-    fn validate_service_rejects_invalid_pull_secret_hash_length() {
-        let payload = BundleService {
-            name: "api".to_string(),
-            program: "node".to_string(),
-            args: vec!["server.js".to_string()],
-            pre_reload_cmd: None,
-            restart_policy: RestartPolicy::OnFailure,
-            max_restarts: 10,
-            crash_restart_limit: 3,
-            cwd: None,
-            env: HashMap::new(),
-            health_check: None,
-            stop_signal: None,
-            stop_timeout_secs: 5,
-            restart_delay_secs: 0,
-            start_delay_secs: 0,
-            watch: false,
-            watch_paths: Vec::new(),
-            ignore_watch: Vec::new(),
-            watch_delay_secs: 0,
-            cluster_mode: false,
-            cluster_instances: None,
-            namespace: None,
-            resource_limits: None,
-            git_repo: None,
-            git_ref: None,
-            pull_secret_hash: Some("abc123".to_string()),
-            reuse_port: false,
-            wait_ready: false,
-            ready_timeout_secs: crate::process::default_ready_timeout_secs(),
-            log_date_format: None,
-            unified_logs: false,
-            cron_restart: None,
-            stdout_log_override: None,
-            stderr_log_override: None,
-        };
-
-        let err = super::validate_service(&payload).expect_err("expected hash validation error");
-        assert!(err.to_string().contains("invalid pull_secret_hash"));
     }
 
     fn fixture_process() -> ManagedProcess {
@@ -687,11 +618,6 @@ mod tests {
             crash_restart_limit: 3,
             auto_restart_history: Vec::new(),
             namespace: Some("backend".to_string()),
-            git_repo: Some("git@github.com:org/api.git".to_string()),
-            git_ref: Some("main".to_string()),
-            pull_secret_hash: Some(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-            ),
             reuse_port: false,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 15,

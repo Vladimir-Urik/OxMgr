@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::hash::sha256_hex;
 use crate::process::ResourceLimits;
 
 use super::ResolvedSettings;
@@ -77,21 +76,6 @@ pub(super) fn set_deny_gpu(settings: &mut ResolvedSettings, deny: bool) {
     let mut limits = settings.resource_limits.clone().unwrap_or_default();
     limits.deny_gpu = deny;
     settings.resource_limits = normalize_resource_limits(limits);
-}
-
-pub(super) fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Option<String>> {
-    let Some(secret) = secret else {
-        return Ok(None);
-    };
-    let trimmed = secret.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("pull_secret cannot be empty");
-    }
-    if trimmed.len() > 512 {
-        anyhow::bail!("pull_secret exceeds maximum length 512");
-    }
-
-    Ok(Some(sha256_hex(trimmed.as_bytes())))
 }
 
 fn parse_memory_limit_mb_str(input: &str) -> Result<u64> {

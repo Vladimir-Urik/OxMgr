@@ -23,7 +23,6 @@ Refresh interval is clamped to `200..5000 ms`.
 - `r`: reload selected service (best-effort no-downtime)
 - `Shift+R`: restart selected service
 - `l`: open fullscreen log viewer for selected service
-- `p`: pull selected service from git and auto reload/restart on commit change
 - `t`: show latest log line snapshot
 - `g` or `Space`: refresh immediately
 - `?`: open/close help overlay
@@ -61,7 +60,7 @@ Press `l` on a selected service to open the fullscreen log viewer.
 - Header: timestamp, refresh cadence, selected-service summary
 - Fleet summary: visible/total plus running/restarting/stopped/unhealthy counters
 - Left services pane: ID, name, status, PID, uptime, CPU, RAM, health
-- Right sidebar (on selected process): full-height runtime/process/git details and compact bars
+- Right sidebar (on selected process): full-height runtime/process details and compact bars
 - Create modal: in-UI process creation flow
 - Fullscreen log viewer: scrollable per-service stdout/stderr view
 

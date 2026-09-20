@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc::unbounded_channel;
@@ -11,10 +10,10 @@ use tokio::time::Instant as TokioInstant;
 #[cfg(unix)]
 use super::graceful_wait_before_force_kill;
 use super::{
-    args_match_expected, compute_restart_delay_secs, constant_time_eq, crash_loop_limit_reached,
+    args_match_expected, compute_restart_delay_secs, crash_loop_limit_reached,
     maybe_reset_backoff_attempt, now_epoch_secs, process_exists, program_matches_expected,
-    resolve_spawn_program, sha256_hex, short_commit, watch_fingerprint_for_dir,
-    watch_fingerprint_for_roots, ProcessManager, CRASH_RESTART_WINDOW_SECS,
+    resolve_spawn_program, watch_fingerprint_for_dir, watch_fingerprint_for_roots, ProcessManager,
+    CRASH_RESTART_WINDOW_SECS,
 };
 use crate::config::AppConfig;
 use crate::process::{
@@ -23,7 +22,6 @@ use crate::process::{
 };
 
 mod cron;
-mod git;
 mod lifecycle;
 mod restart;
 mod spawn;
@@ -45,9 +43,6 @@ fn fixture_process() -> ManagedProcess {
         crash_restart_limit: 3,
         auto_restart_history: Vec::new(),
         namespace: None,
-        git_repo: None,
-        git_ref: None,
-        pull_secret_hash: None,
         reuse_port: false,
         stop_signal: Some("SIGTERM".to_string()),
         stop_timeout_secs: 5,
@@ -137,7 +132,6 @@ fn test_config(prefix: &str) -> AppConfig {
     AppConfig {
         base_dir: base.clone(),
         daemon_addr: "127.0.0.1:50100".to_string(),
-        api_addr: "127.0.0.1:51100".to_string(),
         state_path: base.join("state.json"),
         log_dir,
         log_rotation: crate::logging::LogRotationPolicy {
@@ -147,102 +141,6 @@ fn test_config(prefix: &str) -> AppConfig {
         },
         event_socket_path: base.join("events.sock"),
     }
-}
-
-struct GitFixture {
-    root: PathBuf,
-    remote_dir: PathBuf,
-    source_dir: PathBuf,
-    clone_dir: PathBuf,
-}
-
-fn setup_git_fixture(prefix: &str) -> GitFixture {
-    let root = temp_watch_dir(prefix);
-    let remote_dir = root.join("remote.git");
-    let source_dir = root.join("source");
-    let clone_dir = root.join("clone");
-
-    fs::create_dir_all(&root).expect("failed to create git fixture root");
-    fs::create_dir_all(&source_dir).expect("failed to create git source dir");
-    run_git_sync(
-        &root,
-        &["init", "--bare", remote_dir.to_str().unwrap_or_default()],
-    );
-    run_git_sync(&source_dir, &["init"]);
-    run_git_sync(&source_dir, &["config", "user.email", "tests@oxmgr.local"]);
-    run_git_sync(&source_dir, &["config", "user.name", "Oxmgr Tests"]);
-    fs::write(source_dir.join("app.js"), "console.log('v1');\n")
-        .expect("failed to write initial source file");
-    run_git_sync(&source_dir, &["add", "."]);
-    run_git_sync(&source_dir, &["commit", "-m", "initial"]);
-    run_git_sync(&source_dir, &["branch", "-M", "main"]);
-    run_git_sync(
-        &source_dir,
-        &[
-            "remote",
-            "add",
-            "origin",
-            remote_dir.to_str().unwrap_or_default(),
-        ],
-    );
-    run_git_sync(&source_dir, &["push", "-u", "origin", "main"]);
-    run_git_sync(
-        &root,
-        &[
-            "clone",
-            remote_dir.to_str().unwrap_or_default(),
-            clone_dir.to_str().unwrap_or_default(),
-        ],
-    );
-    run_git_sync(&clone_dir, &["checkout", "main"]);
-
-    GitFixture {
-        root,
-        remote_dir,
-        source_dir,
-        clone_dir,
-    }
-}
-
-fn write_commit_and_push(source_dir: &Path, file_name: &str, content: &str, message: &str) {
-    fs::write(source_dir.join(file_name), content).expect("failed writing updated source file");
-    run_git_sync(source_dir, &["add", "."]);
-    run_git_sync(source_dir, &["commit", "-m", message]);
-    run_git_sync(source_dir, &["push", "origin", "main"]);
-}
-
-fn git_head(repo_dir: &Path) -> String {
-    let output = StdCommand::new("git")
-        .arg("rev-parse")
-        .arg("HEAD")
-        .current_dir(repo_dir)
-        .output()
-        .expect("failed running git rev-parse");
-    assert!(
-        output.status.success(),
-        "git rev-parse failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
-fn run_git_sync(cwd: &Path, args: &[&str]) {
-    let output = StdCommand::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("failed to launch git in test");
-    assert!(
-        output.status.success(),
-        "git {:?} failed in {}: {}",
-        args,
-        cwd.display(),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn cleanup_git_fixture(fixture: GitFixture) {
-    let _ = fs::remove_dir_all(fixture.root);
 }
 
 fn temp_watch_dir(prefix: &str) -> PathBuf {

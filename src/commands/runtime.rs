@@ -10,7 +10,7 @@ use tokio::time::{sleep, timeout, Instant};
 
 use crate::config::AppConfig;
 use crate::ecosystem::EcosystemProcessSpec;
-use crate::process::StartProcessSpec;
+use crate::process::{max_restarts_reached, valid_max_restarts, StartProcessSpec};
 
 use super::common::expand_specs_with_deterministic_names;
 use super::import::{load_import_specs, order_specs_for_start};
@@ -302,7 +302,7 @@ fn should_restart(entry: &mut RuntimeEntry, exited_successfully: bool) -> bool {
     {
         return false;
     }
-    if entry.restart_count >= entry.spec.max_restarts {
+    if max_restarts_reached(entry.restart_count, entry.spec.max_restarts) {
         return false;
     }
     !crash_loop_limit_reached(entry, now_epoch_secs())
@@ -369,6 +369,11 @@ async fn wait_for_shutdown_signal() {
 }
 
 fn expand_specs_for_runtime(specs: Vec<EcosystemProcessSpec>) -> Result<Vec<StartProcessSpec>> {
+    for spec in &specs {
+        if !valid_max_restarts(spec.max_restarts) {
+            anyhow::bail!("max_restarts must be -1 or a non-negative integer");
+        }
+    }
     expand_specs_with_deterministic_names(specs, "runtime")
 }
 
@@ -579,7 +584,7 @@ mod tests {
         let mut entry = runtime_entry("api");
         assert!(should_restart(&mut entry, false));
 
-        entry.restart_count = entry.spec.max_restarts;
+        entry.restart_count = u32::try_from(entry.spec.max_restarts.max(0)).unwrap_or(u32::MAX);
         assert!(!should_restart(&mut entry, false));
 
         let mut never_entry = runtime_entry("never");
@@ -669,9 +674,6 @@ module.exports = {
             cluster_instances: None,
             namespace: None,
             resource_limits: None,
-            git_repo: None,
-            git_ref: None,
-            pull_secret_hash: None,
             reuse_port: false,
             start_order: 0,
             depends_on: Vec::new(),
@@ -705,7 +707,6 @@ module.exports = {
         crate::config::AppConfig {
             base_dir: base.clone(),
             daemon_addr: "127.0.0.1:0".to_string(),
-            api_addr: "127.0.0.1:0".to_string(),
             state_path: base.join("state.json"),
             log_dir: base.join("logs"),
             log_rotation: LogRotationPolicy {

@@ -428,16 +428,6 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
                             needs_full_clear = true;
                             needs_redraw = true;
                         }
-                        KeyCode::Char('p') => {
-                            pull_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            next_refresh_at = Instant::now();
-                            needs_redraw = true;
-                        }
                         KeyCode::Char('t') => {
                             tail_selected(
                                 config,
@@ -1088,25 +1078,6 @@ async fn reload_selected(config: &AppConfig, target: Option<String>, state: &mut
     }
 }
 
-async fn pull_selected(config: &AppConfig, target: Option<String>, state: &mut DashboardState) {
-    if let Some(target) = target {
-        match send_request(
-            &config.daemon_addr,
-            &IpcRequest::Pull {
-                target: Some(target),
-            },
-        )
-        .await
-        {
-            Ok(response) => match expect_ok(response) {
-                Ok(ok) => state.set_info(ok.message),
-                Err(err) => state.set_error(err.to_string()),
-            },
-            Err(err) => state.set_error(err.to_string()),
-        }
-    }
-}
-
 async fn tail_selected(config: &AppConfig, target: Option<String>, state: &mut DashboardState) {
     if let Some(target) = target {
         match send_request(&config.daemon_addr, &IpcRequest::Logs { target }).await {
@@ -1314,9 +1285,6 @@ async fn submit_create_form(config: &AppConfig, state: &mut DashboardState) {
         cluster_instances: None,
         namespace: None,
         resource_limits: None,
-        git_repo: None,
-        git_ref: None,
-        pull_secret_hash: None,
         reuse_port: false,
         wait_ready: false,
         ready_timeout_secs: crate::process::default_ready_timeout_secs(),

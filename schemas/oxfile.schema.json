@@ -26,13 +26,6 @@
         "$ref": "#/definitions/app"
       },
       "description": "Managed application definitions."
-    },
-    "deploy": {
-      "type": "object",
-      "description": "Optional PM2-style deploy environments.",
-      "additionalProperties": {
-        "$ref": "#/definitions/deployTarget"
-      }
     }
   },
   "definitions": {
@@ -104,7 +97,7 @@
         },
         "max_restarts": {
           "type": "integer",
-          "minimum": 0
+          "minimum": -1
         },
         "crash_restart_limit": {
           "type": "integer",
@@ -204,18 +197,6 @@
         },
         "reuse_port": {
           "type": "boolean"
-        },
-        "git_repo": {
-          "type": "string",
-          "minLength": 1
-        },
-        "git_ref": {
-          "type": "string",
-          "minLength": 1
-        },
-        "pull_secret": {
-          "type": "string",
-          "minLength": 1
         },
         "wait_ready": {
           "type": "boolean"
@@ -245,7 +226,7 @@
         },
         "max_restarts": {
           "type": "integer",
-          "minimum": 0
+          "minimum": -1
         },
         "crash_restart_limit": {
           "type": "integer",
@@ -338,18 +319,6 @@
         },
         "reuse_port": {
           "type": "boolean"
-        },
-        "git_repo": {
-          "type": "string",
-          "minLength": 1
-        },
-        "git_ref": {
-          "type": "string",
-          "minLength": 1
-        },
-        "pull_secret": {
-          "type": "string",
-          "minLength": 1
         },
         "wait_ready": {
           "type": "boolean"
@@ -393,7 +362,7 @@
         },
         "max_restarts": {
           "type": "integer",
-          "minimum": 0
+          "minimum": -1
         },
         "crash_restart_limit": {
           "type": "integer",
@@ -487,18 +456,6 @@
         "reuse_port": {
           "type": "boolean"
         },
-        "git_repo": {
-          "type": "string",
-          "minLength": 1
-        },
-        "git_ref": {
-          "type": "string",
-          "minLength": 1
-        },
-        "pull_secret": {
-          "type": "string",
-          "minLength": 1
-        },
         "wait_ready": {
           "type": "boolean"
         },
@@ -517,60 +474,6 @@
           "additionalProperties": {
             "$ref": "#/definitions/profile"
           }
-        }
-      }
-    },
-    "deployTarget": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "user",
-        "host",
-        "path"
-      ],
-      "properties": {
-        "user": {
-          "type": "string",
-          "minLength": 1
-        },
-        "host": {
-          "$ref": "#/definitions/hostField"
-        },
-        "port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535
-        },
-        "key": {
-          "type": "string",
-          "minLength": 1
-        },
-        "repo": {
-          "type": "string",
-          "minLength": 1
-        },
-        "ref": {
-          "type": "string",
-          "minLength": 1
-        },
-        "pre_setup": {
-          "type": "string"
-        },
-        "post_setup": {
-          "type": "string"
-        },
-        "pre_deploy_local": {
-          "type": "string"
-        },
-        "pre_deploy": {
-          "type": "string"
-        },
-        "post_deploy": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string",
-          "minLength": 1
         }
       }
     }

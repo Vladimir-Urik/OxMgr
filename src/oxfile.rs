@@ -9,8 +9,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::ecosystem::EcosystemProcessSpec;
-use crate::hash::sha256_hex;
-use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
+use crate::process::{valid_max_restarts, HealthCheck, ResourceLimits, RestartPolicy};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -98,7 +97,7 @@ struct Oxfile {
 #[derive(Debug, Deserialize, Clone, Default)]
 struct OxDefaults {
     restart_policy: Option<RestartPolicyValue>,
-    max_restarts: Option<u32>,
+    max_restarts: Option<i64>,
     crash_restart_limit: Option<u32>,
     pre_reload_cmd: Option<String>,
     cwd: Option<PathBuf>,
@@ -125,9 +124,6 @@ struct OxDefaults {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret: Option<String>,
     reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
@@ -145,7 +141,7 @@ struct OxApp {
     cwd: Option<PathBuf>,
     env: Option<HashMap<String, String>>,
     restart_policy: Option<RestartPolicyValue>,
-    max_restarts: Option<u32>,
+    max_restarts: Option<i64>,
     crash_restart_limit: Option<u32>,
     stop_signal: Option<String>,
     stop_timeout_secs: Option<u64>,
@@ -169,9 +165,6 @@ struct OxApp {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret: Option<String>,
     reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
@@ -188,7 +181,7 @@ struct OxProfile {
     cwd: Option<PathBuf>,
     env: Option<HashMap<String, String>>,
     restart_policy: Option<RestartPolicyValue>,
-    max_restarts: Option<u32>,
+    max_restarts: Option<i64>,
     crash_restart_limit: Option<u32>,
     pre_reload_cmd: Option<String>,
     stop_signal: Option<String>,
@@ -213,9 +206,6 @@ struct OxProfile {
     max_cpu_percent: Option<f32>,
     cgroup_enforce: Option<bool>,
     deny_gpu: Option<bool>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret: Option<String>,
     reuse_port: Option<bool>,
     wait_ready: Option<bool>,
     ready_timeout_secs: Option<u64>,
@@ -231,7 +221,7 @@ struct Resolved {
     cwd: Option<PathBuf>,
     env: HashMap<String, String>,
     restart_policy: RestartPolicy,
-    max_restarts: u32,
+    max_restarts: i64,
     crash_restart_limit: u32,
     pre_reload_cmd: Option<String>,
     stop_signal: Option<String>,
@@ -245,9 +235,6 @@ struct Resolved {
     cluster_mode: bool,
     cluster_instances: Option<u32>,
     namespace: Option<String>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret_hash: Option<String>,
     reuse_port: bool,
     start_order: i32,
     depends_on: Vec<String>,
@@ -283,7 +270,7 @@ struct OxAppOut {
     #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     env: HashMap<String, String>,
     restart_policy: RestartPolicy,
-    max_restarts: u32,
+    max_restarts: i64,
     crash_restart_limit: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_signal: Option<String>,
@@ -302,10 +289,6 @@ struct OxAppOut {
     cluster_instances: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    git_repo: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    git_ref: Option<String>,
     start_order: i32,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     depends_on: Vec<String>,
@@ -428,16 +411,26 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
 
         if let Some(path) = resolved.stdout_log_override.as_ref() {
             let expanded = expand_log_path(path)?;
-            resolved.stdout_log_override = Some(match base_dir.as_deref() {
-                Some(base) => resolve_relative_to(base, &expanded),
-                None => expanded,
+            resolved.stdout_log_override = Some(match expanded.is_absolute() {
+                true => expanded,
+                false => resolved
+                    .cwd
+                    .as_deref()
+                    .or(base_dir.as_deref())
+                    .map(|base| resolve_relative_to(base, &expanded))
+                    .unwrap_or(expanded),
             });
         }
         if let Some(path) = resolved.stderr_log_override.as_ref() {
             let expanded = expand_log_path(path)?;
-            resolved.stderr_log_override = Some(match base_dir.as_deref() {
-                Some(base) => resolve_relative_to(base, &expanded),
-                None => expanded,
+            resolved.stderr_log_override = Some(match expanded.is_absolute() {
+                true => expanded,
+                false => resolved
+                    .cwd
+                    .as_deref()
+                    .or(base_dir.as_deref())
+                    .map(|base| resolve_relative_to(base, &expanded))
+                    .unwrap_or(expanded),
             });
         }
 
@@ -463,9 +456,6 @@ pub fn load_with_profile(path: &Path, profile: Option<&str>) -> Result<Vec<Ecosy
             cluster_instances: resolved.cluster_instances,
             namespace: resolved.namespace,
             resource_limits: resolved.resource_limits,
-            git_repo: resolved.git_repo,
-            git_ref: resolved.git_ref,
-            pull_secret_hash: resolved.pull_secret_hash,
             reuse_port: resolved.reuse_port,
             start_order: resolved.start_order,
             depends_on: resolved.depends_on,
@@ -493,6 +483,11 @@ fn resolve_app(
     let default_watch = defaults.watch.as_ref().map(WatchValue::resolve);
     let app_watch = app.watch.as_ref().map(WatchValue::resolve);
 
+    let max_restarts = app.max_restarts.or(defaults.max_restarts).unwrap_or(10);
+    if !valid_max_restarts(max_restarts) {
+        anyhow::bail!("max_restarts must be -1 or a non-negative integer");
+    }
+
     let mut resolved = Resolved {
         cwd: app.cwd.clone().or_else(|| defaults.cwd.clone()),
         env: defaults.env.clone().unwrap_or_default(),
@@ -502,11 +497,11 @@ fn resolve_app(
             .or_else(|| defaults.restart_policy.clone())
             .map(Into::into)
             .unwrap_or(RestartPolicy::OnFailure),
-        max_restarts: app.max_restarts.or(defaults.max_restarts).unwrap_or(10),
+        max_restarts,
         crash_restart_limit: app
             .crash_restart_limit
             .or(defaults.crash_restart_limit)
-            .unwrap_or(3),
+            .unwrap_or(0),
         pre_reload_cmd: app
             .pre_reload_cmd
             .clone()
@@ -552,13 +547,6 @@ fn resolve_app(
             app.cluster_instances.or(defaults.cluster_instances),
         ),
         namespace: app.namespace.clone().or_else(|| defaults.namespace.clone()),
-        git_repo: app.git_repo.clone().or_else(|| defaults.git_repo.clone()),
-        git_ref: app.git_ref.clone().or_else(|| defaults.git_ref.clone()),
-        pull_secret_hash: normalize_pull_secret_hash(
-            app.pull_secret
-                .clone()
-                .or_else(|| defaults.pull_secret.clone()),
-        )?,
         reuse_port: app.reuse_port.or(defaults.reuse_port).unwrap_or(false),
         start_order: app
             .start_order
@@ -659,6 +647,9 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
         resolved.restart_policy = policy.clone().into();
     }
     if let Some(max_restarts) = profile.max_restarts {
+        if !valid_max_restarts(max_restarts) {
+            anyhow::bail!("max_restarts must be -1 or a non-negative integer");
+        }
         resolved.max_restarts = max_restarts;
     }
     if let Some(crash_restart_limit) = profile.crash_restart_limit {
@@ -698,15 +689,6 @@ fn apply_profile(profile: &OxProfile, resolved: &mut Resolved) -> Result<()> {
     }
     if let Some(namespace) = &profile.namespace {
         resolved.namespace = Some(namespace.clone());
-    }
-    if let Some(git_repo) = &profile.git_repo {
-        resolved.git_repo = Some(git_repo.clone());
-    }
-    if let Some(git_ref) = &profile.git_ref {
-        resolved.git_ref = Some(git_ref.clone());
-    }
-    if let Some(pull_secret) = &profile.pull_secret {
-        resolved.pull_secret_hash = normalize_pull_secret_hash(Some(pull_secret.clone()))?;
     }
     if let Some(reuse_port) = profile.reuse_port {
         resolved.reuse_port = reuse_port;
@@ -856,21 +838,6 @@ fn normalize_resource_limits(mut limits: ResourceLimits) -> Option<ResourceLimit
     }
 }
 
-fn normalize_pull_secret_hash(secret: Option<String>) -> Result<Option<String>> {
-    let Some(secret) = secret else {
-        return Ok(None);
-    };
-    let trimmed = secret.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("pull_secret cannot be empty");
-    }
-    if trimmed.len() > 512 {
-        anyhow::bail!("pull_secret exceeds maximum length 512");
-    }
-
-    Ok(Some(sha256_hex(trimmed.as_bytes())))
-}
-
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -934,8 +901,6 @@ pub fn write_from_specs(path: &Path, specs: &[EcosystemProcessSpec]) -> Result<(
             cluster_mode: spec.cluster_mode,
             cluster_instances: spec.cluster_instances,
             namespace: spec.namespace.clone(),
-            git_repo: spec.git_repo.clone(),
-            git_ref: spec.git_ref.clone(),
             start_order: spec.start_order,
             depends_on: spec.depends_on.clone(),
             instances: spec.instances,
@@ -1012,7 +977,7 @@ version = 1
 
 [defaults]
 restart_policy = "on-failure"
-max_restarts = 5
+max_restarts = -1
 crash_restart_limit = 4
 start_order = 20
 max_memory_mb = 256
@@ -1049,6 +1014,7 @@ NODE_ENV = "production"
         assert_eq!(app.instances, 3);
         assert_eq!(app.start_order, 2);
         assert_eq!(app.restart_policy, RestartPolicy::Always);
+        assert_eq!(app.max_restarts, -1);
         assert_eq!(app.crash_restart_limit, 6);
         assert!(app.cluster_mode);
         assert_eq!(app.cluster_instances, Some(4));
@@ -1117,6 +1083,78 @@ combined = "./logs/api.log"
     }
 
     #[test]
+    fn load_resolves_relative_logs_to_service_cwd() {
+        let path = temp_file("oxfile-logs-cwd");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "api"
+command = "sleep 1"
+cwd = "./service"
+
+[apps.logs]
+stdout = "./logs/api.out.log"
+stderr = "./logs/api.err.log"
+combined = "./logs/api.combined.log"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+
+        let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
+        let cwd = path
+            .parent()
+            .expect("oxfile parent missing")
+            .join("./service");
+        let spec = &specs[0];
+        assert_eq!(spec.cwd.as_ref(), Some(&cwd));
+        assert_eq!(
+            spec.stdout_log_override.as_ref(),
+            Some(&cwd.join("./logs/api.out.log"))
+        );
+        assert_eq!(
+            spec.stderr_log_override.as_ref(),
+            Some(&cwd.join("./logs/api.err.log"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_resolves_combined_relative_log_to_service_cwd() {
+        let path = temp_file("oxfile-logs-combined-cwd");
+        let payload = r#"
+version = 1
+
+[[apps]]
+name = "api"
+command = "sleep 1"
+cwd = "./service"
+
+[apps.logs]
+combined = "./logs/api.log"
+"#;
+        fs::write(&path, payload).expect("failed to write oxfile fixture");
+
+        let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
+        let cwd = path
+            .parent()
+            .expect("oxfile parent missing")
+            .join("./service");
+        let spec = &specs[0];
+        assert_eq!(spec.cwd.as_ref(), Some(&cwd));
+        assert_eq!(
+            spec.stdout_log_override.as_ref(),
+            Some(&cwd.join("./logs/api.log"))
+        );
+        assert_eq!(
+            spec.stderr_log_override.as_ref(),
+            Some(&cwd.join("./logs/api.log"))
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn write_from_specs_renders_toml() {
         let path = temp_file("oxfile-write");
         let specs = vec![EcosystemProcessSpec {
@@ -1151,9 +1189,6 @@ combined = "./logs/api.log"
             cluster_mode: true,
             cluster_instances: Some(2),
             namespace: Some("core".to_string()),
-            git_repo: Some("git@github.com:org/worker.git".to_string()),
-            git_ref: Some("main".to_string()),
-            pull_secret_hash: None,
             reuse_port: true,
             start_order: 1,
             depends_on: vec!["db".to_string()],
@@ -1189,7 +1224,7 @@ combined = "./logs/api.log"
     }
 
     #[test]
-    fn load_with_profile_defaults_crash_restart_limit_to_three() {
+    fn load_with_profile_defaults_crash_restart_limit_to_zero() {
         let path = temp_file("oxfile-default-crash-limit");
         let payload = r#"
 version = 1
@@ -1202,7 +1237,7 @@ command = "node server.js"
 
         let specs = load_with_profile(&path, None).expect("failed to parse oxfile");
         assert_eq!(specs.len(), 1);
-        assert_eq!(specs[0].crash_restart_limit, 3);
+        assert_eq!(specs[0].crash_restart_limit, 0);
 
         let _ = fs::remove_file(path);
     }

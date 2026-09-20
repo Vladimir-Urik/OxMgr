@@ -5,14 +5,12 @@ mod common;
 mod convert;
 mod daemon_stop;
 mod delete;
-mod deploy;
 mod doctor;
 mod events;
 mod export;
 mod import;
 mod list;
 mod logs;
-mod pull;
 mod reload;
 mod restart;
 mod runtime;
@@ -41,7 +39,6 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
             | Commands::Service { .. }
             | Commands::Convert { .. }
             | Commands::Validate { .. }
-            | Commands::Deploy { .. }
             | Commands::Doctor
             | Commands::Runtime { .. }
             | Commands::Daemon {
@@ -59,7 +56,6 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         Commands::Stop { target } => stop::run(config, target).await,
         Commands::Restart { target } => restart::run(config, target).await,
         Commands::Reload { target } => reload::run(config, target).await,
-        Commands::Pull { target } => pull::run(config, target).await,
         Commands::Delete { target } => delete::run(config, target).await,
         Commands::List { json } => list::run(config, json).await,
         Commands::Ui { interval_ms } => ui::run(config, interval_ms).await,
@@ -84,11 +80,6 @@ pub async fn run(command: Commands, config: &AppConfig) -> Result<()> {
         } => apply::run(config, paths, env, only, prune).await,
         Commands::Convert { input, out, env } => convert::run(input, out, env),
         Commands::Validate { paths, env, only } => validate::run(&paths, env.as_deref(), &only),
-        Commands::Deploy {
-            config,
-            force,
-            args,
-        } => deploy::run(config, force, args).await,
         Commands::Doctor => doctor::run(config).await,
         Commands::Events {
             process,

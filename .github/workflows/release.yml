@@ -153,10 +153,63 @@ jobs:
             ${{ runner.temp }}/oxmgr_${{ env.VERSION }}_*.deb.sha256
           if-no-files-found: error
 
+  build-freebsd:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-freebsd
+          - arch: aarch64
+            target: aarch64-unknown-freebsd
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "OXMGR_BUILD_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Build binary in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        env:
+          TARGET: ${{ matrix.target }}
+        with:
+          release: 14.3
+          arch: ${{ matrix.arch }}
+          usesh: true
+          copyback: true
+          envs: TAG,VERSION,OXMGR_BUILD_VERSION,TARGET
+          prepare: pkg install -y rust
+          run: |
+            set -euo pipefail
+            cargo build --release
+            mkdir -p release-assets
+            asset="oxmgr-${TAG}-${TARGET}.tar.gz"
+            cp target/release/oxmgr release-assets/oxmgr
+            tar -czf "release-assets/${asset}" -C release-assets oxmgr
+            rm release-assets/oxmgr
+            sha256 -q "release-assets/${asset}" > "release-assets/${asset}.sha256"
+            printf "  %s\\n" "$asset" >> "release-assets/${asset}.sha256"
+
+      - name: Upload FreeBSD artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: build-artifacts
+    needs: [build-artifacts, build-freebsd]
     env:
       RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
       RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}

@@ -7,8 +7,8 @@ use serde_json::{Map, Value};
 use crate::process::{HealthCheck, RestartPolicy};
 
 use super::resources::{
-    normalize_pull_secret_hash, parse_memory_limit_mb_value, set_cgroup_enforce,
-    set_cpu_limit_percent, set_deny_gpu, set_memory_limit_mb,
+    parse_memory_limit_mb_value, set_cgroup_enforce, set_cpu_limit_percent, set_deny_gpu,
+    set_memory_limit_mb,
 };
 use super::{
     is_cluster_exec_mode, millis_to_secs_ceil, watch_from, EcosystemWatch, ResolvedSettings,
@@ -42,8 +42,11 @@ pub(super) fn apply_profile_overrides(
                 }
             }
             "max_restarts" => {
-                if let Some(parsed) = value.as_u64() {
-                    settings.max_restarts = parsed as u32;
+                if let Some(parsed) = value.as_i64() {
+                    if !crate::process::valid_max_restarts(parsed) {
+                        anyhow::bail!("max_restarts must be -1 or a non-negative integer");
+                    }
+                    settings.max_restarts = parsed;
                 }
             }
             "crash_restart_limit" => {
@@ -95,22 +98,6 @@ pub(super) fn apply_profile_overrides(
             "namespace" => {
                 if let Some(parsed) = value.as_str() {
                     settings.namespace = Some(parsed.to_string());
-                }
-            }
-            "git_repo" => {
-                if let Some(parsed) = value.as_str() {
-                    settings.git_repo = Some(parsed.to_string());
-                }
-            }
-            "git_ref" => {
-                if let Some(parsed) = value.as_str() {
-                    settings.git_ref = Some(parsed.to_string());
-                }
-            }
-            "pull_secret" => {
-                if let Some(parsed) = value.as_str() {
-                    settings.pull_secret_hash =
-                        normalize_pull_secret_hash(Some(parsed.to_string()))?;
                 }
             }
             "reuse_port" => {

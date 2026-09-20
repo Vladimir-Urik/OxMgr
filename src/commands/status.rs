@@ -29,7 +29,11 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
     );
     print_field(
         "Restarts",
-        format!("{}/{}", process.restart_count, process.max_restarts),
+        if process.max_restarts < 0 {
+            format!("{}/∞", process.restart_count)
+        } else {
+            format!("{}/{}", process.restart_count, process.max_restarts)
+        },
     );
     print_field(
         "Crash Loop",
@@ -79,20 +83,6 @@ pub(crate) async fn run(config: &AppConfig, target: String) -> Result<()> {
     if let Some(namespace) = process.namespace.as_deref() {
         print_field("Namespace", namespace);
     }
-    if let Some(git_repo) = process.git_repo.as_deref() {
-        print_field("Git Repo", git_repo);
-    }
-    if let Some(git_ref) = process.git_ref.as_deref() {
-        print_field("Git Ref", git_ref);
-    }
-    print_field(
-        "Pull Hook",
-        if process.pull_secret_hash.is_some() {
-            "enabled"
-        } else {
-            "disabled"
-        },
-    );
     print_field(
         "Reuse Port",
         if process.reuse_port {

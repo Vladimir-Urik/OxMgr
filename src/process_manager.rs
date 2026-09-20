@@ -22,10 +22,6 @@ use tracing::{error, info, warn};
 
 use crate::events::{BusEvent, EventProcessInfo};
 
-use self::git::{
-    constant_time_eq, ensure_origin_remote, ensure_repo_checkout, git_rev_parse_head, run_git,
-    sha256_hex, short_commit, PullOutcome,
-};
 use self::health::execute_health_check;
 #[cfg(test)]
 use self::restart::CRASH_RESTART_WINDOW_SECS;
@@ -52,11 +48,11 @@ use crate::config::AppConfig;
 use crate::errors::OxmgrError;
 use crate::logging::{prepare_log_files, process_logs_for_mode, ProcessLogs};
 use crate::process::{
-    DesiredState, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus, StartProcessSpec,
+    max_restarts_reached, valid_max_restarts, DesiredState, HealthStatus, ManagedProcess,
+    ProcessExitEvent, ProcessStatus, StartProcessSpec,
 };
 use crate::storage::{load_state, save_state, PersistedState};
 
-mod git;
 mod health;
 #[cfg(windows)]
 mod job;
@@ -401,9 +397,6 @@ impl ProcessManager {
             cluster_instances,
             namespace,
             resource_limits,
-            git_repo,
-            git_ref,
-            pull_secret_hash,
             reuse_port,
             wait_ready,
             ready_timeout_secs,
@@ -413,6 +406,10 @@ impl ProcessManager {
             stdout_log_override,
             stderr_log_override,
         } = spec;
+
+        if !valid_max_restarts(max_restarts) {
+            anyhow::bail!("max_restarts must be -1 or a non-negative integer");
+        }
 
         let (command, args) = parse_command_line(&command_line)?;
 
@@ -455,9 +452,6 @@ impl ProcessManager {
             crash_restart_limit,
             auto_restart_history: Vec::new(),
             namespace,
-            git_repo,
-            git_ref,
-            pull_secret_hash,
             reuse_port,
             stop_signal,
             stop_timeout_secs: stop_timeout_secs.max(1),
@@ -826,95 +820,6 @@ impl ProcessManager {
         );
     }
 
-    /// Pulls Git updates for one or more managed processes and applies the
-    /// corresponding reload or restart only when the checked-out revision changed.
-    pub async fn pull_processes(&mut self, target: Option<&str>) -> Result<String> {
-        let mut targets = if let Some(target) = target {
-            vec![self.resolve_target(target)?]
-        } else {
-            let mut names: Vec<String> = self
-                .processes
-                .values()
-                .filter(|process| process.git_repo.is_some())
-                .map(|process| process.name.clone())
-                .collect();
-            names.sort();
-            names
-        };
-
-        if targets.is_empty() {
-            anyhow::bail!("no services configured with git_repo");
-        }
-
-        targets.sort();
-        targets.dedup();
-
-        let mut changed_count = 0_usize;
-        let mut unchanged_count = 0_usize;
-        let mut restarted_count = 0_usize;
-        let mut failures = Vec::new();
-        let mut details = Vec::new();
-
-        for name in targets {
-            match self.pull_single_process(&name).await {
-                Ok(outcome) => {
-                    if outcome.changed {
-                        changed_count = changed_count.saturating_add(1);
-                    } else {
-                        unchanged_count = unchanged_count.saturating_add(1);
-                    }
-                    if outcome.restarted_or_reloaded {
-                        restarted_count = restarted_count.saturating_add(1);
-                    }
-                    details.push(outcome.message);
-                }
-                Err(err) => {
-                    failures.push(format!("{name}: {err}"));
-                }
-            }
-        }
-
-        if !failures.is_empty() {
-            let mut lines = vec!["pull completed with failures:".to_string()];
-            for failure in failures {
-                lines.push(format!("- {failure}"));
-            }
-            anyhow::bail!(lines.join("\n"));
-        }
-
-        let mut summary = format!(
-            "Pull complete: {} updated, {} unchanged, {} reloaded/restarted",
-            changed_count, unchanged_count, restarted_count
-        );
-        if !details.is_empty() {
-            summary.push('\n');
-            summary.push_str(&details.join("\n"));
-        }
-
-        Ok(summary)
-    }
-
-    /// Verifies that a webhook secret matches the stored digest for the target
-    /// process.
-    pub fn verify_pull_webhook_secret(&self, target: &str, provided_secret: &str) -> Result<()> {
-        let name = self.resolve_target(target)?;
-        let process = self
-            .processes
-            .get(&name)
-            .ok_or_else(|| OxmgrError::ProcessNotFound(target.to_string()))?;
-
-        let expected_hash = process
-            .pull_secret_hash
-            .as_deref()
-            .context("pull webhook secret is not configured for this service")?;
-        let provided_hash = sha256_hex(provided_secret.trim());
-
-        if !constant_time_eq(expected_hash.as_bytes(), provided_hash.as_bytes()) {
-            anyhow::bail!("invalid pull webhook secret");
-        }
-        Ok(())
-    }
-
     /// Deletes a managed process and removes its persisted metadata.
     pub async fn delete_process(&mut self, target: &str) -> Result<ManagedProcess> {
         let name = self.resolve_target(target)?;
@@ -971,70 +876,6 @@ impl ProcessManager {
 
         self.save()?;
         Ok(deleted)
-    }
-
-    async fn pull_single_process(&mut self, name: &str) -> Result<PullOutcome> {
-        let snapshot = self
-            .processes
-            .get(name)
-            .cloned()
-            .ok_or_else(|| OxmgrError::ProcessNotFound(name.to_string()))?;
-
-        let repo = snapshot
-            .git_repo
-            .clone()
-            .context("git_repo is not configured for this service")?;
-        let cwd = snapshot
-            .cwd
-            .clone()
-            .context("pull requires cwd to be set for the service")?;
-        let git_ref = snapshot.git_ref.clone();
-
-        ensure_repo_checkout(&cwd, &repo, git_ref.as_deref()).await?;
-        ensure_origin_remote(&cwd, &repo).await?;
-
-        let before = git_rev_parse_head(&cwd).await?;
-        if let Some(git_ref) = git_ref.as_deref() {
-            run_git(
-                &cwd,
-                &["pull", "--ff-only", "origin", git_ref],
-                "pull repository from remote ref",
-            )
-            .await?;
-        } else {
-            run_git(&cwd, &["pull", "--ff-only"], "pull repository").await?;
-        }
-        let after = git_rev_parse_head(&cwd).await?;
-        let changed = before != after;
-
-        let mut action = "up-to-date".to_string();
-        let mut restarted_or_reloaded = false;
-
-        if changed {
-            if snapshot.status == ProcessStatus::Running && snapshot.pid.is_some() {
-                self.reload_process(name).await?;
-                action = "reloaded".to_string();
-                restarted_or_reloaded = true;
-            } else if snapshot.desired_state == DesiredState::Running {
-                self.restart_process(name).await?;
-                action = "restarted".to_string();
-                restarted_or_reloaded = true;
-            } else {
-                action = "updated (service stopped)".to_string();
-            }
-        }
-
-        Ok(PullOutcome {
-            changed,
-            restarted_or_reloaded,
-            message: format!(
-                "{}: {} ({} -> {})",
-                name,
-                action,
-                short_commit(&before),
-                short_commit(&after)
-            ),
-        })
     }
 
     /// Returns an ordered snapshot of all managed processes.
@@ -1109,7 +950,7 @@ impl ProcessManager {
         let exited_successfully = event.success && !event.wait_error;
         let can_restart = !event.wait_error
             && process.restart_policy.should_restart(exited_successfully)
-            && process.restart_count < process.max_restarts;
+            && !max_restarts_reached(process.restart_count, process.max_restarts);
 
         if can_restart {
             if crash_loop_limit_reached(&mut process, now) {
@@ -1850,7 +1691,7 @@ impl ProcessManager {
                 continue;
             };
 
-            if snapshot.restart_count >= snapshot.max_restarts {
+            if max_restarts_reached(snapshot.restart_count, snapshot.max_restarts) {
                 warn!(
                     "resource limits exceeded for process {} and max_restarts reached; stopping process",
                     name
@@ -2067,7 +1908,7 @@ impl ProcessManager {
             }
 
             if should_restart {
-                if snapshot.restart_count >= snapshot.max_restarts {
+                if max_restarts_reached(snapshot.restart_count, snapshot.max_restarts) {
                     warn!(
                         "health checks failed for process {} and max_restarts reached; stopping process",
                         name

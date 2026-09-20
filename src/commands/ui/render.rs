@@ -222,7 +222,7 @@ pub(super) fn draw_frame(
         write_line(
             &mut frame,
             &frame_line_content(
-                " Keys: j/k move  / search  f filter  o sort  n new  s stop  d delete  r reload  R restart  l logs  p pull  t tail  g/space refresh  ? help  Esc menu ",
+                " Keys: j/k move  / search  f filter  o sort  n new  s stop  d delete  r reload  R restart  l logs  t tail  g/space refresh  ? help  Esc menu ",
             ),
         )?;
     }
@@ -564,7 +564,6 @@ fn draw_help_overlay(out: &mut impl Write, width: usize, height: usize) -> Resul
         " Navigation: j/k or ↑/↓, mouse wheel, left click row".to_string(),
         " View: / search, f cycles filters, o cycles sort order".to_string(),
         " Actions: s stop, d delete (confirm), r reload, Shift+R restart".to_string(),
-        " Git: p pull selected service and auto reload/restart on commit change".to_string(),
         " Logs: l opens fullscreen viewer, t shows latest line snapshot".to_string(),
         " Log viewer: Tab switches stdout/stderr, PgUp/PgDn/Home/End scroll".to_string(),
         " Refresh: g or Space".to_string(),
@@ -835,7 +834,12 @@ fn draw_process_sidebar(
         ),
         format!(
             " restarts: {}/{}",
-            process.restart_count, process.max_restarts
+            process.restart_count,
+            if process.max_restarts < 0 {
+                "∞".to_string()
+            } else {
+                process.max_restarts.to_string()
+            }
         ),
         format!(" mode: {}", mode),
         format!(" cpu: {:>5.1}%", process.cpu_percent),
@@ -845,14 +849,6 @@ fn draw_process_sidebar(
         ),
         format!(" ram: {}", format_memory_cell(process.memory_bytes)),
         format!(" rambar: {}", paint("1;35", &progress_bar(ram_pct, 16))),
-        format!(
-            " pull hook: {}",
-            if process.pull_secret_hash.is_some() {
-                "enabled"
-            } else {
-                "disabled"
-            }
-        ),
         format!(" watch: {}", if process.watch { "on" } else { "off" }),
         format!(" ns: {}", process.namespace.as_deref().unwrap_or("-")),
         format!(" cmd: {}", truncate(&command, inner.saturating_sub(6))),
@@ -863,15 +859,6 @@ fn draw_process_sidebar(
                 .as_ref()
                 .map(|cwd| cwd.display().to_string())
                 .unwrap_or_else(|| "-".to_string())
-        ),
-        format!(
-            " git: {}{}",
-            process.git_repo.as_deref().unwrap_or("-"),
-            process
-                .git_ref
-                .as_ref()
-                .map(|value| format!(" @ {value}"))
-                .unwrap_or_default()
         ),
     ];
 

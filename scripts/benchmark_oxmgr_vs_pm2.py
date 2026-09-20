@@ -522,7 +522,6 @@ class TrialWorkspace:
     home_dir: Path
     work_dir: Path
     daemon_addr: str
-    api_addr: str
 
 
 def make_workspace(parent: Path, keep: bool, label: str) -> TrialWorkspace:
@@ -536,13 +535,11 @@ def make_workspace(parent: Path, keep: bool, label: str) -> TrialWorkspace:
     home_dir.mkdir(parents=True, exist_ok=True)
     work_dir.mkdir(parents=True, exist_ok=True)
     daemon_port = available_port()
-    api_port = available_port()
     return TrialWorkspace(
         root=workspace_root,
         home_dir=home_dir,
         work_dir=work_dir,
         daemon_addr=f"127.0.0.1:{daemon_port}",
-        api_addr=f"127.0.0.1:{api_port}",
     )
 
 
@@ -558,7 +555,6 @@ class OxmgrAdapter:
         env = os.environ.copy()
         env["OXMGR_HOME"] = str(workspace.home_dir)
         env["OXMGR_DAEMON_ADDR"] = workspace.daemon_addr
-        env["OXMGR_API_ADDR"] = workspace.api_addr
         env["OXMGR_LOG_MAX_SIZE_MB"] = "64"
         env["OXMGR_LOG_MAX_FILES"] = "2"
         env["OXMGR_LOG_MAX_DAYS"] = "1"

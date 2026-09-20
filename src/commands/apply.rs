@@ -249,8 +249,6 @@ fn process_matches_spec(existing: &ManagedProcess, desired: &StartProcessSpec) -
         && existing.cluster_instances == desired.cluster_instances
         && existing.namespace == desired.namespace
         && existing.resource_limits == desired.resource_limits
-        && existing.git_repo == desired.git_repo
-        && existing.git_ref == desired.git_ref
         && existing.pre_reload_cmd == desired.pre_reload_cmd
         && existing.reuse_port == desired.reuse_port
         && existing.wait_ready == desired.wait_ready
@@ -367,9 +365,6 @@ mod tests {
             cluster_instances: None,
             namespace: Some("default".to_string()),
             resource_limits: None,
-            git_repo: None,
-            git_ref: None,
-            pull_secret_hash: None,
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
@@ -408,9 +403,6 @@ mod tests {
             crash_restart_limit: desired.crash_restart_limit,
             auto_restart_history: Vec::new(),
             namespace: desired.namespace.clone(),
-            git_repo: desired.git_repo.clone(),
-            git_ref: desired.git_ref.clone(),
-            pull_secret_hash: desired.pull_secret_hash.clone(),
             reuse_port: desired.reuse_port,
             stop_signal: desired.stop_signal.clone(),
             stop_timeout_secs: desired.stop_timeout_secs,

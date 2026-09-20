@@ -6,17 +6,12 @@ use std::process::Command as StdCommand;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::time::{timeout, Duration};
 
 use crate::cli::InitSystem;
 use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest};
 use crate::process::ManagedProcess;
 use crate::storage::PersistedState;
-
-const NETWORK_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum DoctorStatus {
@@ -46,7 +41,6 @@ pub(crate) async fn run(config: &AppConfig) -> Result<()> {
     println!("Oxmgr doctor");
     println!("Home: {}", config.base_dir.display());
     println!("Daemon: {}", config.daemon_addr);
-    println!("API: {}", config.api_addr);
     println!();
 
     let mut passed = 0_usize;
@@ -119,17 +113,6 @@ pub(crate) async fn run(config: &AppConfig) -> Result<()> {
         }
     };
 
-    let api_addr_resolved = match resolve_socket_addr(&config.api_addr) {
-        Ok(resolved) => {
-            record(DoctorStatus::Ok, "api_addr", resolved);
-            true
-        }
-        Err(err) => {
-            record(DoctorStatus::Fail, "api_addr", err.to_string());
-            false
-        }
-    };
-
     let persisted_state = match inspect_state_file(&config.state_path) {
         Ok((status, detail, state)) => {
             record(status, "state_file", detail);
@@ -186,34 +169,6 @@ pub(crate) async fn run(config: &AppConfig) -> Result<()> {
         }
     }
 
-    if api_addr_resolved {
-        match probe_metrics_endpoint(&config.api_addr).await {
-            Ok(detail) => record(DoctorStatus::Ok, "api_metrics", detail),
-            Err(err) => match probe_bind_status(&config.api_addr) {
-                Ok(BindStatus::Free) => record(
-                    DoctorStatus::Warn,
-                    "api_metrics",
-                    format!("webhook API not reachable ({err})"),
-                ),
-                Ok(BindStatus::Occupied) => record(
-                    DoctorStatus::Fail,
-                    "api_metrics",
-                    format!("API address is occupied but /metrics probe failed ({err})"),
-                ),
-                Ok(BindStatus::Unavailable) => record(
-                    DoctorStatus::Fail,
-                    "api_metrics",
-                    format!("API address is not bindable ({err})"),
-                ),
-                Err(bind_err) => record(
-                    DoctorStatus::Fail,
-                    "api_metrics",
-                    format!("{err}; bind probe failed: {bind_err}"),
-                ),
-            },
-        }
-    }
-
     let service_system = resolve_init_system();
     let (service_unit_status, service_unit_detail) = inspect_service_definition(service_system);
     record(service_unit_status, "service_unit", service_unit_detail);
@@ -226,9 +181,6 @@ pub(crate) async fn run(config: &AppConfig) -> Result<()> {
 
     let (cgroup_status, cgroup_detail) = inspect_cgroup_support(&persisted_state.processes);
     record(cgroup_status, "cgroup", cgroup_detail);
-
-    let (git_pull_status, git_pull_detail) = inspect_git_pull_setup(&persisted_state.processes);
-    record(git_pull_status, "git_pull", git_pull_detail);
 
     record(
         DoctorStatus::Ok,
@@ -332,57 +284,6 @@ fn probe_bind_status(addr: &str) -> Result<BindStatus> {
         }
         Err(err) => Err(err).with_context(|| format!("failed to probe bindability of {addr}")),
     }
-}
-
-async fn probe_metrics_endpoint(addr: &str) -> Result<String> {
-    let mut stream = timeout(NETWORK_TIMEOUT, TcpStream::connect(addr))
-        .await
-        .context("timed out connecting to webhook API")?
-        .with_context(|| format!("failed to connect to webhook API at {addr}"))?;
-    let request = format!("GET /metrics HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
-
-    timeout(NETWORK_TIMEOUT, stream.write_all(request.as_bytes()))
-        .await
-        .context("timed out sending /metrics request")?
-        .context("failed to send /metrics request")?;
-
-    let _ = timeout(NETWORK_TIMEOUT, stream.shutdown()).await;
-
-    let mut response = Vec::new();
-    timeout(NETWORK_TIMEOUT, stream.read_to_end(&mut response))
-        .await
-        .context("timed out reading /metrics response")?
-        .context("failed to read /metrics response")?;
-
-    let (status, body) = parse_http_response(&response)?;
-    if status != 200 {
-        anyhow::bail!("/metrics returned HTTP {status}");
-    }
-    if !body.contains("oxmgr_managed_processes") {
-        anyhow::bail!("/metrics response did not contain oxmgr metrics");
-    }
-
-    let line_count = body.lines().filter(|line| !line.trim().is_empty()).count();
-    Ok(format!(
-        "GET /metrics responded 200 ({line_count} metric lines)"
-    ))
-}
-
-fn parse_http_response(bytes: &[u8]) -> Result<(u16, String)> {
-    let response =
-        String::from_utf8(bytes.to_vec()).context("HTTP response was not valid UTF-8")?;
-    let (head, body) = response
-        .split_once("\r\n\r\n")
-        .or_else(|| response.split_once("\n\n"))
-        .context("HTTP response did not contain a header/body separator")?;
-    let status_line = head.lines().next().context("HTTP response was empty")?;
-    let status = status_line
-        .split_whitespace()
-        .nth(1)
-        .context("HTTP response was missing status code")?
-        .parse::<u16>()
-        .context("HTTP response status code was not numeric")?;
-    Ok((status, body.to_string()))
 }
 
 fn resolve_init_system() -> InitSystem {
@@ -623,35 +524,6 @@ fn inspect_cgroup_support(processes: &[ManagedProcess]) -> (DoctorStatus, String
     }
 }
 
-fn inspect_git_pull_setup(processes: &[ManagedProcess]) -> (DoctorStatus, String) {
-    let git_enabled = processes
-        .iter()
-        .filter(|process| process.git_repo.is_some())
-        .count();
-    let pull_hooks = processes
-        .iter()
-        .filter(|process| process.pull_secret_hash.is_some())
-        .count();
-    let invalid_hooks = processes
-        .iter()
-        .filter(|process| process.pull_secret_hash.is_some() && process.git_repo.is_none())
-        .count();
-
-    if invalid_hooks > 0 {
-        return (
-            DoctorStatus::Warn,
-            format!(
-                "{invalid_hooks} service(s) define a pull secret without git_repo; webhook pulls will fail"
-            ),
-        );
-    }
-
-    (
-        DoctorStatus::Ok,
-        format!("{git_enabled} git-enabled service(s), {pull_hooks} webhook-enabled service(s)"),
-    )
-}
-
 enum CommandCapture {
     Success(String),
     Failure(String),
@@ -698,25 +570,10 @@ fn current_uid_string() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::net::TcpListener;
-    use std::path::PathBuf;
-
     use crate::cli::InitSystem;
-    use crate::process::{ManagedProcess, ProcessStatus, RestartPolicy};
+    use std::net::TcpListener;
 
-    use super::{
-        inspect_git_pull_setup, parse_http_response, probe_bind_status, service_definition_path,
-        BindStatus, DoctorStatus,
-    };
-
-    #[test]
-    fn parse_http_response_extracts_status_and_body() {
-        let response = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nhello";
-        let (status, body) =
-            parse_http_response(response).expect("expected valid HTTP response parsing");
-        assert_eq!(status, 200);
-        assert_eq!(body, "hello");
-    }
+    use super::{probe_bind_status, service_definition_path, BindStatus};
 
     #[test]
     fn probe_bind_status_detects_occupied_and_free_ports() {
@@ -744,17 +601,6 @@ mod tests {
     }
 
     #[test]
-    fn inspect_git_pull_setup_warns_when_pull_secret_has_no_repo() {
-        let mut process = sample_process();
-        process.pull_secret_hash = Some("hashed".to_string());
-        process.git_repo = None;
-
-        let (status, detail) = inspect_git_pull_setup(&[process]);
-        assert_eq!(status, DoctorStatus::Warn);
-        assert!(detail.contains("pull secret without git_repo"));
-    }
-
-    #[test]
     fn service_definition_path_matches_expected_suffix() {
         #[cfg(target_os = "windows")]
         {
@@ -770,67 +616,6 @@ mod tests {
             let launchd = service_definition_path(InitSystem::Launchd)
                 .expect("expected launchd service definition path");
             assert!(launchd.ends_with("Library/LaunchAgents/io.oxmgr.daemon.plist"));
-        }
-    }
-
-    fn sample_process() -> ManagedProcess {
-        ManagedProcess {
-            id: 1,
-            name: "api".to_string(),
-            command: "node".to_string(),
-            args: vec!["server.js".to_string()],
-            pre_reload_cmd: None,
-            cwd: None,
-            env: std::collections::HashMap::new(),
-            restart_policy: RestartPolicy::OnFailure,
-            max_restarts: 5,
-            restart_count: 0,
-            crash_restart_limit: 3,
-            auto_restart_history: Vec::new(),
-            namespace: None,
-            git_repo: Some("https://example.com/repo.git".to_string()),
-            git_ref: None,
-            pull_secret_hash: None,
-            reuse_port: false,
-            stop_signal: None,
-            stop_timeout_secs: 5,
-            restart_delay_secs: 0,
-            restart_backoff_cap_secs: 0,
-            restart_backoff_reset_secs: 0,
-            restart_backoff_attempt: 0,
-            start_delay_secs: 0,
-            watch: false,
-            watch_paths: Vec::new(),
-            ignore_watch: Vec::new(),
-            watch_delay_secs: 0,
-            cluster_mode: false,
-            cluster_instances: None,
-            resource_limits: None,
-            cgroup_path: None,
-            pid: None,
-            status: ProcessStatus::Stopped,
-            desired_state: crate::process::DesiredState::Stopped,
-            last_exit_code: None,
-            stdout_log: PathBuf::from("/tmp/stdout.log"),
-            stderr_log: PathBuf::from("/tmp/stderr.log"),
-            health_check: None,
-            health_status: crate::process::HealthStatus::Unknown,
-            health_failures: 0,
-            last_health_check: None,
-            next_health_check: None,
-            last_health_error: None,
-            wait_ready: false,
-            ready_timeout_secs: 30,
-            last_started_at: None,
-            last_stopped_at: None,
-            last_metrics_at: None,
-            memory_bytes: 0,
-            cpu_percent: 0.0,
-            config_fingerprint: String::new(),
-            log_date_format: Some("%Y-%m-%d %H:%M:%S".to_string()),
-            unified_logs: false,
-            cron_restart: None,
-            next_cron_restart: None,
         }
     }
 }

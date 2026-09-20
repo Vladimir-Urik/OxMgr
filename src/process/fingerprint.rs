@@ -30,9 +30,6 @@ impl ManagedProcess {
             cluster_instances: self.cluster_instances,
             namespace: self.namespace.as_deref(),
             resource_limits: self.resource_limits.as_ref(),
-            git_repo: self.git_repo.as_deref(),
-            git_ref: self.git_ref.as_deref(),
-            pull_secret_hash: self.pull_secret_hash.as_deref(),
             reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
@@ -47,17 +44,13 @@ impl ManagedProcess {
         self.config_fingerprint = self.config_fingerprint();
     }
 
-    /// Returns a clone suitable for IPC transport, with sensitive values such
-    /// as environment variables and webhook secrets removed.
+    /// Returns a clone suitable for IPC transport, with environment variables removed.
     pub fn redacted_for_transport(&self) -> Self {
         let mut clone = self.clone();
         if clone.config_fingerprint.is_empty() {
             clone.config_fingerprint = self.config_fingerprint();
         }
         clone.env.clear();
-        if clone.pull_secret_hash.is_some() {
-            clone.pull_secret_hash = Some("<redacted>".to_string());
-        }
         clone
     }
 }
@@ -89,9 +82,6 @@ impl StartProcessSpec {
             cluster_instances: self.cluster_instances,
             namespace: self.namespace.as_deref(),
             resource_limits: self.resource_limits.as_ref(),
-            git_repo: self.git_repo.as_deref(),
-            git_ref: self.git_ref.as_deref(),
-            pull_secret_hash: self.pull_secret_hash.as_deref(),
             reuse_port: self.reuse_port,
             wait_ready: self.wait_ready,
             ready_timeout_secs: self.ready_timeout_secs,
@@ -109,7 +99,7 @@ struct ProcessConfigRef<'a> {
     env: &'a HashMap<String, String>,
     pre_reload_cmd: Option<&'a str>,
     restart_policy: &'a RestartPolicy,
-    max_restarts: u32,
+    max_restarts: i64,
     crash_restart_limit: u32,
     health_check: Option<&'a HealthCheck>,
     stop_signal: Option<&'a str>,
@@ -124,9 +114,6 @@ struct ProcessConfigRef<'a> {
     cluster_instances: Option<u32>,
     namespace: Option<&'a str>,
     resource_limits: Option<&'a ResourceLimits>,
-    git_repo: Option<&'a str>,
-    git_ref: Option<&'a str>,
-    pull_secret_hash: Option<&'a str>,
     reuse_port: bool,
     wait_ready: bool,
     ready_timeout_secs: u64,
@@ -160,7 +147,7 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
     payload.push_str(&config.restart_policy.to_string());
     payload.push('\n');
     payload.push_str(&format!(
-        "max_restarts={}\ncrash_restart_limit={}\nstop_timeout_secs={}\nrestart_delay_secs={}\nstart_delay_secs={}\nwatch={}\nwatch_delay_secs={}\ncluster_mode={}\ncluster_instances={:?}\nnamespace={:?}\ngit_repo={:?}\ngit_ref={:?}\npull_secret_hash={:?}\nreuse_port={}\nwait_ready={}\nready_timeout_secs={}\n",
+        "max_restarts={}\ncrash_restart_limit={}\nstop_timeout_secs={}\nrestart_delay_secs={}\nstart_delay_secs={}\nwatch={}\nwatch_delay_secs={}\ncluster_mode={}\ncluster_instances={:?}\nnamespace={:?}\nreuse_port={}\nwait_ready={}\nready_timeout_secs={}\n",
         config.max_restarts,
         config.crash_restart_limit,
         config.stop_timeout_secs,
@@ -171,9 +158,6 @@ fn process_config_fingerprint(config: ProcessConfigRef<'_>) -> String {
         config.cluster_mode,
         config.cluster_instances,
         config.namespace,
-        config.git_repo,
-        config.git_ref,
-        config.pull_secret_hash,
         config.reuse_port,
         config.wait_ready,
         config.ready_timeout_secs

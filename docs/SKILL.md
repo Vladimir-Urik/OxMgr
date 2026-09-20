@@ -15,7 +15,6 @@ You use it to:
 - Tail logs, check status, monitor CPU/RAM
 - Watch files and restart on changes (dev workflow)
 - Do zero-downtime reloads with health checks
-- Auto-update services via git pull or webhook
 - Stream real-time lifecycle/log/health events over a local socket (`oxmgr events`)
 - Emit machine-readable output for scripting (`oxmgr list --json`)
 
@@ -67,7 +66,7 @@ oxmgr apply ./oxfile.toml --env prod
 
 ## Config File: `oxfile.toml`
 
-The recommended way to manage services. One file, multiple services, repeatable deploys.
+The recommended way to manage services. One file, multiple services, repeatable applies.
 
 > **Paths in config:** Relative `cwd` values resolve against the directory containing the config file (not the daemon's working directory). `~`, `~/...`, `$VAR`, and `${VAR}` are expanded in `cwd` paths and `env` values; `$$` is a literal `$`. A missing variable fails loudly with an error naming it, rather than expanding to an empty string.
 
@@ -99,7 +98,7 @@ command = "node server.js"
 cwd = "./services/api"               # working directory
 restart_policy = "on_failure"        # always | on_failure | never
 max_restarts = 10
-crash_restart_limit = 3              # max auto-restarts in 5min window; 0 = disable
+crash_restart_limit = 0              # disable the 5-minute crash-loop cutoff
 stop_signal = "SIGTERM"
 stop_timeout_secs = 5
 restart_delay_secs = 2
@@ -270,28 +269,6 @@ stderr = "/var/log/api/err.log"
 
 `[apps.logs]` (also settable on `[defaults.logs]`) overrides where stdout/stderr are written. Relative paths resolve against the oxfile directory and support `~`/`$VAR` expansion. `combined` routes both streams to a single file; explicit `stdout`/`stderr` win over `combined`. When unset, the daemon keeps its default `<log_dir>/<name>.out.log` / `<name>.err.log` (or `<name>.log` with `unified_logs = true`). PM2 ecosystem files map `out_file`, `error_file`, and `log_file` onto the same overrides.
 
-### Git pull + webhook auto-update
-
-```toml
-[[apps]]
-name = "api"
-command = "node server.js"
-git_repo = "git@github.com:org/repo.git"
-git_ref = "main"
-pull_secret = "your-long-random-secret"
-```
-
-```bash
-oxmgr pull api
-# or via HTTP webhook:
-curl -X POST http://localhost:<port>/pull/api \
-  -H "X-Oxmgr-Secret: your-long-random-secret"
-```
-
-Only reloads/restarts if the commit changed.
-
----
-
 ## Event Bus (streaming)
 
 The daemon exposes a Unix domain socket (`events.sock`, default `{base_dir}/events.sock`, configurable via `event_socket_path`) that streams real-time events as NDJSON — one JSON object per line. Use it to react to process lifecycle, logs, and health without polling.
@@ -336,8 +313,8 @@ Every event's `process` object carries `command` (full command line) and `cwd`. 
 | `command` | string | required | Command to run |
 | `cwd` | string | — | Working directory |
 | `restart_policy` | `always\|on_failure\|never` | `on_failure` | |
-| `max_restarts` | int | `10` | Total restart budget |
-| `crash_restart_limit` | int | `3` | Auto-restarts in 5-min window; `0` disables |
+| `max_restarts` | int | `10` (`-1` unlimited) | Total restart budget |
+| `crash_restart_limit` | int | `0` | Auto-restarts in 5-min window; `0` disables |
 | `stop_signal` | string | `SIGTERM` | e.g. `SIGINT`, `SIGTERM` |
 | `stop_timeout_secs` | int | `5` | Grace period before force-kill |
 | `restart_delay_secs` | int | `0` | Delay before auto-restart |
@@ -366,9 +343,6 @@ Every event's `process` object carries `command` (full command line) and `cwd`. 
 | `cgroup_enforce` | bool | `false` | Hard cgroup v2 limits (Linux) |
 | `deny_gpu` | bool | `false` | Disable GPU visibility via env |
 | `reuse_port` | bool | `false` | SO_REUSEPORT hint (macOS/Linux) |
-| `git_repo` | string | — | Git remote for `oxmgr pull` |
-| `git_ref` | string | — | Branch/tag/ref to pull |
-| `pull_secret` | string | — | Webhook auth secret |
 | `unified_logs` | bool | `false` | Merge stdout/stderr into one default file |
 
 ### `[apps.logs]` / `[defaults.logs]`
@@ -386,6 +360,7 @@ Every event's `process` object carries `command` (full command line) and `cwd`. 
 - `restart_policy` uses underscores in `oxfile.toml` (`on_failure`) but hyphens in CLI flags (`--restart on-failure`).
 - `instances` (Oxmgr multi-process) and `cluster_mode` (Node.js internal clustering) are separate features — don't combine them.
 - `crash_restart_limit = 0` disables the 5-minute crash-loop cutoff only, not the total `max_restarts` budget.
+- `max_restarts = -1` allows unlimited automatic restart attempts.
 - `wait_ready` requires `health_cmd` to be set.
 - `cluster_mode` requires the command to be `node <script>` — no runtime flags before the script.
 - `env` tables are always merged (not replaced) across the `defaults` → `app` → `profile` layers.
@@ -393,6 +368,6 @@ Every event's `process` object carries `command` (full command line) and `cwd`. 
 - `apply` is idempotent — safe to run in CI/CD on every deploy. Unchanged apps are left untouched.
 - Relative `cwd` resolves against the config file's directory, not the daemon's cwd — so `oxmgr apply` gives the same result regardless of where you run it from.
 - A missing `$VAR` in `cwd`/`env` is a hard error (names the variable); it does not silently become empty. Use `$$` for a literal `$`.
-- `oxmgr events` needs a running daemon; it streams from `events.sock` (Unix socket) — not the HTTP API. The event bus is Unix-only (Linux/macOS).
+- `oxmgr events` needs a running daemon; it streams from `events.sock` (Unix socket). The event bus is Unix-only (Linux/macOS).
 - `log:out`/`log:err` events fire for every log line regardless of `log_date_format`; a chatty process makes a chatty stream — filter with `-f`/`-p`.
 - `[apps.logs].combined` and explicit `stdout`/`stderr` can coexist; the specific stream override wins over `combined`.

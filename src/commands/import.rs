@@ -343,9 +343,6 @@ fn expand_ecosystem_specs(specs: Vec<EcosystemProcessSpec>) -> Vec<StartProcessS
                 cluster_instances: spec.cluster_instances,
                 namespace: spec.namespace.clone(),
                 resource_limits: spec.resource_limits.clone(),
-                git_repo: spec.git_repo.clone(),
-                git_ref: spec.git_ref.clone(),
-                pull_secret_hash: spec.pull_secret_hash.clone(),
                 reuse_port: spec.reuse_port,
                 wait_ready: spec.wait_ready,
                 ready_timeout_secs: spec.ready_timeout_secs,
@@ -579,9 +576,6 @@ mod tests {
             cluster_instances: None,
             namespace: None,
             resource_limits: None,
-            git_repo: Some("git@github.com:org/api.git".to_string()),
-            git_ref: Some("main".to_string()),
-            pull_secret_hash: None,
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: crate::process::default_ready_timeout_secs(),
@@ -605,9 +599,6 @@ mod tests {
             crash_restart_limit: spec.crash_restart_limit,
             auto_restart_history: Vec::new(),
             namespace: None,
-            git_repo: spec.git_repo.clone(),
-            git_ref: spec.git_ref.clone(),
-            pull_secret_hash: None,
             reuse_port: false,
             stop_signal: None,
             stop_timeout_secs: 5,
@@ -656,7 +647,6 @@ mod tests {
             .expect("expected bundle import to parse");
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].name.as_deref(), Some("api"));
-        assert_eq!(specs[0].git_ref.as_deref(), Some("main"));
 
         let _ = fs::remove_file(path);
     }

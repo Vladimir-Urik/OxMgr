@@ -9,13 +9,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::js_config::extract_js_object_literal;
-use crate::process::{HealthCheck, ResourceLimits, RestartPolicy};
+use crate::process::{valid_max_restarts, HealthCheck, ResourceLimits, RestartPolicy};
 
 mod profile;
 mod resources;
 
 use self::profile::apply_profile_overrides;
-use self::resources::{normalize_pull_secret_hash, resource_limits_from};
+use self::resources::resource_limits_from;
 
 #[derive(Debug, Clone)]
 /// Canonical process specification produced after importing external process
@@ -25,7 +25,7 @@ pub struct EcosystemProcessSpec {
     pub name: Option<String>,
     pub pre_reload_cmd: Option<String>,
     pub restart_policy: RestartPolicy,
-    pub max_restarts: u32,
+    pub max_restarts: i64,
     pub crash_restart_limit: u32,
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
@@ -42,9 +42,6 @@ pub struct EcosystemProcessSpec {
     pub cluster_instances: Option<u32>,
     pub namespace: Option<String>,
     pub resource_limits: Option<ResourceLimits>,
-    pub git_repo: Option<String>,
-    pub git_ref: Option<String>,
-    pub pull_secret_hash: Option<String>,
     pub reuse_port: bool,
     pub start_order: i32,
     pub depends_on: Vec<String>,
@@ -75,7 +72,7 @@ struct EcosystemApp {
     env: Option<HashMap<String, String>>,
     autorestart: Option<bool>,
     restart_policy: Option<RestartPolicy>,
-    max_restarts: Option<u32>,
+    max_restarts: Option<i64>,
     crash_restart_limit: Option<u32>,
     restart_delay: Option<u64>,
     delay_start: Option<u64>,
@@ -90,9 +87,6 @@ struct EcosystemApp {
     priority: Option<i32>,
     depends_on: Option<Vec<String>>,
     namespace: Option<String>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret: Option<String>,
     reuse_port: Option<bool>,
     instances: Option<u32>,
     instance_var: Option<String>,
@@ -155,7 +149,7 @@ struct EcosystemHealth {
 #[derive(Debug)]
 struct ResolvedSettings {
     restart_policy: RestartPolicy,
-    max_restarts: u32,
+    max_restarts: i64,
     crash_restart_limit: u32,
     pre_reload_cmd: Option<String>,
     cwd: Option<PathBuf>,
@@ -173,9 +167,6 @@ struct ResolvedSettings {
     cluster_instances: Option<u32>,
     namespace: Option<String>,
     resource_limits: Option<ResourceLimits>,
-    git_repo: Option<String>,
-    git_ref: Option<String>,
-    pull_secret_hash: Option<String>,
     reuse_port: bool,
     start_order: i32,
     depends_on: Vec<String>,
@@ -281,10 +272,15 @@ impl EcosystemApp {
         };
         let (watch, watch_paths) = watch_from(self.watch);
 
+        let max_restarts = self.max_restarts.unwrap_or(10);
+        if !valid_max_restarts(max_restarts) {
+            anyhow::bail!("max_restarts must be -1 or a non-negative integer");
+        }
+
         let mut settings = ResolvedSettings {
             restart_policy: restart_policy_from(self.restart_policy, self.autorestart),
-            max_restarts: self.max_restarts.unwrap_or(10),
-            crash_restart_limit: self.crash_restart_limit.unwrap_or(3),
+            max_restarts,
+            crash_restart_limit: self.crash_restart_limit.unwrap_or(0),
             pre_reload_cmd: self.pre_reload_cmd,
             cwd: self.cwd,
             env: self.env.unwrap_or_default(),
@@ -313,9 +309,6 @@ impl EcosystemApp {
                 self.cgroup_enforce,
                 self.deny_gpu,
             )?,
-            git_repo: self.git_repo,
-            git_ref: self.git_ref,
-            pull_secret_hash: normalize_pull_secret_hash(self.pull_secret)?,
             reuse_port: self.reuse_port.unwrap_or(false),
             start_order: self.priority.or(self.start_order).unwrap_or(default_order),
             depends_on: self.depends_on.unwrap_or_default(),
@@ -360,9 +353,6 @@ impl EcosystemApp {
             cluster_instances: settings.cluster_instances,
             namespace: settings.namespace,
             resource_limits: settings.resource_limits,
-            git_repo: settings.git_repo,
-            git_ref: settings.git_ref,
-            pull_secret_hash: settings.pull_secret_hash,
             reuse_port: settings.reuse_port,
             start_order: settings.start_order,
             depends_on: settings.depends_on,
@@ -754,7 +744,7 @@ module.exports = {
     }
 
     #[test]
-    fn load_defaults_crash_restart_limit_to_three() {
+    fn load_defaults_crash_restart_limit_to_zero() {
         let file_path = temp_file("ecosystem-default-crash-limit");
         let payload = r#"
 {
@@ -770,7 +760,7 @@ module.exports = {
 
         let specs = load_with_profile(&file_path, None).expect("failed to parse ecosystem config");
         assert_eq!(specs.len(), 1);
-        assert_eq!(specs[0].crash_restart_limit, 3);
+        assert_eq!(specs[0].crash_restart_limit, 0);
 
         let _ = fs::remove_file(file_path);
     }

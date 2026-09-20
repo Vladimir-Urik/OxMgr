@@ -33,7 +33,7 @@ Compared to `ecosystem.config.{js,cjs,mjs,json}` style files, `oxfile.toml` give
 ## Quick Start
 
 ```bash
-# Validate oxfile before deploy/apply
+# Validate oxfile before apply
 oxmgr validate ./oxfile.toml --env prod
 
 # Apply desired state from oxfile
@@ -118,13 +118,12 @@ Details:
 - `version` (required recommended): currently `1`
 - `defaults` (optional)
 - `apps` (required, array of app entries)
-- `deploy` (optional, map of deploy environments)
 
 ### `[defaults]` fields
 
 - `restart_policy`: `always | on_failure | never`
-- `max_restarts`: integer
-- `crash_restart_limit`: integer (`0` disables crash-loop cutoff, default `3`)
+- `max_restarts`: integer (`-1` means unlimited automatic restarts)
+- `crash_restart_limit`: integer (`0` disables crash-loop cutoff, default `0`)
 - `pre_reload_cmd`: command string run before reload attempts
 - `cwd`: string path
 - `env`: key/value table
@@ -153,9 +152,6 @@ Details:
 - `cgroup_enforce`: bool (Linux only; applies hard limits via cgroup v2)
 - `deny_gpu`: bool (best-effort GPU visibility disable via environment variables)
 - `reuse_port`: bool (best-effort hint for SO_REUSEPORT on macOS/Linux)
-- `git_repo`: git remote URL for `oxmgr pull`
-- `git_ref`: optional branch/tag/ref for `oxmgr pull`
-- `pull_secret`: secret used by webhook endpoint `POST /pull/<name|id>`
 - `log_date_format`: date format string (e.g., `"%Y-%m-%d %H:%M:%S"`) to prefix each log line
 - `unified_logs`: bool (`true` merges stdout/stderr into one log file)
 - `cron_restart`: cron expression (6-field: `"second minute hour day month dayofweek"`) for scheduled restarts
@@ -163,7 +159,7 @@ Details:
   - `stdout`: custom path for the stdout log file
   - `stderr`: custom path for the stderr log file
   - `combined`: convenience field that routes both stdout and stderr to one file (overridden by explicit `stdout`/`stderr`)
-  - Relative paths resolve against the directory containing the oxfile; `~` and `$VAR` are expanded
+  - Relative paths resolve against the resolved service `cwd` when configured, otherwise against the directory containing the oxfile; `~` and `$VAR` are expanded
   - When unset the daemon keeps the previous default of `<log_dir>/<name>.out.log` / `<name>.err.log` (or `<name>.log` with `unified_logs = true`)
 
 ### `[[apps]]` fields
@@ -188,7 +184,7 @@ Details:
 Crash-loop cutoff:
 
 - `crash_restart_limit` stops daemon-triggered auto restarts after that many restart attempts inside a rolling 5-minute window.
-- Default is `3`.
+- Default is `0`.
 - Manual `start`, `restart`, and `reload` reset the counter.
 - Set `crash_restart_limit = 0` to disable the cutoff.
 
@@ -277,24 +273,6 @@ Behavior:
 - when exceeded, Oxmgr triggers restart logic
 - if restart budget is exhausted, process is marked `errored`
 - if `cgroup_enforce = true`, Linux cgroup v2 hard limits are applied at spawn time
-
-## Git Pull + Webhook
-
-You can enable auto-update pull behavior per service:
-
-```toml
-git_repo = "git@github.com:org/api.git"
-git_ref = "main"
-pull_secret = "super-secret-token"
-```
-
-Behavior:
-
-- `oxmgr pull <name>` runs git pull for that service and reloads/restarts only if commit changed.
-- `oxmgr pull` without target processes all services with `git_repo`.
-- Webhook endpoint: `POST /pull/<name|id>` with header `X-Oxmgr-Secret: <pull_secret>`.
-- Metrics endpoint: `GET /metrics` on the same daemon HTTP bind address.
-- Daemon HTTP bind address can be set with `OXMGR_API_ADDR`.
 
 ## Log Date Formatting
 
@@ -417,31 +395,6 @@ Then use:
 
 ```bash
 oxmgr apply ./oxfile.toml --env prod
-```
-
-## Deploy Environments (Optional)
-
-You can define deployment environments directly in `oxfile.toml`:
-
-```toml
-[deploy.production]
-user = "ubuntu"
-host = ["192.168.0.13", "192.168.0.14"]
-repo = "git@github.com:Username/repository.git"
-ref = "origin/main"
-path = "/var/www/my-repository"
-pre_setup = "echo setup-start"
-post_setup = "echo setup-done"
-pre_deploy_local = "echo local-prepare"
-pre_deploy = "npm ci"
-post_deploy = "oxmgr apply ./oxfile.toml --env production"
-```
-
-Then deploy with:
-
-```bash
-oxmgr deploy ./oxfile.toml production setup
-oxmgr deploy ./oxfile.toml production
 ```
 
 ## Real Examples

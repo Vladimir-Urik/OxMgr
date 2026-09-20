@@ -10,7 +10,19 @@ mod fingerprint;
 
 /// Default number of daemon-triggered restarts allowed inside the crash-loop
 /// window before Oxmgr stops retrying automatically.
-pub const DEFAULT_CRASH_RESTART_LIMIT: u32 = 3;
+pub const DEFAULT_CRASH_RESTART_LIMIT: u32 = 0;
+/// Sentinel value meaning that the total automatic restart budget is unlimited.
+pub const UNLIMITED_RESTARTS: i64 = -1;
+
+/// Returns whether the total automatic restart budget has been exhausted.
+pub fn max_restarts_reached(restart_count: u32, max_restarts: i64) -> bool {
+    max_restarts >= 0 && i64::from(restart_count) >= max_restarts
+}
+
+/// Returns whether a configured restart budget is valid.
+pub fn valid_max_restarts(max_restarts: i64) -> bool {
+    max_restarts >= UNLIMITED_RESTARTS
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -141,7 +153,7 @@ pub struct StartProcessSpec {
     #[serde(default)]
     pub pre_reload_cmd: Option<String>,
     pub restart_policy: RestartPolicy,
-    pub max_restarts: u32,
+    pub max_restarts: i64,
     #[serde(default = "default_crash_restart_limit")]
     pub crash_restart_limit: u32,
     pub cwd: Option<PathBuf>,
@@ -169,12 +181,6 @@ pub struct StartProcessSpec {
     pub namespace: Option<String>,
     #[serde(default)]
     pub resource_limits: Option<ResourceLimits>,
-    #[serde(default)]
-    pub git_repo: Option<String>,
-    #[serde(default)]
-    pub git_ref: Option<String>,
-    #[serde(default)]
-    pub pull_secret_hash: Option<String>,
     #[serde(default)]
     pub reuse_port: bool,
     #[serde(default)]
@@ -209,7 +215,7 @@ pub struct ManagedProcess {
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
     pub restart_policy: RestartPolicy,
-    pub max_restarts: u32,
+    pub max_restarts: i64,
     pub restart_count: u32,
     #[serde(default = "default_crash_restart_limit")]
     pub crash_restart_limit: u32,
@@ -217,12 +223,6 @@ pub struct ManagedProcess {
     pub auto_restart_history: Vec<u64>,
     #[serde(default)]
     pub namespace: Option<String>,
-    #[serde(default)]
-    pub git_repo: Option<String>,
-    #[serde(default)]
-    pub git_ref: Option<String>,
-    #[serde(default)]
-    pub pull_secret_hash: Option<String>,
     #[serde(default)]
     pub reuse_port: bool,
     #[serde(default)]
@@ -341,9 +341,18 @@ mod tests {
 
     use super::{
         default_crash_restart_limit, default_ready_timeout_secs, default_stop_timeout_secs,
-        DesiredState, HealthCheck, HealthStatus, ManagedProcess, ProcessStatus, ResourceLimits,
-        RestartPolicy, StartProcessSpec, DEFAULT_CRASH_RESTART_LIMIT,
+        max_restarts_reached, valid_max_restarts, DesiredState, HealthCheck, HealthStatus,
+        ManagedProcess, ProcessStatus, ResourceLimits, RestartPolicy, StartProcessSpec,
+        DEFAULT_CRASH_RESTART_LIMIT,
     };
+
+    #[test]
+    fn restart_budget_supports_unlimited_and_rejects_other_negative_values() {
+        assert!(!max_restarts_reached(10, -1));
+        assert!(max_restarts_reached(10, 10));
+        assert!(!valid_max_restarts(-2));
+        assert!(valid_max_restarts(-1));
+    }
 
     #[test]
     fn restart_policy_always_restarts_on_success_and_failure() {
@@ -397,9 +406,9 @@ mod tests {
     }
 
     #[test]
-    fn crash_restart_limit_default_is_three() {
-        assert_eq!(default_crash_restart_limit(), 3);
-        assert_eq!(DEFAULT_CRASH_RESTART_LIMIT, 3);
+    fn crash_restart_limit_default_is_zero() {
+        assert_eq!(default_crash_restart_limit(), 0);
+        assert_eq!(DEFAULT_CRASH_RESTART_LIMIT, 0);
     }
 
     #[test]
@@ -442,9 +451,6 @@ mod tests {
             cluster_instances: Some(2),
             namespace: Some("prod".to_string()),
             resource_limits: resource_limits.clone(),
-            git_repo: Some("https://example.com/repo.git".to_string()),
-            git_ref: Some("main".to_string()),
-            pull_secret_hash: Some("abc123".to_string()),
             reuse_port: true,
             wait_ready: true,
             ready_timeout_secs: 45,
@@ -478,9 +484,6 @@ mod tests {
         process.cluster_instances = spec.cluster_instances;
         process.namespace = spec.namespace.clone();
         process.resource_limits = resource_limits;
-        process.git_repo = spec.git_repo.clone();
-        process.git_ref = spec.git_ref.clone();
-        process.pull_secret_hash = spec.pull_secret_hash.clone();
         process.reuse_port = spec.reuse_port;
         process.wait_ready = spec.wait_ready;
         process.ready_timeout_secs = spec.ready_timeout_secs;
@@ -548,12 +551,10 @@ mod tests {
         process
             .env
             .insert("API_KEY".to_string(), "secret".to_string());
-        process.pull_secret_hash = Some("top-secret".to_string());
 
         let redacted = process.redacted_for_transport();
 
         assert!(redacted.env.is_empty());
-        assert_eq!(redacted.pull_secret_hash.as_deref(), Some("<redacted>"));
         assert_eq!(redacted.config_fingerprint, process.config_fingerprint());
     }
 
@@ -564,17 +565,14 @@ mod tests {
         process
             .env
             .insert("TOKEN".to_string(), "secret".to_string());
-        process.pull_secret_hash = Some("hashed-secret".to_string());
 
         let redacted = process.redacted_for_transport();
 
         assert_eq!(redacted.config_fingerprint, "precomputed");
         assert!(redacted.env.is_empty());
-        assert_eq!(redacted.pull_secret_hash.as_deref(), Some("<redacted>"));
 
         assert_eq!(process.config_fingerprint, "precomputed");
         assert_eq!(process.env.get("TOKEN").map(String::as_str), Some("secret"));
-        assert_eq!(process.pull_secret_hash.as_deref(), Some("hashed-secret"));
     }
 
     #[test]
@@ -603,9 +601,6 @@ mod tests {
             crash_restart_limit: DEFAULT_CRASH_RESTART_LIMIT,
             auto_restart_history: Vec::new(),
             namespace: None,
-            git_repo: None,
-            git_ref: None,
-            pull_secret_hash: None,
             reuse_port: false,
             stop_signal: Some("SIGTERM".to_string()),
             stop_timeout_secs: 5,
@@ -672,9 +667,6 @@ mod tests {
             cluster_instances: None,
             namespace: None,
             resource_limits: None,
-            git_repo: None,
-            git_ref: None,
-            pull_secret_hash: None,
             reuse_port: false,
             wait_ready: false,
             ready_timeout_secs: default_ready_timeout_secs(),

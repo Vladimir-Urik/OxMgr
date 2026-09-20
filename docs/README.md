@@ -12,8 +12,6 @@ Project docs live here.
 - [Runtime Mode (pm2-runtime style)](./RUNTIME.md)
 - [Latest Benchmark Results](../BENCHMARK.md)
 - [Latest Benchmark JSON](../benchmark.json)
-- [Pull, Webhook, and Metrics Guide](./PULL_WEBHOOK.md)
-- [Deployment Guide](./DEPLOY.md)
 - [Benchmark Guide](./BENCHMARKS.md)
 - [Download Metrics](./DOWNLOAD_METRICS.md)
 - [Service Bundles](./BUNDLES.md)

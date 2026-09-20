@@ -6,7 +6,7 @@ use anyhow::Result;
 /// Returns the outermost object literal found in the payload.
 ///
 /// This intentionally supports the simple config shapes used by PM2 ecosystem
-/// files and Oxmgr deploy config wrappers, not arbitrary JavaScript parsing.
+/// files, not arbitrary JavaScript parsing.
 pub fn extract_js_object_literal(payload: &str, context: &str) -> Result<String> {
     let trimmed = payload.trim();
     if trimmed.starts_with('{') {

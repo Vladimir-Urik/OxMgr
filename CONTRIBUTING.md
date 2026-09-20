@@ -93,7 +93,7 @@ Please update the relevant docs alongside code changes:
 - `README.md` for user-visible behavior or project positioning changes
 - `docs/CLI.md` for command or flag changes
 - `docs/OXFILE.md` and `docs/examples/` for config-format changes
-- `docs/UI.md`, `docs/PULL_WEBHOOK.md`, `docs/DEPLOY.md`, or other guides when workflows change
+- `docs/UI.md` or other guides when workflows change
 
 If behavior changes but docs stay untouched, explain why in the PR.
 

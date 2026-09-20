@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use crate::cli::{build_health_check, build_resource_limits, env_pairs_to_map, StartCommand};
 use crate::config::AppConfig;
 use crate::ipc::{send_request, IpcRequest};
-use crate::process::StartProcessSpec;
+use crate::process::{valid_max_restarts, StartProcessSpec};
 
 use super::common::expect_ok;
 
@@ -18,6 +18,9 @@ pub(crate) fn validate_flags(args: &StartCommand) -> Result<()> {
     }
     if args.wait_ready && args.ready_timeout == 0 {
         anyhow::bail!("--ready-timeout must be at least 1 second");
+    }
+    if !valid_max_restarts(args.max_restarts) {
+        anyhow::bail!("--max-restarts must be -1 or a non-negative integer");
     }
 
     Ok(())
@@ -85,9 +88,6 @@ fn build_start_spec(args: StartCommand) -> Result<StartProcessSpec> {
         cluster_instances: args.cluster_instances.map(|value| value.max(1)),
         namespace: args.namespace,
         resource_limits,
-        git_repo: None,
-        git_ref: None,
-        pull_secret_hash: None,
         reuse_port: args.reuse_port,
         wait_ready: args.wait_ready,
         ready_timeout_secs: args.ready_timeout.max(1),
