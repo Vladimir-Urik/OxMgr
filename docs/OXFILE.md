@@ -116,9 +116,40 @@ Details:
 ### Top-level
 
 - `version` (required recommended): currently `1`
+- `http_server` (optional): HTTP server/dashboard configuration
 - `defaults` (optional)
 - `apps` (required, array of app entries)
 - `deploy` (optional, map of deploy environments)
+
+### `[http_server]` fields
+
+Configures the HTTP API server and web dashboard authentication (supervisord-compatible).
+
+- `port`: TCP address to bind (e.g. `"127.0.0.1:46001"` or `"0.0.0.0:46001"`)
+- `username`: Basic Auth username (optional, enables auth when set with password)
+- `password`: Basic Auth password, supports plain text or hashed formats:
+  - Plain text: `"mysecret"`
+  - SHA256: `"{SHA256}base64hash"` (supervisord-compatible)
+  - SHA512: `"{SHA512}base64hash"`
+- `interval_ms`: Dashboard refresh interval in milliseconds (default 2000, clamped to 200-10000)
+- `label`: Custom environment label displayed in dashboard header (e.g. `"PRODUCTION"`, `"DEVELOPMENT"`)
+- `label_color`: Label color as CSS value (e.g. `"#ef4444"`, `"red"`, `"rgb(239,68,68)"`)
+
+Example:
+
+```toml
+[http_server]
+port = "0.0.0.0:46001"
+username = "admin"
+password = "changeme"
+interval_ms = 1000
+label = "PRODUCTION"
+label_color = "#ef4444"
+```
+
+Environment variables (`OXMGR_API_ADDR`, `OXMGR_DASHBOARD_USER`, `OXMGR_DASHBOARD_PASS`, `OXMGR_DASHBOARD_LABEL`, `OXMGR_DASHBOARD_LABEL_COLOR`) take precedence over oxfile settings.
+
+For full API endpoints and usage details, see [Web Dashboard in UI.md](./UI.md#web-dashboard).
 
 ### `[defaults]` fields
 

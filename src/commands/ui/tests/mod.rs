@@ -6,14 +6,14 @@ use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::process::{DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy};
 
+use super::layout::{handle_delete_confirm_mouse, handle_menu_mouse, handle_table_mouse_selection};
 use super::{
     compute_table_view, delete_confirm_layout, esc_menu_layout, format_memory_cell,
-    frame_content_line_left, frame_line_with_label, handle_delete_confirm_mouse, handle_menu_mouse,
-    handle_table_mouse_selection, log_viewer_content_rows, process_sidebar_layout, progress_bar,
-    table_inner_width, visible_len, visible_processes, CreateField, CreateProcessForm,
-    DashboardState, DeleteConfirmChoice, DeleteConfirmLayout, EscMenuChoice, EscMenuLayout,
-    FlashLevel, FlashMessage, LogSource, LogViewerState, ProcessFilter, ProcessSidebarLayout,
-    ProcessSort, TableArea, TableView,
+    frame_content_line_left, frame_line_with_label, log_viewer_content_rows,
+    process_sidebar_layout, progress_bar, table_inner_width, visible_len, visible_processes,
+    CreateField, CreateProcessForm, DashboardState, DeleteConfirmChoice, DeleteConfirmLayout,
+    EscMenuChoice, EscMenuLayout, FlashLevel, FlashMessage, LogSource, LogViewerState,
+    ProcessFilter, ProcessSidebarLayout, ProcessSort, TableArea, TableView,
 };
 
 mod layout;
@@ -77,5 +77,6 @@ fn sample_process() -> ManagedProcess {
         unified_logs: false,
         cron_restart: None,
         next_cron_restart: None,
+        last_error: None,
     }
 }

@@ -16,6 +16,9 @@
       ],
       "description": "Oxfile format version."
     },
+    "http_server": {
+      "$ref": "#/definitions/httpServer"
+    },
     "defaults": {
       "$ref": "#/definitions/defaults"
     },
@@ -36,6 +39,32 @@
     }
   },
   "definitions": {
+    "httpServer": {
+      "type": "object",
+      "description": "HTTP server and dashboard configuration (supervisord-compatible).",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": "string",
+          "description": "TCP address to bind (e.g. '127.0.0.1:46001' or '0.0.0.0:46001')."
+        },
+        "username": {
+          "type": "string",
+          "description": "Basic Auth username. Enables authentication when set with password."
+        },
+        "password": {
+          "type": "string",
+          "description": "Basic Auth password. Supports plain text, {SHA256}base64, or {SHA512}base64 formats."
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 10000,
+          "default": 2000,
+          "description": "Dashboard refresh interval in milliseconds (default 2000)."
+        }
+      }
+    },
     "envMap": {
       "type": "object",
       "description": "Environment variables.",

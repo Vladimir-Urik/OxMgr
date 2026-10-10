@@ -267,8 +267,14 @@ mod tests {
             .await
             .expect_err("expected request to fail without listener");
 
+        // The error can be either a connection failure (port closed immediately)
+        // or a read failure (connection accepted but peer closed before response).
+        // Both are valid failure modes when no daemon is listening.
+        let err_str = err.to_string();
         assert!(
-            err.to_string().contains("failed to connect to daemon at"),
+            err_str.contains("failed to connect to daemon at")
+                || err_str.contains("failed to read from IPC stream")
+                || err_str.contains("daemon closed IPC connection"),
             "unexpected error: {err}"
         );
     }

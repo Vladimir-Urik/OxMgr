@@ -4,10 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::cursor;
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEventKind,
-};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
     self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -18,12 +15,12 @@ use crate::ipc::{send_request, IpcRequest};
 use crate::logging::read_last_lines;
 use crate::process::ManagedProcess;
 
+use self::input::{handle_key, handle_mouse, LoopControl};
 #[cfg(test)]
 use self::layout::{
     compute_table_view, delete_confirm_layout, esc_menu_layout, process_sidebar_layout,
     table_inner_width,
 };
-use self::layout::{handle_delete_confirm_mouse, handle_menu_mouse, handle_table_mouse_selection};
 use self::logs::{default_log_source, preferred_log_source};
 use self::render::{draw_frame, log_viewer_content_rows};
 #[cfg(test)]
@@ -34,13 +31,31 @@ use self::text::truncate;
 #[cfg(test)]
 use self::text::visible_len;
 use super::common::expect_ok;
+use crate::cli::UiCommand;
 
+mod input;
 mod layout;
 mod logs;
 mod render;
 mod text;
+mod web;
 
-pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
+pub(crate) async fn run(
+    config: &AppConfig,
+    command: Option<UiCommand>,
+    interval_ms: u64,
+) -> Result<()> {
+    match command {
+        Some(UiCommand::Web {
+            port,
+            bind,
+            no_open,
+        }) => web::run(config, &bind, port, no_open).await,
+        Some(UiCommand::Tui) | None => run_tui(config, interval_ms).await,
+    }
+}
+
+async fn run_tui(config: &AppConfig, interval_ms: u64) -> Result<()> {
     let refresh_interval = Duration::from_millis(interval_ms.clamp(200, 5000));
     let _guard = TerminalGuard::enter()?;
 
@@ -97,453 +112,24 @@ pub(crate) async fn run(config: &AppConfig, interval_ms: u64) -> Result<()> {
         }
 
         if event::poll(Duration::from_millis(90)).context("failed polling terminal input")? {
+            let mut ctl = LoopControl::default();
             match event::read().context("failed reading terminal input")? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    let visible = visible_processes(&processes, &state);
-                    if state.search_input_open {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Enter => {
-                                state.close_search();
-                                needs_redraw = true;
-                            }
-                            KeyCode::Backspace => {
-                                state.pop_search_char();
-                                state.clamp_selection(visible_processes(&processes, &state).len());
-                                needs_redraw = true;
-                            }
-                            KeyCode::Delete => {
-                                state.clear_search_query();
-                                state.clamp_selection(visible_processes(&processes, &state).len());
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                state.clear_search_query();
-                                state.clamp_selection(visible_processes(&processes, &state).len());
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char(ch) if !ch.is_control() => {
-                                state.push_search_char(ch);
-                                state.clamp_selection(visible_processes(&processes, &state).len());
-                                needs_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if state.create_form.is_some() {
-                        match key.code {
-                            KeyCode::Esc => {
-                                state.close_create_form();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Tab | KeyCode::BackTab => {
-                                if let Some(form) = state.create_form.as_mut() {
-                                    form.toggle_field();
-                                    form.error = None;
-                                }
-                                needs_redraw = true;
-                            }
-                            KeyCode::Backspace => {
-                                if let Some(form) = state.create_form.as_mut() {
-                                    let _ = form.active_mut().pop();
-                                    form.error = None;
-                                }
-                                needs_redraw = true;
-                            }
-                            KeyCode::Enter => {
-                                submit_create_form(config, &mut state).await;
-                                next_refresh_at = Instant::now();
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char(ch) => {
-                                if !ch.is_control() {
-                                    if let Some(form) = state.create_form.as_mut() {
-                                        if form.active_mut().chars().count() < 256 {
-                                            form.active_mut().push(ch);
-                                        }
-                                        form.error = None;
-                                    }
-                                }
-                                needs_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if let Some(confirm) = state.delete_confirm.as_mut() {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('n') => {
-                                state.close_delete_confirm();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Left
-                            | KeyCode::Up
-                            | KeyCode::Char('h')
-                            | KeyCode::Char('k') => {
-                                confirm.selected = DeleteConfirmChoice::Cancel;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Right
-                            | KeyCode::Down
-                            | KeyCode::Tab
-                            | KeyCode::Char('l')
-                            | KeyCode::Char('j') => {
-                                confirm.selected = DeleteConfirmChoice::Delete;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('y') => {
-                                let target = confirm.target.clone();
-                                state.close_delete_confirm();
-                                delete_target(config, &target, &mut state).await;
-                                next_refresh_at = Instant::now();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Enter => {
-                                let action = confirm.selected;
-                                let target = confirm.target.clone();
-                                state.close_delete_confirm();
-                                match action {
-                                    DeleteConfirmChoice::Cancel => {}
-                                    DeleteConfirmChoice::Delete => {
-                                        delete_target(config, &target, &mut state).await;
-                                        next_refresh_at = Instant::now();
-                                    }
-                                }
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if let Some(viewer) = state.log_viewer.as_mut() {
-                        let visible_rows = log_viewer_content_rows(
-                            terminal::size().ok().map(|(_, h)| h as usize).unwrap_or(20),
-                        );
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('l') => {
-                                state.close_log_viewer();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                viewer.scroll_up(1);
-                                needs_redraw = true;
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                viewer.scroll_down(visible_rows, 1);
-                                needs_redraw = true;
-                            }
-                            KeyCode::PageUp => {
-                                viewer.scroll_up(visible_rows.saturating_sub(1).max(1));
-                                needs_redraw = true;
-                            }
-                            KeyCode::PageDown => {
-                                viewer.scroll_down(
-                                    visible_rows,
-                                    visible_rows.saturating_sub(1).max(1),
-                                );
-                                needs_redraw = true;
-                            }
-                            KeyCode::Home => {
-                                viewer.scroll_to_top();
-                                needs_redraw = true;
-                            }
-                            KeyCode::End => {
-                                viewer.scroll_to_bottom(visible_rows);
-                                needs_redraw = true;
-                            }
-                            KeyCode::Tab => {
-                                viewer.toggle_source(visible_rows);
-                                viewer.clamp_scroll(visible_rows);
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('g') | KeyCode::Char(' ') => {
-                                viewer.reload();
-                                viewer.clamp_scroll(visible_rows);
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('q') => should_exit = true,
-                            KeyCode::Char('?') => {
-                                state.toggle_help();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if state.help_open {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('?') => {
-                                state.toggle_help();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('q') => should_exit = true,
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if state.esc_menu_open {
-                        match key.code {
-                            KeyCode::Esc => {
-                                state.close_menu();
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Left
-                            | KeyCode::Up
-                            | KeyCode::Char('h')
-                            | KeyCode::Char('k') => {
-                                state.esc_menu_selected = EscMenuChoice::Resume;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Right
-                            | KeyCode::Down
-                            | KeyCode::Tab
-                            | KeyCode::Char('l')
-                            | KeyCode::Char('j') => {
-                                state.esc_menu_selected = EscMenuChoice::Quit;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Enter => match state.esc_menu_selected {
-                                EscMenuChoice::Resume => {
-                                    state.close_menu();
-                                    needs_full_clear = true;
-                                    needs_redraw = true;
-                                }
-                                EscMenuChoice::Quit => {
-                                    should_exit = true;
-                                }
-                            },
-                            KeyCode::Char('q') => should_exit = true,
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    match key.code {
-                        KeyCode::Char('q') => should_exit = true,
-                        KeyCode::Char('/') => {
-                            state.open_search();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('f') => {
-                            state.cycle_filter();
-                            state.clamp_selection(visible_processes(&processes, &state).len());
-                            state.set_info(format!("filter: {}", state.filter.label()));
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('o') => {
-                            state.cycle_sort();
-                            state.clamp_selection(visible_processes(&processes, &state).len());
-                            state.set_info(format!("sort: {}", state.sort.label()));
-                            needs_redraw = true;
-                        }
-                        KeyCode::Esc => {
-                            state.toggle_menu();
-                            needs_full_clear = true;
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('?') => {
-                            state.toggle_help();
-                            needs_full_clear = true;
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('n') => {
-                            state.open_create_form();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Up | KeyCode::Char('k') if state.selected > 0 => {
-                            state.selected -= 1;
-                            needs_redraw = true;
-                        }
-                        KeyCode::Down | KeyCode::Char('j')
-                            if state.selected + 1 < visible.len() =>
-                        {
-                            state.selected += 1;
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('g') => {
-                            next_refresh_at = Instant::now();
-                            state.set_info("refresh scheduled");
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char(' ') => {
-                            next_refresh_at = Instant::now();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('s') => {
-                            stop_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            next_refresh_at = Instant::now();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('d') => {
-                            if let Some(process) = visible.get(state.selected).copied() {
-                                state.open_delete_confirm(process);
-                            }
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('r') => {
-                            reload_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            next_refresh_at = Instant::now();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('R') => {
-                            restart_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            next_refresh_at = Instant::now();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('l') => {
-                            open_logs_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            needs_full_clear = true;
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('p') => {
-                            pull_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            next_refresh_at = Instant::now();
-                            needs_redraw = true;
-                        }
-                        KeyCode::Char('t') => {
-                            tail_selected(
-                                config,
-                                selected_target(&visible, state.selected),
-                                &mut state,
-                            )
-                            .await;
-                            needs_redraw = true;
-                        }
-                        _ => {}
-                    }
+                    handle_key(config, key, &processes, &mut state, &mut ctl).await;
                 }
                 Event::Mouse(mouse) => {
-                    let visible = visible_processes(&processes, &state);
-                    if state.create_form.is_some() {
-                        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if state.delete_confirm.is_some() {
-                        if let Some(layout) = frame_info.delete_confirm_layout {
-                            if let Some(action) = handle_delete_confirm_mouse(mouse, layout) {
-                                let target = state
-                                    .delete_confirm
-                                    .as_ref()
-                                    .map(|confirm| confirm.target.clone());
-                                match action {
-                                    DeleteConfirmChoice::Cancel => {
-                                        state.close_delete_confirm();
-                                    }
-                                    DeleteConfirmChoice::Delete => {
-                                        state.close_delete_confirm();
-                                        if let Some(target) = target {
-                                            delete_target(config, &target, &mut state).await;
-                                            next_refresh_at = Instant::now();
-                                        }
-                                    }
-                                }
-                                needs_full_clear = true;
-                                needs_redraw = true;
-                            }
-                        }
-                        continue;
-                    }
-
-                    if let Some(viewer) = state.log_viewer.as_mut() {
-                        let visible_rows = log_viewer_content_rows(
-                            terminal::size().ok().map(|(_, h)| h as usize).unwrap_or(20),
-                        );
-                        match mouse.kind {
-                            MouseEventKind::ScrollUp => {
-                                viewer.scroll_up(3);
-                                needs_redraw = true;
-                            }
-                            MouseEventKind::ScrollDown => {
-                                viewer.scroll_down(visible_rows, 3);
-                                needs_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if state.help_open {
-                        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-                            state.toggle_help();
-                            needs_full_clear = true;
-                            needs_redraw = true;
-                        }
-                        continue;
-                    }
-
-                    if state.esc_menu_open {
-                        if let Some(layout) = frame_info.menu_layout {
-                            if let Some(action) = handle_menu_mouse(mouse, layout) {
-                                match action {
-                                    EscMenuChoice::Resume => {
-                                        state.close_menu();
-                                        needs_full_clear = true;
-                                        needs_redraw = true;
-                                    }
-                                    EscMenuChoice::Quit => should_exit = true,
-                                }
-                            }
-                        }
-                        continue;
-                    }
-
-                    let selection_changed = handle_table_mouse_selection(
-                        mouse,
-                        &frame_info.table_view,
-                        frame_info.table_area,
-                        &mut state,
-                        visible.len(),
-                    );
-                    if selection_changed {
-                        needs_redraw = true;
-                    }
+                    handle_mouse(config, mouse, &processes, &mut state, &frame_info, &mut ctl)
+                        .await;
                 }
-                Event::Resize(_, _) => {
-                    needs_full_clear = true;
-                    needs_redraw = true;
-                }
+                Event::Resize(_, _) => ctl.needs_full_clear = true,
                 _ => {}
+            }
+
+            needs_full_clear |= ctl.needs_full_clear;
+            needs_redraw |= ctl.needs_redraw || ctl.needs_full_clear;
+            should_exit |= ctl.should_exit;
+            if ctl.refresh_now {
+                next_refresh_at = Instant::now();
             }
         }
 

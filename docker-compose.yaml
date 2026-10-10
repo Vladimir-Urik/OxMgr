@@ -1,0 +1,69 @@
+# OxMgr demo - process manager + web dashboard
+#
+# Start the demo:
+#   docker compose up --build
+#
+# Then open the web dashboard:
+#   http://localhost:46001
+#
+# The demo oxfile (docker/oxfile.example.toml) is applied to the daemon on
+# first start and manages three example services you can inspect and control
+# from the dashboard: stop/restart/reload them and watch their stdout/stderr.
+#
+# Services exposed:
+#   46001  OxMgr web dashboard (REST API + Prometheus metrics)
+#   8080   example web service managed by OxMgr
+
+services:
+  oxmgr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: oxmgr:demo
+    container_name: oxmgr-demo
+    # Reap zombies with the container runtime's own init instead of baking an
+    # init wrapper into the image. This makes docker-init PID 1 and oxmgr PID 2;
+    # docker-init forwards SIGTERM, and oxmgr handles it natively either way, so
+    # graceful shutdown works with or without this flag.
+    init: true
+    # Give the daemon room to stop managed processes before the runtime escalates
+    # to SIGKILL (Docker's default grace period is 10s).
+    stop_grace_period: 30s
+    ports:
+      - "46001:46001"   # web dashboard
+      - "8080:8080"     # example managed web service
+    environment:
+      # Bind the API/dashboard to all interfaces inside the container so the
+      # port mapping above can reach it. The daemon IPC stays loopback-only.
+      OXMGR_API_ADDR: 0.0.0.0:46001
+      OXMGR_DAEMON_ADDR: 127.0.0.1:45001
+      OXMGR_CONFIG: /opt/oxmgr/oxfile.example.toml
+      PORT: 8080
+      # Dashboard Basic Auth. Override by exporting the same vars before
+      # `docker compose up`, e.g.:  export OXMGR_DASHBOARD_USER=admin
+      # Password supports plain text or hash (supervisord-compatible):
+      #   Plain:   OXMGR_DASHBOARD_PASS=s3cret
+      #   SHA256:  OXMGR_DASHBOARD_PASS={SHA256}$(echo -n 's3cret' | openssl dgst -sha256 -binary | base64)
+      #   SHA512:  OXMGR_DASHBOARD_PASS={SHA512}$(echo -n 's3cret' | openssl dgst -sha512 -binary | base64)
+      OXMGR_DASHBOARD_USER: ${OXMGR_DASHBOARD_USER:-admin}
+      # Default password: oxmgr-demo (hashed with SHA256)
+      OXMGR_DASHBOARD_PASS: ${OXMGR_DASHBOARD_PASS:-{SHA256}pfHOMnNTR5Aeh+Zxg6okbm7aP8o87ODdfNsOrfCnQ20=}
+      # Dashboard environment label (e.g. PRODUCTION, DEVELOPMENT, LOCAL)
+      OXMGR_DASHBOARD_LABEL: ${OXMGR_DASHBOARD_LABEL:-DEVELOPMENT}
+      OXMGR_DASHBOARD_LABEL_COLOR: ${OXMGR_DASHBOARD_LABEL_COLOR:-#eab308}
+    volumes:
+      # Persist managed-process state and logs across restarts. Comment this
+      # out (and `docker compose down -v`) to re-run the demo from scratch.
+      - oxmgr-data:/var/lib/oxmgr
+    healthcheck:
+      # /metrics is intentionally public (no Basic Auth), so the healthcheck
+      # stays valid even though the dashboard/API require credentials.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:46001/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  oxmgr-data:

@@ -11,6 +11,7 @@ use tokio::time::{sleep, timeout, Instant};
 use crate::config::AppConfig;
 use crate::ecosystem::EcosystemProcessSpec;
 use crate::process::StartProcessSpec;
+use crate::signal::wait_for_shutdown_signal;
 
 use super::common::expand_specs_with_deterministic_names;
 use super::import::{load_import_specs, order_specs_for_start};
@@ -349,23 +350,6 @@ fn unix_signal_from_name(value: Option<&str>) -> Option<nix::sys::signal::Signal
         "USR2" => Some(Signal::SIGUSR2),
         _ => None,
     }
-}
-
-#[cfg(unix)]
-async fn wait_for_shutdown_signal() {
-    use tokio::signal::unix::{signal, SignalKind};
-
-    let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
-    let mut sigint = signal(SignalKind::interrupt()).expect("failed to install SIGINT handler");
-    tokio::select! {
-        _ = sigterm.recv() => {}
-        _ = sigint.recv() => {}
-    }
-}
-
-#[cfg(not(unix))]
-async fn wait_for_shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
 }
 
 fn expand_specs_for_runtime(specs: Vec<EcosystemProcessSpec>) -> Result<Vec<StartProcessSpec>> {

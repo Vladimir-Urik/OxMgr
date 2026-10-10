@@ -39,6 +39,7 @@ flate2 = { version = "1.0", default-features = false, features = [
   "rust_backend",
 ] }
 url = "2.5"
+base64 = "0.23.1"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["signal", "process", "user"] }
