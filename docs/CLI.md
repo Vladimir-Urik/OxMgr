@@ -194,6 +194,13 @@ Full deployment configuration details: [Deployment Guide](./DEPLOY.md).
 - `oxmgr daemon run`
 - `oxmgr daemon stop`
 
+On Windows, `service install` creates the `OxmgrDaemon` logon task using Windows
+PowerShell (`powershell.exe`) with a hidden console. The launcher waits for
+`daemon run` to exit and reports its exit code to Task Scheduler. Run
+`service install` again to replace an existing task created by an older version.
+`startup` prints PowerShell commands for this same installation workflow.
+Running `daemon run` directly still runs in the foreground.
+
 `doctor` checks filesystem layout, state-file readability, daemon IPC reachability, webhook API metrics, service-manager integration, cgroup prerequisites, git pull/webhook setup, and log-rotation policy.
 
 Daemon HTTP API:
