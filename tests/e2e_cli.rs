@@ -12,6 +12,7 @@ use serial_test::serial;
 struct TestEnv {
     home: PathBuf,
     daemon_addr: String,
+    api_addr: String,
 }
 
 static COMMAND_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -25,16 +26,12 @@ impl TestEnv {
         let home = std::env::temp_dir().join(format!("oxmgr-e2e-{prefix}-{nonce}"));
         fs::create_dir_all(&home).expect("failed to create temporary home");
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind random port");
-        let port = listener
-            .local_addr()
-            .expect("failed to resolve local addr")
-            .port();
-        drop(listener);
-
         Self {
             home,
-            daemon_addr: format!("127.0.0.1:{port}"),
+            daemon_addr: free_local_addr(),
+            // Keep the HTTP API off the per-user default port so tests never
+            // collide with a daemon the developer is already running.
+            api_addr: free_local_addr(),
         }
     }
 
@@ -59,6 +56,7 @@ impl TestEnv {
             .args(args)
             .env("OXMGR_HOME", &self.home)
             .env("OXMGR_DAEMON_ADDR", &self.daemon_addr)
+            .env("OXMGR_API_ADDR", &self.api_addr)
             .env("OXMGR_LOG_MAX_SIZE_MB", "1")
             .env("OXMGR_LOG_MAX_FILES", "3")
             .env("OXMGR_LOG_MAX_DAYS", "1")
@@ -115,6 +113,15 @@ impl TestEnv {
         fs::write(&path, contents).expect("failed to write fixture file");
         path
     }
+}
+
+fn free_local_addr() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("failed to bind random port");
+    let port = listener
+        .local_addr()
+        .expect("failed to resolve local addr")
+        .port();
+    format!("127.0.0.1:{port}")
 }
 
 fn read_command_output(status: ExitStatus, stdout_path: &Path, stderr_path: &Path) -> Output {
@@ -2091,4 +2098,81 @@ fn e2e_missing_target_commands_report_process_not_found() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+#[serial]
+fn e2e_reports_daemon_startup_failure_when_endpoint_is_occupied() {
+    if !should_run_e2e("e2e_reports_daemon_startup_failure_when_endpoint_is_occupied") {
+        return;
+    }
+
+    let env = TestEnv::new("daemon-endpoint-busy");
+    // A listener that never answers pings stands in for a stale socket left
+    // behind by a killed daemon.
+    let squatter = TcpListener::bind(&env.daemon_addr).expect("failed to occupy daemon address");
+
+    let started = Instant::now();
+    let list = env.run(&["list"]);
+    let elapsed = started.elapsed();
+    let stderr = String::from_utf8_lossy(&list.stderr);
+
+    assert!(
+        !list.status.success(),
+        "list should fail while daemon address is occupied"
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "startup failure should be reported promptly, took {elapsed:?}"
+    );
+    assert!(
+        stderr.contains("daemon exited during startup")
+            && stderr.contains("failed to bind daemon endpoint")
+            && stderr.contains(&env.daemon_addr),
+        "expected the daemon's bind error in stderr, got:\n{stderr}"
+    );
+    assert!(
+        env.home.join("logs").join("daemon.log").exists(),
+        "daemon output should be kept in logs/daemon.log"
+    );
+
+    drop(squatter);
+    let list = env.run(&["list"]);
+    assert!(
+        list.status.success(),
+        "daemon should start once the address is free: {}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_daemon_starts_when_api_port_is_occupied() {
+    if !should_run_e2e("e2e_daemon_starts_when_api_port_is_occupied") {
+        return;
+    }
+
+    let env = TestEnv::new("api-port-busy");
+    let _squatter = TcpListener::bind(&env.api_addr).expect("failed to occupy API address");
+
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(25),
+        "--name".to_string(),
+        "api-busy-app".to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start should succeed without the HTTP API: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+
+    let log = fs::read_to_string(env.home.join("logs").join("daemon.log"))
+        .expect("daemon.log should exist");
+    assert!(
+        log.contains("failed to bind webhook API endpoint") && log.contains(&env.api_addr),
+        "daemon.log should explain the disabled API, got:\n{log}"
+    );
 }

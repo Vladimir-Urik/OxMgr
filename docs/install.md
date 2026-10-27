@@ -48,17 +48,7 @@ The `oxmgr-bin` package uses the published Linux musl release artifact for broad
 
 ### APT (Debian/Ubuntu)
 
-Unsigned repository (simple setup):
-
-```bash
-echo "deb [trusted=yes] https://vladimir-urik.github.io/OxMgr/apt stable main" | sudo tee /etc/apt/sources.list.d/oxmgr.list
-sudo apt update
-sudo apt install oxmgr
-```
-
-The published `.deb` packages ship the Linux musl binary to avoid newer glibc runtime requirements on older distributions.
-
-Signed repository (recommended):
+The repository metadata is signed. Install the archive key and reference it with `signed-by`:
 
 ```bash
 sudo install -d -m 0755 /etc/apt/keyrings
@@ -69,6 +59,10 @@ echo "deb [signed-by=/etc/apt/keyrings/oxmgr-archive-keyring.gpg] https://vladim
 sudo apt update
 sudo apt install oxmgr
 ```
+
+The published `.deb` packages ship the Linux musl binary to avoid newer glibc runtime requirements on older distributions.
+
+If you previously added the repository with `[trusted=yes]`, `apt update` warns with `NO_PUBKEY 99A20442326A95A6`. Replace the source line with the signed setup above.
 
 ## Install From Source
 

@@ -6,8 +6,15 @@
 
 - On Windows, every managed process is now assigned to a dedicated Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, guaranteeing that no descendant can outlive its managed root or the daemon. This closes orphan-process gaps that `taskkill /T` alone cannot cover: children of a crashed application, descendants re-parented after an intermediate process exits, processes spawned mid-kill, and trees left behind when the daemon itself is force-killed. After a root exits, surviving descendants get up to `stop_timeout_secs` to finish before the job is terminated; the exit event (and any restart) is deferred until the sweep completes so a new instance never races leftovers for ports or files. If job creation or assignment fails (e.g. nested-job restrictions), oxmgr logs a warning and falls back to the previous `taskkill`-based cleanup. Thanks to @rckok for their contribution in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).
 - Added `--follow` (`-f`) flag support to `oxmgr logs all` (and `oxmgr log all`), streaming live logs concurrently across all managed processes in the background. Each log line is prefixed with the process name (`[<name>]` for unified logs, `[<name>:stdout]` / `[<name>:stderr]` for split logs) so outputs from different services can be distinguished easily. Initial support contributed by @johndoe75 in [#51](https://github.com/Vladimir-Urik/OxMgr/pull/51).
+### Fixed
+
+- When the auto-started daemon fails to start, the CLI now reports the daemon's own error (for example `failed to bind daemon endpoint at 127.0.0.1:<port>: Address in use`) as soon as the daemon exits, instead of waiting silently and printing `daemon did not become ready in time`. Daemon output is kept in `logs/daemon.log` under `OXMGR_HOME`. Addresses the diagnostics part of [#103](https://github.com/Vladimir-Urik/OxMgr/issues/103).
+- A port conflict on the optional HTTP API (pull webhooks, `/metrics`) no longer prevents the daemon from starting; the API is disabled and the reason is logged.
+- The APT install instructions now use the signed repository with `signed-by` instead of `[trusted=yes]`, which produced a `NO_PUBKEY 99A20442326A95A6` warning ([#105](https://github.com/Vladimir-Urik/OxMgr/issues/105)).
 
 ### Dependencies
+
+- Refreshed `Cargo.lock` with `cargo update` (among others `tokio` `1.54.1`, `clap` `4.6.7`, `croner` `4.0.2`, `serde_json` `1.0.154`, `thiserror` `2.0.21`), superseding the open Dependabot PRs.
 
 - Added `windows-sys` `0.61` (with `Win32_Foundation`, `Win32_Security`, `Win32_System_JobObjects`) for Windows targets in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).
 - Bumped `dirs` from `6.0.0` to `7.0.0` by @dependabot[bot] in [#94](https://github.com/Vladimir-Urik/OxMgr/pull/94).

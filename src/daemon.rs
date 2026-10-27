@@ -61,7 +61,15 @@ enum ManagerCommand {
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
     let listener = bind_listener(&config.daemon_addr).await?;
-    let api_listener = bind_api_listener(&config.api_addr).await?;
+    // The HTTP API (pull webhooks, metrics) is optional: a conflict on its port
+    // must not keep the daemon itself from starting.
+    let api_listener = match bind_api_listener(&config.api_addr).await {
+        Ok(listener) => Some(listener),
+        Err(err) => {
+            error!("{err:#}; webhook API and metrics are disabled (set OXMGR_API_ADDR to another address)");
+            None
+        }
+    };
 
     let (exit_tx, mut exit_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = mpsc::unbounded_channel::<()>();
@@ -89,7 +97,9 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     maintenance.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     info!("oxmgr daemon started at {}", config.daemon_addr);
-    info!("oxmgr webhook API started at {}", config.api_addr);
+    if api_listener.is_some() {
+        info!("oxmgr webhook API started at {}", config.api_addr);
+    }
 
     loop {
         tokio::select! {
@@ -109,7 +119,7 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                     }
                 }
             }
-            incoming = api_listener.accept() => {
+            incoming = accept_api(api_listener.as_ref()) => {
                 match incoming {
                     Ok((stream, _)) => {
                         let command_tx = command_tx.clone();
@@ -194,29 +204,94 @@ fn restart_sleep_deadline(next_due_at: Option<TokioInstant>, now: TokioInstant) 
 
 /// Ensures that the local daemon is running, spawning a detached foreground
 /// instance when necessary and waiting briefly for it to become reachable.
+///
+/// The spawned daemon's output goes to `daemon.log` in the log directory, so a
+/// daemon that exits during startup (for example because its endpoint is still
+/// held by another process) is reported with its own error instead of a bare
+/// timeout.
 pub async fn ensure_daemon_running(config: &AppConfig) -> Result<()> {
     if daemon_socket_available(&config.daemon_addr).await {
         return Ok(());
     }
 
     let executable = env::current_exe().context("failed to locate current executable")?;
-    Command::new(executable)
+    let log_path = config.log_dir.join(DAEMON_LOG_FILE);
+    let (stdout, stderr, log_offset) = open_daemon_log(&log_path)?;
+    let mut child = Command::new(executable)
         .arg("daemon")
         .arg("run")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
         .spawn()
         .context("failed to spawn daemon")?;
 
-    for _ in 0..300 {
+    let deadline = TokioInstant::now() + DAEMON_STARTUP_TIMEOUT;
+    while TokioInstant::now() < deadline {
         if daemon_socket_available(&config.daemon_addr).await {
             return Ok(());
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            // Another CLI invocation may have won the race to start the daemon.
+            if daemon_socket_available(&config.daemon_addr).await {
+                return Ok(());
+            }
+            let output = read_daemon_log_since(&log_path, log_offset);
+            anyhow::bail!(
+                "daemon exited during startup ({status}){}\nfull log: {}",
+                format_daemon_output(&output),
+                log_path.display()
+            );
         }
         sleep(Duration::from_millis(100)).await;
     }
 
-    anyhow::bail!("daemon did not become ready in time")
+    anyhow::bail!(
+        "daemon did not become ready at {} within {}s; see {}",
+        config.daemon_addr,
+        DAEMON_STARTUP_TIMEOUT.as_secs(),
+        log_path.display()
+    )
+}
+
+const DAEMON_LOG_FILE: &str = "daemon.log";
+const DAEMON_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+const DAEMON_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn open_daemon_log(path: &std::path::Path) -> Result<(Stdio, Stdio, u64)> {
+    let existing = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    let truncate = existing > DAEMON_LOG_MAX_BYTES;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(!truncate)
+        .write(true)
+        .truncate(truncate)
+        .open(path)
+        .with_context(|| format!("failed to open daemon log {}", path.display()))?;
+    let offset = if truncate { 0 } else { existing };
+    let stderr = file
+        .try_clone()
+        .with_context(|| format!("failed to open daemon log {}", path.display()))?;
+    Ok((Stdio::from(file), Stdio::from(stderr), offset))
+}
+
+fn read_daemon_log_since(path: &std::path::Path, offset: u64) -> String {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let start = usize::try_from(offset).unwrap_or(0).min(bytes.len());
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
+fn format_daemon_output(output: &str) -> String {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let tail = &lines[lines.len().saturating_sub(10)..];
+    format!(":\n{}", tail.join("\n"))
 }
 
 async fn daemon_socket_available(daemon_addr: &str) -> bool {
@@ -235,9 +310,26 @@ async fn bind_listener(daemon_addr: &str) -> Result<TcpListener> {
         return Err(OxmgrError::DaemonAlreadyRunning.into());
     }
 
-    TcpListener::bind(daemon_addr)
-        .await
-        .with_context(|| format!("failed to bind daemon endpoint at {daemon_addr}"))
+    TcpListener::bind(daemon_addr).await.map_err(|err| {
+        let hint = if err.kind() == std::io::ErrorKind::AddrInUse {
+            "; the address is held by another process that does not answer as an oxmgr daemon \
+             (free it or set OXMGR_DAEMON_ADDR to another address)"
+        } else {
+            ""
+        };
+        anyhow::Error::new(err).context(format!(
+            "failed to bind daemon endpoint at {daemon_addr}{hint}"
+        ))
+    })
+}
+
+async fn accept_api(
+    listener: Option<&TcpListener>,
+) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
+    match listener {
+        Some(listener) => listener.accept().await,
+        None => std::future::pending().await,
+    }
 }
 
 async fn bind_api_listener(api_addr: &str) -> Result<TcpListener> {
