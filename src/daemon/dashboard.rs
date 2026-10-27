@@ -662,12 +662,23 @@ struct SocketSlot;
 
 impl SocketSlot {
     fn acquire() -> Option<Self> {
-        OPEN_SOCKETS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |open| {
-                (open < MAX_SOCKETS).then_some(open + 1)
-            })
-            .ok()
-            .map(|_| SocketSlot)
+        // A plain compare-exchange loop: `fetch_update` is deprecated on newer
+        // toolchains and its replacement does not exist on older ones.
+        let mut open = OPEN_SOCKETS.load(Ordering::Acquire);
+        loop {
+            if open >= MAX_SOCKETS {
+                return None;
+            }
+            match OPEN_SOCKETS.compare_exchange_weak(
+                open,
+                open + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(SocketSlot),
+                Err(current) => open = current,
+            }
+        }
     }
 }
 
