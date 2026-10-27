@@ -71,7 +71,11 @@ yay -S oxmgr-bin
 ### APT (Debian/Ubuntu)
 
 ```bash
-echo "deb [trusted=yes] https://vladimir-urik.github.io/OxMgr/apt stable main" | sudo tee /etc/apt/sources.list.d/oxmgr.list
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://vladimir-urik.github.io/OxMgr/apt/keyrings/oxmgr-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/oxmgr-archive-keyring.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/oxmgr-archive-keyring.gpg] https://vladimir-urik.github.io/OxMgr/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/oxmgr.list
 sudo apt update
 sudo apt install oxmgr
 ```
@@ -85,7 +89,7 @@ cargo build --release
 ./target/release/oxmgr --help
 ```
 
-For signed APT setup, local installation, and platform-specific notes, see [docs/install.md](./docs/install.md).
+For local installation, and platform-specific notes, see [docs/install.md](./docs/install.md).
 
 ## Quick Start
 

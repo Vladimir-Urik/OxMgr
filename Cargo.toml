@@ -10,7 +10,7 @@ description = "Oxmgr - lightweight language-agnostic process manager"
 anyhow = "1.0"
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
-croner = "3.0.1"
+croner = "4.0.0"
 dirs = "7.0"
 crossterm = "0.29"
 json5 = "1.3"
@@ -22,25 +22,34 @@ regex = "1.11"
 sysinfo = "0.39"
 thiserror = "2.0"
 tokio = { version = "1.52", features = [
-    "macros",
-    "rt-multi-thread",
-    "net",
-    "process",
-    "signal",
-    "fs",
-    "time",
-    "io-util",
-    "sync",
+  "macros",
+  "rt-multi-thread",
+  "net",
+  "process",
+  "signal",
+  "fs",
+  "time",
+  "io-util",
+  "sync",
 ] }
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+flate2 = { version = "1.0", default-features = false, features = [
+  "rust_backend",
+] }
 url = "2.5"
 base64 = "0.23.1"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["signal", "process", "user"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+] }
 
 [dev-dependencies]
 serial_test = "4.0"
