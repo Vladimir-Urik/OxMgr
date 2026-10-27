@@ -116,8 +116,8 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 - `oxmgr logs <name|id> [-f] [--lines <n>]` (alias: `oxmgr log`)
 - `oxmgr logs all [-f] [--lines <n>]` — prints recent logs for every managed process at once; with `-f` (`--follow`), concurrently streams live logs across all processes prefixed with `[<name>]` (unified logs) or `[<name>:stdout]` / `[<name>:stderr]` (split logs); running `oxmgr logs` without a target prints usage help
 - `oxmgr ui [--interval-ms <n>]`
-- `oxmgr ui tui` — explicitly open terminal UI
-- `oxmgr ui web [--port <n>] [--bind <addr>] [--no-open]` — open web dashboard in browser
+- `oxmgr ui tui`: explicitly open terminal UI
+- `oxmgr ui web [--no-open]`: open the daemon's web dashboard in the browser
 
 
 `list` includes runtime columns such as status, mode, uptime, CPU, RAM, and health. Use `--json` to emit as a JSON array of objects.
@@ -142,16 +142,13 @@ Details and metrics/webhook flow: [Pull, Webhook, and Metrics Guide](./PULL_WEBH
 
 ### Web Dashboard (`oxmgr ui web`)
 
-Opens the daemon's built-in web dashboard in your default browser:
+Checks that the daemon serves the dashboard, prints its URL and opens it in the
+default browser. The dashboard is off unless the daemon runs with `OXMGR_DASHBOARD=1`.
 
 ```bash
-oxmgr ui web                    # opens http://127.0.0.1:46001
-oxmgr ui web --no-open          # print URL without opening browser
+oxmgr ui web            # open in the browser
+oxmgr ui web --no-open  # only print the URL
 ```
-
-Features: real-time process list, live log streaming via SSE, process control, Prometheus metrics.
-
-For authentication setup, API endpoints, and configuration details, see the [Web Dashboard section in UI.md](./UI.md#web-dashboard).
 
 Full UI behavior and panel layout: [UI Guide](./UI.md).
 Foreground runtime details: [Runtime Mode (pm2-runtime style)](./RUNTIME.md).
@@ -221,5 +218,4 @@ Daemon HTTP API:
 - Header: `X-Oxmgr-Secret: <secret>` (or `Authorization: Bearer <secret>`)
 - Daemon bind address: `OXMGR_API_ADDR` (default high localhost port)
 - Metrics response format: Prometheus text exposition
-
-Dashboard authentication and API endpoints are documented in the [Web Dashboard section of UI.md](./UI.md#web-dashboard).
+Dashboard authentication and API endpoints: [Web Dashboard section of UI.md](./UI.md#web-dashboard).

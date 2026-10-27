@@ -83,90 +83,79 @@ Press `l` on a selected service to open the fullscreen log viewer.
 
 # Web Dashboard
 
-`oxmgr ui web` opens a browser-based dashboard with real-time updates via Server-Sent Events (SSE).
+The daemon serves a browser dashboard on its HTTP API address (`OXMGR_API_ADDR`,
+loopback by default) with live updates over Server-Sent Events.
 
-## Start
+## Enable
+
+The dashboard and its `/api/*` routes are **off by default**. Start the daemon with:
 
 ```bash
-oxmgr ui web
-oxmgr ui web --port 8080
-oxmgr ui web --bind 0.0.0.0 --no-open
+OXMGR_DASHBOARD=1 oxmgr daemon run
 ```
 
-Or navigate directly to `http://127.0.0.1:46001` while the daemon is running.
+then open it:
+
+```bash
+oxmgr ui web            # checks the daemon and opens the browser
+oxmgr ui web --no-open  # only print the URL
+```
+
+`/metrics` and `/pull/*` are not affected by this switch.
 
 ## Features
 
-- Real-time process list with status, CPU, RAM, uptime, and health
-- Live log streaming (stdout/stderr/error) via SSE
-- Process control: stop, restart, reload from the browser
-- Prometheus metrics at `/metrics`
-- Responsive design for desktop and mobile
+- Process list with status, CPU, RAM, uptime, restarts and health
+- Last error (stderr tail) of crashed processes
+- Live log streaming (stdout/stderr) via SSE
+- Stop, restart and reload from the browser
 
-## Authentication
+## Security
 
-Configure Basic Auth via `[http_server]` in `oxfile.toml`:
-
-```toml
-[http_server]
-port = "0.0.0.0:46001"
-username = "admin"
-password = "changeme"
-interval_ms = 1000  # refresh interval in ms (200-10000)
-label = "PRODUCTION"  # environment label in header
-label_color = "#ef4444"  # label color (CSS value)
-```
-
-Or via environment variables (take precedence over oxfile):
+- Without credentials the dashboard only answers on a loopback listener, and
+  only to requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]`
+  (protection against DNS rebinding).
+- When `OXMGR_API_ADDR` is not a loopback address, `OXMGR_DASHBOARD_USER` and
+  `OXMGR_DASHBOARD_PASS` are required; otherwise the dashboard answers `403`.
+- Credentials are checked in constant time. Basic Auth is sent in clear text,
+  so put a TLS reverse proxy in front of the dashboard when exposing it.
+- `POST` actions require the `X-Oxmgr-Request` header and, when the browser
+  sends an `Origin`, a same-origin request (CSRF protection).
+- Pages are served with `X-Frame-Options: DENY` and a restrictive
+  Content-Security-Policy; the dashboard loads nothing from other hosts.
+- At most 32 live streams are served at once.
 
 ```bash
+export OXMGR_DASHBOARD=1
 export OXMGR_DASHBOARD_USER="admin"
-export OXMGR_DASHBOARD_PASS="s3cret"
-export OXMGR_DASHBOARD_LABEL="PRODUCTION"
-export OXMGR_DASHBOARD_LABEL_COLOR="#ef4444"
+export OXMGR_DASHBOARD_PASS="{SHA256}$(echo -n 'yourpassword' | openssl dgst -sha256 -binary | base64)"
 ```
 
-Common label colors:
-- Production: `#ef4444` (red)
-- Staging: `#f97316` (orange)
-- Development: `#eab308` (yellow)
-- Local: `#22c55e` (green)
+Password formats: plain text, `{SHA256}<base64>` or `{SHA512}<base64>` (supervisord-compatible).
 
-Password formats:
-- Plain text: `s3cret`
-- SHA256 (supervisord-compatible): `{SHA256}<base64-hash>`
-- SHA512: `{SHA512}<base64-hash>`
+Optional appearance settings:
 
-Generate a SHA256 hash:
-
-```bash
-echo -n 'yourpassword' | openssl dgst -sha256 -binary | base64
-```
+- `OXMGR_DASHBOARD_INTERVAL_MS`: refresh interval (default 2000, clamped to 200..10000)
+- `OXMGR_DASHBOARD_LABEL`, `OXMGR_DASHBOARD_LABEL_COLOR`: environment label in the header, e.g. `PRODUCTION` / `#ef4444`
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Web dashboard HTML |
-| `/api/processes` | GET | JSON list of all processes |
-| `/api/processes/:name` | GET | Single process details |
-| `/api/processes/:name/logs` | GET | Log tail (`?stream=stdout\|stderr\|error`) |
-| `/api/processes/:name/stop` | POST | Stop a process |
-| `/api/processes/:name/restart` | POST | Restart a process |
-| `/api/processes/:name/reload` | POST | Reload a process |
-| `/api/stop-all` | POST | Stop all processes |
-| `/api/events` | GET | SSE stream of real-time updates |
-| `/metrics` | GET | Prometheus metrics |
-| `/health` | GET | Health check endpoint |
+| `/` | GET | Dashboard page |
+| `/api/config` | GET | Dashboard settings (interval, label) |
+| `/api/processes` | GET | JSON list of processes (secrets redacted) |
+| `/api/processes/stream` | GET | SSE stream of the process list (`?interval_ms=`) |
+| `/api/processes/:name` | GET | Single process |
+| `/api/processes/:name/logs` | GET | Log tail (`?stream=stdout\|stderr&lines=200`) |
+| `/api/processes/:name/logs/stream` | GET | SSE log follow (`?stream=stdout\|stderr`) |
+| `/api/events/stream` | GET | SSE event bus (`?subscribe=process:*&process=<name>`) |
+| `/api/processes/:name/stop` | POST | Stop (`all` stops every process) |
+| `/api/processes/:name/restart` | POST | Restart (`all` restarts every process) |
+| `/api/processes/:name/reload` | POST | Reload one process |
 
-## Docker
-
-The Docker image exposes the web dashboard on port 46001:
+From scripts, send the CSRF header with actions:
 
 ```bash
-docker compose up --build
-# open http://localhost:46001
-# credentials: admin / oxmgr-demo
+curl -u admin:secret -H 'X-Oxmgr-Request: 1' -X POST http://127.0.0.1:<port>/api/processes/web/restart
 ```
-
-See [docker-compose.yaml](../docker-compose.yaml) for configuration options.
