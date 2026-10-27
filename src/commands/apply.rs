@@ -451,6 +451,7 @@ mod tests {
             unified_logs: desired.unified_logs,
             cron_restart: None,
             next_cron_restart: None,
+            last_error: None,
         }
     }
 }

@@ -109,31 +109,22 @@ oxmgr ui
 
 Inside `oxmgr ui`, use `/` for live search, `f` to cycle status filters, and `o` to cycle sort order.
 
-Use a config file for repeatable setups:
+### Web dashboard
 
-```toml
-version = 1
-
-[[apps]]
-name = "api"
-command = "node server.js"
-restart_policy = "on_failure"
-max_restarts = 10
-stop_timeout_secs = 5
-```
+The daemon can serve a browser dashboard with live process status, log streaming
+and stop / restart / reload buttons. It is off by default; enable it when
+starting the daemon:
 
 ```bash
-oxmgr validate ./oxfile.toml
-oxmgr apply ./oxfile.toml
-oxmgr apply ./core.toml ./worker.toml
+OXMGR_DASHBOARD=1 oxmgr daemon run
+oxmgr ui web
 ```
 
-Container-style foreground mode:
+It listens on `OXMGR_API_ADDR` (loopback by default). Binding it to another
+interface requires `OXMGR_DASHBOARD_USER` and `OXMGR_DASHBOARD_PASS`. See the
+[Web Dashboard section of the UI guide](./docs/UI.md#web-dashboard).
 
-```bash
-oxmgr runtime ./oxfile.toml
-oxmgr runtime ./ecosystem.config.js
-```
+![OxMgr web dashboard](./docs/screenshots/dashboard.jpg)
 
 ## PM2 Migration
 

@@ -1,8 +1,70 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::process::ManagedProcess;
+use crate::process::{DesiredState, HealthStatus, ManagedProcess, ProcessExitEvent, ProcessStatus};
 
 pub(super) const CRASH_RESTART_WINDOW_SECS: u64 = 5 * 60;
+
+/// Returns `true` when an exit event belongs to the pid currently tracked for
+/// the process, filtering out stale notifications from earlier generations.
+pub(super) fn exit_event_matches_process(
+    process: &ManagedProcess,
+    event: &ProcessExitEvent,
+) -> bool {
+    match process.pid {
+        Some(active_pid) => active_pid == event.pid,
+        // No tracked pid: only trust the event if the process is not expected
+        // to be running, otherwise a newer spawn is already in flight.
+        None => process.desired_state != DesiredState::Running,
+    }
+}
+
+/// Returns `true` when restart policy and restart budget both allow another
+/// automatic restart for this exit.
+pub(super) fn can_auto_restart(
+    process: &ManagedProcess,
+    event: &ProcessExitEvent,
+    exited_successfully: bool,
+) -> bool {
+    !event.wait_error
+        && process.restart_policy.should_restart(exited_successfully)
+        && process.restart_count < process.max_restarts
+}
+
+/// Clears health tracking so a stopped or exited process reports no stale
+/// health verdict.
+pub(super) fn clear_health_state(process: &mut ManagedProcess) {
+    process.health_status = HealthStatus::Unknown;
+    process.health_failures = 0;
+    process.next_health_check = None;
+}
+
+/// Moves a process into the restarting state and reschedules its health check.
+pub(super) fn mark_restarting(process: &mut ManagedProcess) {
+    process.status = ProcessStatus::Restarting;
+    process.restart_count = process.restart_count.saturating_add(1);
+    process.restart_backoff_attempt = process.restart_backoff_attempt.saturating_add(1);
+    process.health_status = HealthStatus::Unknown;
+    process.health_failures = 0;
+    process.next_health_check = process
+        .health_check
+        .as_ref()
+        .map(|check| now_epoch_secs().saturating_add(check.interval_secs.max(1)));
+}
+
+/// Maps an exit event to the terminal status of a process that will not be
+/// restarted.
+pub(super) fn terminal_exit_status(
+    event: &ProcessExitEvent,
+    exited_successfully: bool,
+) -> ProcessStatus {
+    if event.wait_error {
+        ProcessStatus::Errored
+    } else if exited_successfully {
+        ProcessStatus::Stopped
+    } else {
+        ProcessStatus::Crashed
+    }
+}
 
 pub(super) fn now_epoch_secs() -> u64 {
     SystemTime::now()

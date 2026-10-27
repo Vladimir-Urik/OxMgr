@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::str;
 
@@ -11,15 +12,41 @@ use tokio::time::{timeout, Duration};
 use crate::process::{ManagedProcess, ProcessStatus};
 use crate::process_manager::ProcessManager;
 
+use super::dashboard;
 use super::{DaemonSnapshot, ManagerCommand, JSON_CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE};
 
+/// Routes an incoming webhook/API client to the appropriate handler.
+///
+/// Dashboard routes (`/`, `/assets/*`, `/api/*`) first pass
+/// [`dashboard::authorize_request`]; `/metrics` and `/pull/*` pass through
+/// unchanged and `/pull/*` enforces its own webhook secret later.
 pub(super) async fn handle_api_client(
     mut stream: TcpStream,
     snapshot: DaemonSnapshot,
     command_tx: mpsc::UnboundedSender<ManagerCommand>,
 ) -> Result<()> {
-    let request = read_http_request(&mut stream).await?;
-    let response = if let Some(response) = execute_snapshot_api_request(&request, &snapshot).await {
+    let mut request = timeout(REQUEST_READ_DEADLINE, read_http_request(&mut stream))
+        .await
+        .context("timed out while reading HTTP request")??;
+    request.peer = stream.peer_addr().ok().map(|addr| addr.ip());
+    let local_is_loopback = stream
+        .local_addr()
+        .map(|addr| addr.ip().is_loopback())
+        .unwrap_or(false);
+    let settings = dashboard::settings();
+
+    if let Some(rejection) = dashboard::authorize_request(&request, settings, local_is_loopback) {
+        return write_http_response(&mut stream, &rejection).await;
+    }
+
+    let (base, _) = split_path_and_query(&request.path);
+    if base == dashboard::WS_PATH {
+        return dashboard::serve_websocket(stream, &request, snapshot, settings).await;
+    }
+
+    let response = if let Some(response) = dashboard::handle_request(&request, settings) {
+        response
+    } else if let Some(response) = execute_snapshot_api_request(&request, &snapshot).await {
         response
     } else {
         super::send_api_command(&command_tx, request).await?
@@ -31,16 +58,92 @@ pub(super) async fn execute_snapshot_api_request(
     request: &HttpRequest,
     snapshot: &DaemonSnapshot,
 ) -> Option<HttpResponse> {
-    if request.method == "GET" && request.path == "/metrics" {
-        let processes = snapshot.list_processes().await;
-        return Some(HttpResponse::text(
-            200,
-            PROMETHEUS_CONTENT_TYPE,
-            render_prometheus_metrics(&processes),
-        ));
+    if request.method != "GET" {
+        return None;
     }
 
-    None
+    match request.path.as_str() {
+        "/metrics" => {
+            let processes = snapshot.list_processes().await;
+            Some(HttpResponse::text(
+                200,
+                PROMETHEUS_CONTENT_TYPE,
+                render_prometheus_metrics(&processes),
+            ))
+        }
+        path if path.starts_with("/api/") => {
+            Some(execute_api_snapshot_get(request, snapshot).await)
+        }
+        _ => None,
+    }
+}
+
+/// Serves read-only dashboard API endpoints from the daemon snapshot without
+/// acquiring the manager lock: process listing, single-process detail, and log
+/// tails for stdout/stderr/error streams.
+async fn execute_api_snapshot_get(
+    request: &HttpRequest,
+    snapshot: &DaemonSnapshot,
+) -> HttpResponse {
+    let (base, query) = split_path_and_query(&request.path);
+
+    if base == "/api/processes" {
+        let processes = snapshot.list_processes().await;
+        let redacted: Vec<ManagedProcess> = processes
+            .into_iter()
+            .map(|process| process.redacted_for_transport())
+            .collect();
+        return HttpResponse::json(
+            200,
+            serde_json::to_value(redacted)
+                .unwrap_or_else(|_| serde_json::Value::Array(Vec::default())),
+        );
+    }
+
+    let Some(rest) = base.strip_prefix("/api/processes/") else {
+        return HttpResponse::error(404, "not found");
+    };
+    let (name, sub) = match rest.split_once('/') {
+        Some((name, sub)) => (name, Some(sub)),
+        None => (rest, None),
+    };
+    let name = decode_segment(name);
+
+    match sub {
+        None => match snapshot.get_process(&name).await {
+            Some(process) => HttpResponse::json(
+                200,
+                serde_json::to_value(process.redacted_for_transport())
+                    .unwrap_or(serde_json::Value::Null),
+            ),
+            None => HttpResponse::error(404, "service not found"),
+        },
+        Some("logs") => {
+            let Some(process) = snapshot.get_process(&name).await else {
+                return HttpResponse::error(404, "service not found");
+            };
+            let stream = query.get("stream").map_or("stdout", String::as_str);
+            let lines = query
+                .get("lines")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(200)
+                .min(5000);
+            let log_path = match stream {
+                "stderr" | "error" => process.stderr_log,
+                _ => process.stdout_log,
+            };
+            let content = crate::logging::read_last_lines(&log_path, lines).unwrap_or_default();
+            HttpResponse::json(
+                200,
+                json!({
+                    "path": log_path.display().to_string(),
+                    "stream": stream,
+                    "lines": content,
+                }),
+            )
+        }
+        _ => HttpResponse::error(404, "not found"),
+    }
 }
 
 pub(super) async fn execute_api_request(
@@ -49,6 +152,18 @@ pub(super) async fn execute_api_request(
 ) -> HttpResponse {
     if request.method != "POST" {
         return HttpResponse::error(405, "method not allowed");
+    }
+
+    if let Some(rest) = request.path.strip_prefix("/api/processes/") {
+        let (target, action) = match rest.split_once('/') {
+            Some((target, action)) => (target, action.split('?').next().unwrap_or(action)),
+            None => return HttpResponse::error(404, "not found"),
+        };
+        let target = decode_segment(target);
+        if target.is_empty() || action.is_empty() {
+            return HttpResponse::error(404, "not found");
+        }
+        return execute_process_action(&target, action, manager).await;
     }
 
     let Some(target) = request.path.strip_prefix("/pull/") else {
@@ -73,6 +188,102 @@ pub(super) async fn execute_api_request(
     match manager.pull_processes(Some(target)).await {
         Ok(message) => HttpResponse::ok(message),
         Err(err) => HttpResponse::error(500, err.to_string()),
+    }
+}
+
+/// Executes a process mutation (`stop`, `restart`, `reload`) against the
+/// manager. A target of `"all"` applies to every managed process where the
+/// manager exposes a batch operation.
+async fn execute_process_action(
+    target: &str,
+    action: &str,
+    manager: &mut ProcessManager,
+) -> HttpResponse {
+    let result = match action {
+        "stop" => {
+            if target == "all" {
+                manager.stop_all_processes().await.map(|ps| ps.len())
+            } else {
+                manager.stop_process(target).await.map(|_| 1)
+            }
+        }
+        "restart" => {
+            if target == "all" {
+                manager.restart_all_processes().await.map(|ps| ps.len())
+            } else {
+                manager.restart_process(target).await.map(|_| 1)
+            }
+        }
+        "reload" => {
+            if target == "all" {
+                return HttpResponse::error(400, "reload all is not supported");
+            }
+            manager.reload_process(target).await.map(|_| 1)
+        }
+        _ => return HttpResponse::error(404, "unknown action"),
+    };
+
+    match result {
+        Ok(count) => HttpResponse::ok(format!("{action} {count} process(es)")),
+        Err(err) => HttpResponse::error(error_status(&err), err.to_string()),
+    }
+}
+
+/// Splits an HTTP request path into its base path and decoded query parameters.
+pub(super) fn split_path_and_query(
+    path: &str,
+) -> (&str, std::collections::HashMap<String, String>) {
+    match path.split_once('?') {
+        Some((base, query)) => (
+            base,
+            url::form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect(),
+        ),
+        None => (path, HashMap::default()),
+    }
+}
+
+/// Percent-decodes a URL path segment (e.g. a process name). Process names are
+/// restricted to `[a-zA-Z0-9_-]`, so the decoder only needs to handle the
+/// common `%XX` byte escapes emitted by URL-aware clients.
+fn decode_segment(segment: &str) -> String {
+    if !segment.contains('%') {
+        return segment.to_string();
+    }
+    let bytes = segment.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[index + 1]), hex_val(bytes[index + 2])) {
+                out.push((hi << 4) | lo);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Maps a domain error to an HTTP status code: process-not-found style errors
+/// become 404, everything else 500.
+fn error_status(err: &anyhow::Error) -> u16 {
+    if err.downcast_ref::<crate::errors::OxmgrError>().is_some() {
+        404
+    } else {
+        500
     }
 }
 
@@ -244,12 +455,23 @@ pub(super) struct HttpRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) headers: std::collections::HashMap<String, String>,
+    /// Request body. Only read for routes that need one (see
+    /// [`dashboard::reads_body`]); other bodies, such as git webhook payloads,
+    /// are left unread as before.
+    pub(super) body: String,
+    /// Address of the connecting client, used to throttle credential guesses.
+    pub(super) peer: Option<std::net::IpAddr>,
 }
+
+const MAX_BODY_BYTES: usize = 8 * 1024;
+/// Whole-request deadline, so a client dripping bytes cannot hold a task open.
+const REQUEST_READ_DEADLINE: Duration = Duration::from_secs(10);
 
 pub(super) struct HttpResponse {
     pub(super) status_code: u16,
     pub(super) content_type: &'static str,
     pub(super) body: HttpBody,
+    pub(super) headers: std::collections::HashMap<String, String>,
 }
 
 pub(super) enum HttpBody {
@@ -258,7 +480,7 @@ pub(super) enum HttpBody {
 }
 
 impl HttpResponse {
-    fn ok(message: impl Into<String>) -> Self {
+    pub(super) fn ok(message: impl Into<String>) -> Self {
         Self::json(
             200,
             json!({
@@ -268,7 +490,7 @@ impl HttpResponse {
         )
     }
 
-    fn error(status_code: u16, message: impl Into<String>) -> Self {
+    pub(super) fn error(status_code: u16, message: impl Into<String>) -> Self {
         Self::json(
             status_code,
             json!({
@@ -278,19 +500,25 @@ impl HttpResponse {
         )
     }
 
-    fn json(status_code: u16, body: serde_json::Value) -> Self {
+    pub(super) fn json(status_code: u16, body: serde_json::Value) -> Self {
         Self {
             status_code,
             content_type: JSON_CONTENT_TYPE,
             body: HttpBody::Json(body),
+            headers: HashMap::default(),
         }
     }
 
-    fn text(status_code: u16, content_type: &'static str, body: impl Into<String>) -> Self {
+    pub(super) fn text(
+        status_code: u16,
+        content_type: &'static str,
+        body: impl Into<String>,
+    ) -> Self {
         Self {
             status_code,
             content_type,
             body: HttpBody::Text(body.into()),
+            headers: HashMap::default(),
         }
     }
 }
@@ -319,13 +547,14 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         }
     }
 
-    let raw = str::from_utf8(&buffer).context("webhook request is not valid UTF-8")?;
-    let header_end = raw
-        .find("\r\n\r\n")
+    let header_end = buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
         .context("malformed webhook request headers")?;
-    let head = &raw[..header_end];
+    let head =
+        str::from_utf8(&buffer[..header_end]).context("webhook request is not valid UTF-8")?;
 
-    let mut lines = head.split("\r\n");
+    let mut lines = head.lines();
     let request_line = lines
         .next()
         .context("missing webhook request line")?
@@ -341,21 +570,49 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         .context("missing webhook request path")?
         .to_string();
 
-    let mut headers = std::collections::HashMap::new();
+    let mut headers = HashMap::default();
     for line in lines {
         if let Some((name, value)) = line.split_once(':') {
             headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
         }
     }
 
+    let content_length = if dashboard::reads_body(&method, &path) {
+        headers
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0)
+            // An oversized body is not read; the handler then rejects it as invalid.
+            .min(MAX_BODY_BYTES)
+    } else {
+        0
+    };
+    let mut body = buffer[header_end + 4..].to_vec();
+    while body.len() < content_length {
+        let read = timeout(Duration::from_secs(5), stream.read(&mut chunk))
+            .await
+            .context("timed out while reading request body")?
+            .context("failed to read request body")?;
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
+    body.truncate(content_length);
+
     Ok(HttpRequest {
         method,
         path,
         headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+        peer: None,
     })
 }
 
-async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) -> Result<()> {
+pub(super) async fn write_http_response(
+    stream: &mut TcpStream,
+    response: &HttpResponse,
+) -> Result<()> {
     let reason = http_reason_phrase(response.status_code);
     let body_text = match &response.body {
         HttpBody::Json(body) => {
@@ -363,17 +620,40 @@ async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) ->
         }
         HttpBody::Text(body) => body.clone(),
     };
-    let response = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+    let mut response_head = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
         response.status_code,
         reason,
         response.content_type,
         body_text.len(),
-        body_text
     );
+    // The dashboard must not be framed (its buttons stop and restart services)
+    // and its inline page may only talk to the daemon itself.
+    response_head.push_str(
+        "X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n",
+    );
+    if response.content_type == JSON_CONTENT_TYPE {
+        // API answers carry process details; keep them out of browser and proxy caches.
+        response_head.push_str("Cache-Control: no-store\r\n");
+    }
+    if response.content_type == dashboard::HTML_CONTENT_TYPE {
+        response_head.push_str(
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; \
+             style-src 'self'; font-src 'self' data:; img-src 'self' data:; \
+             connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\r\n",
+        );
+    }
+    for (name, value) in &response.headers {
+        response_head.push_str(name);
+        response_head.push_str(": ");
+        response_head.push_str(value);
+        response_head.push_str("\r\n");
+    }
+    response_head.push_str("\r\n");
+    response_head.push_str(&body_text);
 
     stream
-        .write_all(response.as_bytes())
+        .write_all(response_head.as_bytes())
         .await
         .context("failed to write webhook response")?;
     stream
@@ -381,7 +661,27 @@ async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) ->
         .await
         .context("failed to flush webhook response")?;
     let _ = stream.shutdown().await;
+    drain_unread_request(stream).await;
     Ok(())
+}
+
+/// Closing a socket that still holds unread request bytes (for example a git
+/// webhook payload the route never reads) makes the kernel send a reset, and
+/// the client may lose the response it was just sent. Read and discard what is
+/// left, within limits, before the connection is dropped.
+async fn drain_unread_request(stream: &mut TcpStream) {
+    const MAX_DRAIN_BYTES: usize = 1024 * 1024;
+    let mut chunk = [0_u8; 8 * 1024];
+    let mut drained = 0;
+    let _ = timeout(Duration::from_secs(2), async {
+        while drained < MAX_DRAIN_BYTES {
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(read) => drained += read,
+            }
+        }
+    })
+    .await;
 }
 
 fn http_reason_phrase(status_code: u16) -> &'static str {
@@ -389,9 +689,12 @@ fn http_reason_phrase(status_code: u16) -> &'static str {
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     }
 }

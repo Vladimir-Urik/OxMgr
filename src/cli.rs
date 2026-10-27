@@ -87,8 +87,11 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Open the interactive terminal user interface.
+    /// Open the interactive user interface (terminal or web).
     Ui {
+        #[command(subcommand)]
+        command: Option<UiCommand>,
+        /// Refresh interval in milliseconds (for terminal UI).
         #[arg(long, default_value_t = 800)]
         interval_ms: u64,
     },
@@ -274,6 +277,19 @@ pub enum DaemonCommand {
     Run,
     /// Ask a running daemon to stop gracefully.
     Stop,
+}
+
+#[derive(Debug, Subcommand)]
+/// Subcommands for the UI command.
+pub enum UiCommand {
+    /// Open the terminal-based interactive dashboard (default).
+    Tui,
+    /// Open the daemon's web dashboard (needs OXMGR_DASHBOARD=1 on the daemon).
+    Web {
+        /// Print the dashboard URL without opening a browser.
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

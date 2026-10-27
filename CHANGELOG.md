@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added an optional web dashboard served by the daemon on `OXMGR_API_ADDR`: a React + TypeScript app with an overview of running and failing processes, live CPU and memory, a process table grouped by namespace, live logs and stop / restart / reload actions, updated over an authenticated WebSocket, plus `oxmgr ui web` to open it. It is off by default (`OXMGR_DASHBOARD=1` enables it), requires `OXMGR_DASHBOARD_USER` / `OXMGR_DASHBOARD_PASS` when bound to a non-loopback address, signs in with its own screen and an `HttpOnly` session cookie, throttles failed sign-ins, checks credentials in constant time, rejects foreign `Host` headers without credentials, and guards actions and the WebSocket against CSRF and cross-site hijacking. Initial implementation contributed by @aldok10 in [#91](https://github.com/Vladimir-Urik/OxMgr/pull/91).
 - On Windows, every managed process is now assigned to a dedicated Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, guaranteeing that no descendant can outlive its managed root or the daemon. This closes orphan-process gaps that `taskkill /T` alone cannot cover: children of a crashed application, descendants re-parented after an intermediate process exits, processes spawned mid-kill, and trees left behind when the daemon itself is force-killed. After a root exits, surviving descendants get up to `stop_timeout_secs` to finish before the job is terminated; the exit event (and any restart) is deferred until the sweep completes so a new instance never races leftovers for ports or files. If job creation or assignment fails (e.g. nested-job restrictions), oxmgr logs a warning and falls back to the previous `taskkill`-based cleanup. Thanks to @rckok for their contribution in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).
 - Added `--follow` (`-f`) flag support to `oxmgr logs all` (and `oxmgr log all`), streaming live logs concurrently across all managed processes in the background. Each log line is prefixed with the process name (`[<name>]` for unified logs, `[<name>:stdout]` / `[<name>:stderr]` for split logs) so outputs from different services can be distinguished easily. Initial support contributed by @johndoe75 in [#51](https://github.com/Vladimir-Urik/OxMgr/pull/51).
 ### Fixed
@@ -14,6 +15,7 @@
 
 ### Dependencies
 
+- Added `base64` `0.23`, `tokio-tungstenite` `0.30`, `futures-util` `0.3` and `getrandom` `0.4` for the web dashboard (Basic Auth, WebSocket, session tokens) in [#91](https://github.com/Vladimir-Urik/OxMgr/pull/91).
 - Refreshed `Cargo.lock` with `cargo update` (among others `tokio` `1.54.1`, `clap` `4.6.7`, `croner` `4.0.2`, `serde_json` `1.0.154`, `thiserror` `2.0.21`), superseding the open Dependabot PRs.
 
 - Added `windows-sys` `0.61` (with `Win32_Foundation`, `Win32_Security`, `Win32_System_JobObjects`) for Windows targets in [#88](https://github.com/Vladimir-Urik/OxMgr/pull/88).

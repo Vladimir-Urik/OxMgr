@@ -24,6 +24,7 @@ use crate::logging::ProcessLogs;
 use crate::process::ManagedProcess;
 use crate::process_manager::ProcessManager;
 
+mod dashboard;
 mod http;
 
 #[cfg(test)]
@@ -33,9 +34,19 @@ use self::http::{
 };
 use self::http::{execute_api_request, handle_api_client, HttpRequest, HttpResponse};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct DaemonSnapshot {
     processes: Arc<RwLock<Vec<ManagedProcess>>>,
+    event_tx: tokio::sync::broadcast::Sender<std::sync::Arc<BusEvent>>,
+}
+
+impl Default for DaemonSnapshot {
+    fn default() -> Self {
+        Self {
+            processes: Arc::default(),
+            event_tx: crate::events::new_bus(),
+        }
+    }
 }
 
 const DISABLED_RESTART_SLEEP_SECS: u64 = 24 * 60 * 60;
@@ -60,6 +71,7 @@ enum ManagerCommand {
 /// pull triggers and Prometheus scraping.
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
+
     let listener = bind_listener(&config.daemon_addr).await?;
     // The HTTP API (pull webhooks, metrics) is optional: a conflict on its port
     // must not keep the daemon itself from starting.
@@ -76,10 +88,14 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     let (command_tx, mut command_rx) = mpsc::unbounded_channel::<ManagerCommand>();
     let mut manager = ProcessManager::new(config.clone(), exit_tx)?;
     manager.recover_processes().await?;
-    let snapshot = DaemonSnapshot::default();
-    snapshot.publish(&manager).await;
 
     let event_tx = manager.event_tx();
+    let snapshot = DaemonSnapshot {
+        processes: Arc::default(),
+        event_tx: event_tx.clone(),
+    };
+    snapshot.publish(&manager).await;
+
     #[cfg(unix)]
     {
         let socket_path = config.event_socket_path.clone();
@@ -685,14 +701,196 @@ mod tests {
         handle_api_client, render_prometheus_metrics, restart_sleep_deadline, DaemonSnapshot,
         HttpBody, HttpRequest, DISABLED_RESTART_SLEEP_SECS, PROMETHEUS_CONTENT_TYPE,
     };
+
     use crate::config::AppConfig;
     use crate::hash::sha256_hex;
     use crate::ipc::{read_json_line, write_json_line, IpcRequest, IpcResponse};
     use crate::process::{
-        DesiredState, HealthStatus, ManagedProcess, RestartPolicy, StartProcessSpec,
+        DesiredState, HealthStatus, ManagedProcess, ProcessStatus, RestartPolicy, StartProcessSpec,
         DEFAULT_CRASH_RESTART_LIMIT,
     };
     use crate::process_manager::ProcessManager;
+
+    fn http_req(method: &str, path: &str) -> HttpRequest {
+        HttpRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_api_lists_redacted_processes() {
+        let snapshot = snapshot_with_processes(vec![fixture_metrics_process()]);
+        let response = execute_snapshot_api_request(&http_req("GET", "/api/processes"), &snapshot)
+            .await
+            .expect("process list should be served from snapshot");
+        assert_eq!(response.status_code, 200);
+
+        let value = json_body(&response);
+        assert!(value.is_array());
+        let processes = value.as_array().expect("expected array");
+        assert_eq!(processes.len(), 1);
+        assert_eq!(processes[0]["name"], "api");
+        // redacted_for_transport clears env and masks the pull-secret hash.
+        assert_eq!(processes[0]["env"], serde_json::json!({}));
+        assert_eq!(processes[0]["pull_secret_hash"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn snapshot_api_returns_single_process_detail() {
+        let snapshot = snapshot_with_processes(vec![fixture_metrics_process()]);
+        let response =
+            execute_snapshot_api_request(&http_req("GET", "/api/processes/api"), &snapshot)
+                .await
+                .expect("detail should be served from snapshot");
+        assert_eq!(response.status_code, 200);
+        assert_eq!(json_body(&response)["name"], "api");
+        assert_eq!(json_body(&response)["status"], "running");
+
+        let missing =
+            execute_snapshot_api_request(&http_req("GET", "/api/processes/nope"), &snapshot)
+                .await
+                .expect("missing target should 404");
+        assert_eq!(missing.status_code, 404);
+    }
+
+    #[tokio::test]
+    async fn snapshot_api_returns_log_tail_by_stream() {
+        let directory = temp_dir("dashboard-logs");
+        fs::create_dir_all(&directory).expect("failed to create temp log dir");
+        let mut process = fixture_metrics_process();
+        process.stdout_log = directory.join("api.out.log");
+        process.stderr_log = directory.join("api.err.log");
+        fs::write(&process.stdout_log, "out a\nout b\n").expect("write stdout fixture");
+        fs::write(&process.stderr_log, "err a\nerr b\n").expect("write stderr fixture");
+
+        let snapshot = snapshot_with_processes(vec![process]);
+
+        let out = execute_snapshot_api_request(
+            &http_req("GET", "/api/processes/api/logs?stream=stdout&lines=10"),
+            &snapshot,
+        )
+        .await
+        .expect("stdout logs should be served");
+        assert_eq!(out.status_code, 200);
+        assert_eq!(
+            json_body(&out)["lines"],
+            serde_json::json!(["out a", "out b"])
+        );
+        assert_eq!(json_body(&out)["stream"], "stdout");
+
+        let err = execute_snapshot_api_request(
+            &http_req("GET", "/api/processes/api/logs?stream=stderr&lines=10"),
+            &snapshot,
+        )
+        .await
+        .expect("stderr logs should be served");
+        assert_eq!(err.status_code, 200);
+        assert_eq!(
+            json_body(&err)["lines"],
+            serde_json::json!(["err a", "err b"])
+        );
+
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[tokio::test]
+    async fn snapshot_api_logs_unknown_process_returns_404() {
+        let snapshot = snapshot_with_processes(Vec::default());
+        let response = execute_snapshot_api_request(
+            &http_req("GET", "/api/processes/nope/logs?lines=10"),
+            &snapshot,
+        )
+        .await
+        .expect("missing process logs should 404");
+        assert_eq!(response.status_code, 404);
+    }
+
+    // --- dashboard REST API (manager mutation endpoints) ---
+
+    #[tokio::test]
+    async fn executor_stops_process_and_reports_count() {
+        let mut manager = empty_manager("api-stop-action");
+        let _ = start_minimal_service(&mut manager, "api", None, None, None).await;
+
+        let response =
+            execute_api_request(http_req("POST", "/api/processes/api/stop"), &mut manager).await;
+        assert_eq!(response.status_code, 200);
+        assert!(json_body(&response)["ok"].as_bool().unwrap_or(false));
+        assert_eq!(json_body(&response)["message"], "stop 1 process(es)");
+
+        let process = manager
+            .get_process("api")
+            .expect("process should still exist");
+        assert_eq!(process.status.to_string(), "stopped");
+        assert_eq!(process.desired_state.to_string(), "stopped");
+
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn executor_restarts_process() {
+        let mut manager = empty_manager("api-restart-action");
+        let _ = start_minimal_service(&mut manager, "api", None, None, None).await;
+
+        let response =
+            execute_api_request(http_req("POST", "/api/processes/api/restart"), &mut manager).await;
+        assert_eq!(response.status_code, 200);
+        assert_eq!(json_body(&response)["message"], "restart 1 process(es)");
+
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn executor_reloads_process() {
+        let mut manager = empty_manager("api-reload-action");
+        let _ = start_minimal_service(&mut manager, "api", None, None, None).await;
+
+        let response =
+            execute_api_request(http_req("POST", "/api/processes/api/reload"), &mut manager).await;
+        assert_eq!(response.status_code, 200);
+        assert_eq!(json_body(&response)["message"], "reload 1 process(es)");
+
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn executor_handles_stop_all_for_dashboard() {
+        let mut manager = empty_manager("api-stop-all");
+        let _ = start_minimal_service(&mut manager, "api", None, None, None).await;
+        let _ = start_minimal_service(&mut manager, "worker", None, None, None).await;
+
+        let response =
+            execute_api_request(http_req("POST", "/api/processes/all/stop"), &mut manager).await;
+        assert_eq!(response.status_code, 200);
+        assert_eq!(json_body(&response)["message"], "stop 2 process(es)");
+
+        assert_eq!(manager.list_processes().len(), 2);
+        assert!(manager
+            .list_processes()
+            .iter()
+            .all(|p| matches!(p.status, ProcessStatus::Stopped)));
+
+        let _ = manager.shutdown_all().await;
+    }
+
+    #[tokio::test]
+    async fn executor_returns_404_for_unknown_process_and_unknown_action() {
+        let mut manager = empty_manager("api-404");
+        let response =
+            execute_api_request(http_req("POST", "/api/processes/nope/stop"), &mut manager).await;
+        assert_eq!(response.status_code, 404);
+
+        let _ = start_minimal_service(&mut manager, "api", None, None, None).await;
+        let response =
+            execute_api_request(http_req("POST", "/api/processes/api/explode"), &mut manager).await;
+        assert_eq!(response.status_code, 404);
+
+        let _ = manager.shutdown_all().await;
+    }
 
     #[tokio::test]
     async fn execute_api_request_rejects_non_post_method() {
@@ -700,7 +898,9 @@ mod tests {
         let request = HttpRequest {
             method: "GET".to_string(),
             path: "/pull/api".to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -716,7 +916,9 @@ mod tests {
         let request = HttpRequest {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -743,6 +945,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers,
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -773,6 +977,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers,
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -797,7 +1003,9 @@ mod tests {
         let request = HttpRequest {
             method: "GET".to_string(),
             path: "/metrics".to_string(),
-            headers: HashMap::new(),
+            headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_snapshot_api_request(&request, &snapshot)
@@ -888,6 +1096,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers,
+            body: String::new(),
+            peer: None,
         };
 
         assert_eq!(
@@ -902,6 +1112,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers: HashMap::from([("authorization".to_string(), "Bearer token123".to_string())]),
+            body: String::new(),
+            peer: None,
         };
         assert_eq!(extract_api_secret(&request).as_deref(), Some("token123"));
     }
@@ -1248,6 +1460,7 @@ mod tests {
     fn snapshot_with_processes(processes: Vec<ManagedProcess>) -> DaemonSnapshot {
         DaemonSnapshot {
             processes: Arc::new(RwLock::new(processes)),
+            event_tx: crate::events::new_bus(),
         }
     }
 
@@ -1309,6 +1522,7 @@ mod tests {
             unified_logs: false,
             cron_restart: None,
             next_cron_restart: None,
+            last_error: None,
         }
     }
 

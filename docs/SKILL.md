@@ -18,6 +18,7 @@ You use it to:
 - Auto-update services via git pull or webhook
 - Stream real-time lifecycle/log/health events over a local socket (`oxmgr events`)
 - Emit machine-readable output for scripting (`oxmgr list --json`)
+- Monitor via the web dashboard (`OXMGR_DASHBOARD=1` on the daemon, then `oxmgr ui web`)
 
 Install: `npm install -g oxmgr` or see [oxmgr releases](https://github.com/Vladimir-Urik/OxMgr/releases).
 
@@ -56,6 +57,9 @@ oxmgr delete api    # alias: rm
 
 # Interactive TUI
 oxmgr ui
+
+# Web dashboard (daemon must run with OXMGR_DASHBOARD=1)
+oxmgr ui web
 
 # Config workflow
 oxmgr validate ./oxfile.toml
