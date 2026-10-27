@@ -28,7 +28,7 @@ Release publish jobs execute only for the canonical repository:
 - Build Debian packages (`oxmgr_<version>_amd64.deb`, `oxmgr_<version>_arm64.deb`) from the Linux musl binaries
 - Publish GitHub Release assets + `SHA256SUMS`
 - Optionally sign release assets (`.asc`) with GPG
-- Publish npm package (`oxmgr`) when `NPM_TOKEN` is set
+- Publish npm package (`oxmgr`) through npm trusted publishing (OIDC)
 - Update Homebrew tap formula when Homebrew secrets are set
 - Update Scoop bucket manifest when Scoop secrets are set
 - Update the `oxmgr-bin` AUR package when `AUR_SSH_PRIVATE_KEY` is set
@@ -43,7 +43,11 @@ Release publish jobs execute only for the canonical repository:
 
 ### For npm publish
 
-- `NPM_TOKEN`
+No secret. The `oxmgr` package on npmjs.com has a trusted publisher for
+`Vladimir-Urik/OxMgr` with workflow `release.yml`; the `publish-npm` job gets a
+short-lived credential through its `id-token: write` permission and publishes
+with provenance. Renaming the workflow file or moving the repository requires
+updating the trusted publisher on npmjs.com.
 
 ### For Homebrew publish
 
