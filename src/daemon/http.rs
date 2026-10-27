@@ -3,10 +3,8 @@ use std::fmt::Write as _;
 use std::str;
 
 use anyhow::{Context, Result};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::json;
-use sha2::{Digest, Sha256, Sha512};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
@@ -14,389 +12,46 @@ use tokio::time::{timeout, Duration};
 use crate::process::{ManagedProcess, ProcessStatus};
 use crate::process_manager::ProcessManager;
 
+use super::dashboard;
 use super::{DaemonSnapshot, ManagerCommand, JSON_CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Embedded assets (compiled into the binary)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const DASHBOARD_HTML: &str = include_str!("../../web/dashboard.html");
-const DASHBOARD_CSS: &str = include_str!("../../web/dashboard.css");
-const DASHBOARD_JS: &str = include_str!("../../web/dashboard.js");
-const FAVICON_SVG: &str = include_str!("../../web/favicon.svg");
-const BUILD_VERSION: &str = env!("OXMGR_BUILD_VERSION");
-
-// Environment variable names
-const ENV_DASHBOARD_INTERVAL_MS: &str = "OXMGR_DASHBOARD_INTERVAL_MS";
-const ENV_DASHBOARD_LABEL: &str = "OXMGR_DASHBOARD_LABEL";
-const ENV_DASHBOARD_LABEL_COLOR: &str = "OXMGR_DASHBOARD_LABEL_COLOR";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Content types
-// ─────────────────────────────────────────────────────────────────────────────
-
-const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
-const TEXT_PLAIN_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
-const SVG_CONTENT_TYPE: &str = "image/svg+xml; charset=utf-8";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dashboard auth
-// ─────────────────────────────────────────────────────────────────────────────
-
-const ENV_DASHBOARD_USER: &str = "OXMGR_DASHBOARD_USER";
-const ENV_DASHBOARD_PASS: &str = "OXMGR_DASHBOARD_PASS";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SSE framing
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Headroom for SSE frame: `data: ` prefix + terminators.
-const SSE_FRAME_PADDING: usize = 8;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Dashboard page (assembled once, cached)
-// ─────────────────────────────────────────────────────────────────────────────
-
-static DASHBOARD_PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
-/// Returns the dashboard page with assets and version substituted. Cached.
-pub(super) fn render_dashboard_html() -> &'static str {
-    DASHBOARD_PAGE.get_or_init(|| {
-        DASHBOARD_HTML
-            .replace("{{OXMGR_STYLES}}", DASHBOARD_CSS)
-            .replace("{{OXMGR_SCRIPT}}", DASHBOARD_JS)
-            .replace("{{OXMGR_VERSION}}", BUILD_VERSION)
-    })
-}
-
-/// Dashboard credentials from the environment. Auth is enabled only when the
-/// user provides both a username and a password, e.g.:
-///   OXMGR_DASHBOARD_USER=admin OXMGR_DASHBOARD_PASS=s3cret
-fn dashboard_auth() -> Option<(String, String)> {
-    let user = std::env::var(ENV_DASHBOARD_USER).ok()?;
-    let pass = std::env::var(ENV_DASHBOARD_PASS).ok()?;
-    if user.trim().is_empty() || pass.is_empty() {
-        return None;
-    }
-    Some((user, pass))
-}
-
-/// Verifies a password against the configured credential.
+/// Routes an incoming webhook/API client to the appropriate handler.
 ///
-/// Supports multiple formats (supervisord-compatible):
-/// - Plain text: `s3cret`
-/// - SHA256:     `{SHA256}base64hash`
-/// - SHA512:     `{SHA512}base64hash`
-///
-/// Generate hashes with:
-/// ```sh
-/// echo -n 'password' | openssl dgst -sha256 -binary | base64    # {SHA256}
-/// echo -n 'password' | openssl dgst -sha512 -binary | base64    # {SHA512}
-/// ```
-fn verify_password(input: &str, configured: &str) -> bool {
-    /// Helper to compute hash and compare with expected base64.
-    fn check_hash<D: Digest>(input: &str, expected_b64: &str) -> bool {
-        let mut hasher = D::new();
-        hasher.update(input.as_bytes());
-        let digest = hasher.finalize();
-        STANDARD.encode(digest) == expected_b64
-    }
-
-    if let Some(hash) = configured.strip_prefix("{SHA256}") {
-        check_hash::<Sha256>(input, hash)
-    } else if let Some(hash) = configured.strip_prefix("{SHA512}") {
-        check_hash::<Sha512>(input, hash)
-    } else {
-        // Plain text comparison
-        input == configured
-    }
-}
-
-/// Verifies the `Authorization: Basic <base64(user:pass)>` header. Returns
-/// `true` when auth is disabled, or when the provided credentials match.
-fn auth_ok(headers: &std::collections::HashMap<String, String>) -> bool {
-    let Some((expected_user, expected_pass)) = dashboard_auth() else {
-        return true; // Auth disabled
-    };
-
-    headers
-        .get("authorization")
-        .and_then(|auth| {
-            auth.strip_prefix("Basic ")
-                .or_else(|| auth.strip_prefix("basic "))
-        })
-        .and_then(|encoded| STANDARD.decode(encoded.trim()).ok())
-        .and_then(|bytes| String::from_utf8(bytes).ok())
-        .and_then(|decoded| {
-            decoded
-                .split_once(':')
-                .map(|(u, p)| (u.to_owned(), p.to_owned()))
-        })
-        .is_some_and(|(user, pass)| user == expected_user && verify_password(&pass, &expected_pass))
-}
-
-/// A `401 Unauthorized` response with a `WWW-Authenticate` challenge, used to
-/// protect the dashboard and REST API when credentials are configured.
-fn unauthorized_response() -> HttpResponse {
-    let mut response = HttpResponse::error(401, "authentication required");
-    response.content_type = TEXT_PLAIN_CONTENT_TYPE;
-    response.body = HttpBody::Text("authentication required".to_string());
-    response.headers.insert(
-        "WWW-Authenticate".to_string(),
-        "Basic realm=\"oxmgr dashboard\"".to_string(),
-    );
-    response
-}
-
-/// Routes an incoming webhook/API client to the appropriate handler after
-/// applying request middleware.
-///
-/// Middleware chain:
-///   - Basic Auth: protects the dashboard page and all `/api/*` routes when
-///     `OXMGR_DASHBOARD_USER` / `OXMGR_DASHBOARD_PASS` are configured.
-///   - Non-protected routes (`/metrics`, `/pull/*`) pass through unchanged;
-///     `/pull/*` enforces its own webhook-secret check later.
+/// Dashboard routes (`/`, `/assets/*`, `/api/*`) first pass
+/// [`dashboard::authorize_request`]; `/metrics` and `/pull/*` pass through
+/// unchanged and `/pull/*` enforces its own webhook secret later.
 pub(super) async fn handle_api_client(
     mut stream: TcpStream,
     snapshot: DaemonSnapshot,
     command_tx: mpsc::UnboundedSender<ManagerCommand>,
 ) -> Result<()> {
-    let request = read_http_request(&mut stream).await?;
+    let mut request = timeout(REQUEST_READ_DEADLINE, read_http_request(&mut stream))
+        .await
+        .context("timed out while reading HTTP request")??;
+    request.peer = stream.peer_addr().ok().map(|addr| addr.ip());
+    let local_is_loopback = stream
+        .local_addr()
+        .map(|addr| addr.ip().is_loopback())
+        .unwrap_or(false);
+    let settings = dashboard::settings();
 
-    if let Some(resp) = authorize_request(&request) {
-        return write_http_response(&mut stream, &resp).await;
-    }
-
-    let (base, query) = split_path_and_query(&request.path);
-    if base == "/api/processes/stream" {
-        return handle_processes_stream(&mut stream, &snapshot, &query).await;
-    }
-    if base == "/api/events/stream" {
-        return handle_events_stream(&mut stream, &snapshot, &query).await;
-    }
-    if base.ends_with("/logs/stream") {
-        return handle_log_stream(&mut stream, &request, &snapshot).await;
+    if let Some(rejection) = dashboard::authorize_request(&request, settings, local_is_loopback) {
+        return write_http_response(&mut stream, &rejection).await;
     }
 
-    let response = if let Some(response) = execute_snapshot_api_request(&request, &snapshot).await {
+    let (base, _) = split_path_and_query(&request.path);
+    if base == dashboard::WS_PATH {
+        return dashboard::serve_websocket(stream, &request, snapshot, settings).await;
+    }
+
+    let response = if let Some(response) = dashboard::handle_request(&request, settings) {
+        response
+    } else if let Some(response) = execute_snapshot_api_request(&request, &snapshot).await {
         response
     } else {
         super::send_api_command(&command_tx, request).await?
     };
     write_http_response(&mut stream, &response).await
-}
-
-/// Streams the full (redacted) process list over Server-Sent Events. Pushes a
-/// snapshot at a configurable interval so the dashboard updates live over one connection.
-///
-/// Query parameters:
-/// - `interval_ms`: refresh interval in milliseconds (default 2000, clamped to 200..10000)
-async fn handle_processes_stream(
-    stream: &mut TcpStream,
-    snapshot: &DaemonSnapshot,
-    query: &std::collections::HashMap<String, String>,
-) -> Result<()> {
-    // Parse interval from query, default 2000ms, clamp to 200..10000ms
-    let interval_ms = query
-        .get("interval_ms")
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(2000)
-        .clamp(200, 10000);
-
-    let sse_head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
-    stream.write_all(sse_head.as_bytes()).await?;
-    stream.flush().await?;
-
-    loop {
-        let processes = snapshot.list_processes().await;
-        let redacted: Vec<ManagedProcess> = processes
-            .into_iter()
-            .map(|process| process.redacted_for_transport())
-            .collect();
-        let payload = serde_json::to_string(&redacted).unwrap_or_else(|_| "[]".to_string());
-        let frame = format!("data: {payload}\n\n");
-
-        if stream.write_all(frame.as_bytes()).await.is_err() {
-            break; // client disconnected
-        }
-        stream.flush().await?;
-
-        tokio::time::sleep(Duration::from_millis(interval_ms)).await;
-    }
-    Ok(())
-}
-
-/// Streams BusEvent events over Server-Sent Events. Clients receive real-time
-/// process lifecycle events, log lines, and health updates.
-///
-/// Query parameters:
-/// - `subscribe`: comma-separated event patterns (e.g., "process:*,log:*"). Default: all events.
-/// - `process`: filter to events from this process name only. Default: all processes.
-async fn handle_events_stream(
-    stream: &mut TcpStream,
-    snapshot: &DaemonSnapshot,
-    query: &std::collections::HashMap<String, String>,
-) -> Result<()> {
-    use crate::events::EventFilter;
-
-    // Parse filter from query params
-    let subscribe: Vec<String> = query
-        .get("subscribe")
-        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
-        .unwrap_or_default();
-    let process = query.get("process").cloned();
-    let filter = EventFilter { subscribe, process };
-
-    // Subscribe to event bus
-    let mut rx = snapshot.event_tx.subscribe();
-
-    // SSE headers
-    let sse_head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
-    stream.write_all(sse_head.as_bytes()).await?;
-    stream.flush().await?;
-
-    loop {
-        match rx.recv().await {
-            Ok(event) => {
-                if !filter.matches(&event) {
-                    continue;
-                }
-                let payload = serde_json::to_string(&*event).unwrap_or_default();
-                let frame = format!("data: {payload}\n\n");
-                if stream.write_all(frame.as_bytes()).await.is_err() {
-                    break; // client disconnected
-                }
-                stream.flush().await?;
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                tracing::warn!("event stream client lagged, dropped {n} events");
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn handle_log_stream(
-    stream: &mut TcpStream,
-    request: &HttpRequest,
-    snapshot: &DaemonSnapshot,
-) -> Result<()> {
-    let (base, query) = split_path_and_query(&request.path);
-
-    // Parse process name from path
-    let name = base
-        .strip_prefix("/api/processes/")
-        .map(|rest| decode_segment(rest.trim_end_matches("/logs/stream")))
-        .filter(|n| !n.is_empty());
-
-    let Some(name) = name else {
-        return write_http_response(stream, &HttpResponse::error(404, "not found")).await;
-    };
-    let Some(process) = snapshot.get_process(&name).await else {
-        return write_http_response(stream, &HttpResponse::error(404, "service not found")).await;
-    };
-
-    let log_path = match query.get("stream").map(String::as_str) {
-        Some("stderr" | "error") => process.stderr_log,
-        _ => process.stdout_log,
-    };
-
-    // SSE headers
-    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n").await?;
-    stream.flush().await?;
-
-    // Send initial snapshot
-    for line in crate::logging::read_last_lines(&log_path, 200).unwrap_or_default() {
-        write_sse_line(stream, &line).await?;
-    }
-    stream.flush().await?;
-
-    // Follow log with rotation handling
-    let file = tokio::fs::File::open(&log_path).await?;
-    let mut reader = BufReader::new(file);
-    reader.seek(std::io::SeekFrom::End(0)).await?;
-
-    let mut line_buf = String::default();
-    loop {
-        line_buf.clear();
-        match reader.read_line(&mut line_buf).await {
-            Ok(0) => {
-                // EOF: check for truncation (log rotation)
-                let pos = reader.stream_position().await?;
-                if tokio::fs::metadata(&log_path)
-                    .await
-                    .is_ok_and(|m| m.len() < pos)
-                {
-                    reader = BufReader::new(tokio::fs::File::open(&log_path).await?);
-                }
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-            Ok(_) => {
-                let line = line_buf.trim_end_matches(['\n', '\r']);
-                if !line.is_empty() {
-                    write_sse_line(stream, line).await?;
-                    stream.flush().await?;
-                }
-            }
-            Err(err) => {
-                tracing::warn!("log stream read error: {err}, reopening");
-                reader = BufReader::new(tokio::fs::File::open(&log_path).await?);
-                reader.seek(std::io::SeekFrom::End(0)).await?;
-            }
-        }
-    }
-}
-
-/// Writes one log line as a single Server-Sent Events message.
-///
-/// A value carrying embedded newlines becomes several `data:` fields terminated
-/// by one blank line, which the SSE spec defines as a single event whose payload
-/// is those fields joined by `\n`.
-///
-/// Both current callers pre-split their input, so nothing reaches this function
-/// with an embedded newline today. Framing it correctly anyway keeps the
-/// function honest about its own contract: a caller that streams a pre-joined
-/// record cannot silently fragment it into one event per physical line.
-async fn write_sse_line(stream: &mut TcpStream, line: &str) -> Result<()> {
-    stream.write_all(build_sse_frame(line).as_bytes()).await?;
-    Ok(())
-}
-
-/// Builds the wire frame for [`write_sse_line`]. Split out from the socket write
-/// so the framing rules can be asserted without a live connection.
-pub(super) fn build_sse_frame(line: &str) -> String {
-    let mut frame = String::with_capacity(line.len() + SSE_FRAME_PADDING);
-    for field in line.lines() {
-        frame.push_str("data: ");
-        frame.push_str(field);
-        frame.push('\n');
-    }
-    // A line that is empty (or contains only newlines) still needs one `data:`
-    // field, otherwise the frame would be a bare blank line and dispatch nothing.
-    if frame.is_empty() {
-        frame.push_str("data: \n");
-    }
-    frame.push('\n');
-    frame
-}
-
-/// Applies Basic Auth middleware. Returns `Some(HttpResponse)` if authorization
-/// is required and fails, otherwise `None`.
-pub(super) fn authorize_request(request: &HttpRequest) -> Option<HttpResponse> {
-    if needs_basic_auth(&request.path) && !auth_ok(&request.headers) {
-        return Some(unauthorized_response());
-    }
-    None
-}
-
-/// Whether a request path is protected by Basic Auth. The Prometheus metrics
-/// endpoint and git webhook are excluded (metrics is intentionally public and
-/// `/pull/*` uses its own secret mechanism).
-fn needs_basic_auth(path: &str) -> bool {
-    path == "/" || path.starts_with("/api/")
 }
 
 pub(super) async fn execute_snapshot_api_request(
@@ -416,41 +71,11 @@ pub(super) async fn execute_snapshot_api_request(
                 render_prometheus_metrics(&processes),
             ))
         }
-        "/" => Some(HttpResponse::text(
-            200,
-            HTML_CONTENT_TYPE,
-            render_dashboard_html(),
-        )),
-        "/favicon.svg" | "/favicon.ico" => {
-            Some(HttpResponse::text(200, SVG_CONTENT_TYPE, FAVICON_SVG))
-        }
-        "/api/config" => Some(serve_dashboard_config()),
         path if path.starts_with("/api/") => {
             Some(execute_api_snapshot_get(request, snapshot).await)
         }
         _ => None,
     }
-}
-
-/// Returns dashboard configuration from environment variables.
-fn serve_dashboard_config() -> HttpResponse {
-    let interval_ms: u64 = std::env::var(ENV_DASHBOARD_INTERVAL_MS)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2000)
-        .clamp(200, 10000);
-
-    let label = std::env::var(ENV_DASHBOARD_LABEL).ok();
-    let label_color = std::env::var(ENV_DASHBOARD_LABEL_COLOR).ok();
-
-    HttpResponse::json(
-        200,
-        serde_json::json!({
-            "interval_ms": interval_ms,
-            "label": label,
-            "label_color": label_color
-        }),
-    )
 }
 
 /// Serves read-only dashboard API endpoints from the daemon snapshot without
@@ -605,7 +230,9 @@ async fn execute_process_action(
 }
 
 /// Splits an HTTP request path into its base path and decoded query parameters.
-fn split_path_and_query(path: &str) -> (&str, std::collections::HashMap<String, String>) {
+pub(super) fn split_path_and_query(
+    path: &str,
+) -> (&str, std::collections::HashMap<String, String>) {
     match path.split_once('?') {
         Some((base, query)) => (
             base,
@@ -828,7 +455,17 @@ pub(super) struct HttpRequest {
     pub(super) method: String,
     pub(super) path: String,
     pub(super) headers: std::collections::HashMap<String, String>,
+    /// Request body. Only read for routes that need one (see
+    /// [`dashboard::reads_body`]); other bodies, such as git webhook payloads,
+    /// are left unread as before.
+    pub(super) body: String,
+    /// Address of the connecting client, used to throttle credential guesses.
+    pub(super) peer: Option<std::net::IpAddr>,
 }
+
+const MAX_BODY_BYTES: usize = 8 * 1024;
+/// Whole-request deadline, so a client dripping bytes cannot hold a task open.
+const REQUEST_READ_DEADLINE: Duration = Duration::from_secs(10);
 
 pub(super) struct HttpResponse {
     pub(super) status_code: u16,
@@ -843,7 +480,7 @@ pub(super) enum HttpBody {
 }
 
 impl HttpResponse {
-    fn ok(message: impl Into<String>) -> Self {
+    pub(super) fn ok(message: impl Into<String>) -> Self {
         Self::json(
             200,
             json!({
@@ -853,7 +490,7 @@ impl HttpResponse {
         )
     }
 
-    fn error(status_code: u16, message: impl Into<String>) -> Self {
+    pub(super) fn error(status_code: u16, message: impl Into<String>) -> Self {
         Self::json(
             status_code,
             json!({
@@ -863,7 +500,7 @@ impl HttpResponse {
         )
     }
 
-    fn json(status_code: u16, body: serde_json::Value) -> Self {
+    pub(super) fn json(status_code: u16, body: serde_json::Value) -> Self {
         Self {
             status_code,
             content_type: JSON_CONTENT_TYPE,
@@ -872,7 +509,11 @@ impl HttpResponse {
         }
     }
 
-    fn text(status_code: u16, content_type: &'static str, body: impl Into<String>) -> Self {
+    pub(super) fn text(
+        status_code: u16,
+        content_type: &'static str,
+        body: impl Into<String>,
+    ) -> Self {
         Self {
             status_code,
             content_type,
@@ -906,11 +547,12 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         }
     }
 
-    let raw = str::from_utf8(&buffer).context("webhook request is not valid UTF-8")?;
-    let header_end = raw
-        .find("\r\n\r\n")
+    let header_end = buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
         .context("malformed webhook request headers")?;
-    let head = &raw[..header_end];
+    let head =
+        str::from_utf8(&buffer[..header_end]).context("webhook request is not valid UTF-8")?;
 
     let mut lines = head.lines();
     let request_line = lines
@@ -935,14 +577,42 @@ async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         }
     }
 
+    let content_length = if dashboard::reads_body(&method, &path) {
+        headers
+            .get("content-length")
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0)
+            // An oversized body is not read; the handler then rejects it as invalid.
+            .min(MAX_BODY_BYTES)
+    } else {
+        0
+    };
+    let mut body = buffer[header_end + 4..].to_vec();
+    while body.len() < content_length {
+        let read = timeout(Duration::from_secs(5), stream.read(&mut chunk))
+            .await
+            .context("timed out while reading request body")?
+            .context("failed to read request body")?;
+        if read == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
+    body.truncate(content_length);
+
     Ok(HttpRequest {
         method,
         path,
         headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+        peer: None,
     })
 }
 
-async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) -> Result<()> {
+pub(super) async fn write_http_response(
+    stream: &mut TcpStream,
+    response: &HttpResponse,
+) -> Result<()> {
     let reason = http_reason_phrase(response.status_code);
     let body_text = match &response.body {
         HttpBody::Json(body) => {
@@ -957,6 +627,22 @@ async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) ->
         response.content_type,
         body_text.len(),
     );
+    // The dashboard must not be framed (its buttons stop and restart services)
+    // and its inline page may only talk to the daemon itself.
+    response_head.push_str(
+        "X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n",
+    );
+    if response.content_type == JSON_CONTENT_TYPE {
+        // API answers carry process details; keep them out of browser and proxy caches.
+        response_head.push_str("Cache-Control: no-store\r\n");
+    }
+    if response.content_type == dashboard::HTML_CONTENT_TYPE {
+        response_head.push_str(
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; \
+             style-src 'self'; font-src 'self' data:; img-src 'self' data:; \
+             connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\r\n",
+        );
+    }
     for (name, value) in &response.headers {
         response_head.push_str(name);
         response_head.push_str(": ");
@@ -975,7 +661,27 @@ async fn write_http_response(stream: &mut TcpStream, response: &HttpResponse) ->
         .await
         .context("failed to flush webhook response")?;
     let _ = stream.shutdown().await;
+    drain_unread_request(stream).await;
     Ok(())
+}
+
+/// Closing a socket that still holds unread request bytes (for example a git
+/// webhook payload the route never reads) makes the kernel send a reset, and
+/// the client may lose the response it was just sent. Read and discard what is
+/// left, within limits, before the connection is dropped.
+async fn drain_unread_request(stream: &mut TcpStream) {
+    const MAX_DRAIN_BYTES: usize = 1024 * 1024;
+    let mut chunk = [0_u8; 8 * 1024];
+    let mut drained = 0;
+    let _ = timeout(Duration::from_secs(2), async {
+        while drained < MAX_DRAIN_BYTES {
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => break,
+                Ok(read) => drained += read,
+            }
+        }
+    })
+    .await;
 }
 
 fn http_reason_phrase(status_code: u16) -> &'static str {
@@ -983,9 +689,12 @@ fn http_reason_phrase(status_code: u16) -> &'static str {
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        429 => "Too Many Requests",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "OK",
     }
 }

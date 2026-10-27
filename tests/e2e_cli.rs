@@ -13,6 +13,7 @@ struct TestEnv {
     home: PathBuf,
     daemon_addr: String,
     api_addr: String,
+    extra_env: Vec<(String, String)>,
 }
 
 static COMMAND_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -32,7 +33,13 @@ impl TestEnv {
             // Keep the HTTP API off the per-user default port so tests never
             // collide with a daemon the developer is already running.
             api_addr: free_local_addr(),
+            extra_env: Vec::new(),
         }
+    }
+
+    fn with_env(mut self, key: &str, value: &str) -> Self {
+        self.extra_env.push((key.to_string(), value.to_string()));
+        self
     }
 
     fn run(&self, args: &[&str]) -> Output {
@@ -60,6 +67,10 @@ impl TestEnv {
             .env("OXMGR_LOG_MAX_SIZE_MB", "1")
             .env("OXMGR_LOG_MAX_FILES", "3")
             .env("OXMGR_LOG_MAX_DAYS", "1")
+            .env_remove("OXMGR_DASHBOARD")
+            .env_remove("OXMGR_DASHBOARD_USER")
+            .env_remove("OXMGR_DASHBOARD_PASS")
+            .envs(self.extra_env.iter().map(|(k, v)| (k, v)))
             .stdout(Stdio::from(stdout_file))
             .stderr(Stdio::from(stderr_file));
         if let Some(cwd) = cwd {
@@ -2175,4 +2186,524 @@ fn e2e_daemon_starts_when_api_port_is_occupied() {
         log.contains("failed to bind webhook API endpoint") && log.contains(&env.api_addr),
         "daemon.log should explain the disabled API, got:\n{log}"
     );
+}
+
+struct HttpReply {
+    status: u16,
+    head: String,
+    body: String,
+}
+
+impl HttpReply {
+    fn header(&self, name: &str) -> Option<&str> {
+        let prefix = format!("{}:", name.to_ascii_lowercase());
+        self.head
+            .lines()
+            .find_map(|line| line.strip_prefix(&prefix))
+            .map(str::trim)
+    }
+}
+
+/// Minimal HTTP/1.1 client for the daemon API (it always closes the connection).
+fn http_request(addr: &str, method: &str, path: &str, headers: &[(&str, &str)]) -> HttpReply {
+    http_request_with_body(addr, method, path, headers, "")
+}
+
+fn http_request_with_body(
+    addr: &str,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> HttpReply {
+    use std::io::{Read, Write};
+
+    let mut stream = std::net::TcpStream::connect(addr).expect("failed to connect to daemon API");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("failed to set read timeout");
+    let mut request = format!(
+        "{method} {path} HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    if !headers
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("host"))
+    {
+        request.push_str(&format!("Host: {addr}\r\n"));
+    }
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+    stream
+        .write_all(request.as_bytes())
+        .expect("failed to send HTTP request");
+    let mut raw = String::new();
+    stream
+        .read_to_string(&mut raw)
+        .expect("failed to read HTTP response");
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("malformed HTTP response: {raw}"));
+    HttpReply {
+        status,
+        head: head.to_ascii_lowercase(),
+        body: body.to_string(),
+    }
+}
+
+type DashboardSocket = tungstenite::WebSocket<std::net::TcpStream>;
+
+/// Opens the dashboard WebSocket with the given extra headers (Origin, Cookie).
+fn open_dashboard_socket(
+    addr: &str,
+    headers: &[(&str, &str)],
+) -> Result<DashboardSocket, tungstenite::Error> {
+    use tungstenite::client::IntoClientRequest;
+    use tungstenite::http::HeaderValue;
+
+    let mut request = format!("ws://{addr}/api/ws")
+        .into_client_request()
+        .expect("valid WebSocket URL");
+    for (name, value) in headers {
+        request.headers_mut().insert(
+            tungstenite::http::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+            HeaderValue::from_str(value).expect("header value"),
+        );
+    }
+    let stream = std::net::TcpStream::connect(addr).expect("failed to connect to daemon API");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("failed to set read timeout");
+    match tungstenite::client(request, stream) {
+        Ok((socket, _)) => Ok(socket),
+        Err(tungstenite::HandshakeError::Failure(err)) => Err(err),
+        Err(tungstenite::HandshakeError::Interrupted(_)) => {
+            panic!("blocking handshake interrupted")
+        }
+    }
+}
+
+/// Reads JSON text messages until `predicate` accepts one or `timeout` passes.
+fn wait_for_message<F>(
+    socket: &mut DashboardSocket,
+    timeout: Duration,
+    mut predicate: F,
+) -> serde_json::Value
+where
+    F: FnMut(&serde_json::Value) -> bool,
+{
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        match socket.read() {
+            Ok(tungstenite::Message::Text(text)) => {
+                let value: serde_json::Value =
+                    serde_json::from_str(text.as_str()).expect("server sends JSON");
+                if predicate(&value) {
+                    return value;
+                }
+            }
+            Ok(_) => {}
+            Err(err) => panic!("WebSocket closed while waiting for a message: {err}"),
+        }
+    }
+    panic!("no matching WebSocket message within {timeout:?}");
+}
+
+fn rejected_status(result: Result<DashboardSocket, tungstenite::Error>) -> u16 {
+    match result {
+        Ok(_) => panic!("WebSocket upgrade should have been rejected"),
+        Err(tungstenite::Error::Http(response)) => response.status().as_u16(),
+        Err(err) => panic!("unexpected WebSocket error: {err}"),
+    }
+}
+
+fn start_dashboard_app(env: &TestEnv, name: &str) {
+    let start = env.run_vec(vec![
+        "start".to_string(),
+        sleep_command(30),
+        "--name".to_string(),
+        name.to_string(),
+        "--restart".to_string(),
+        "never".to_string(),
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_web_dashboard_is_disabled_by_default() {
+    if !should_run_e2e("e2e_web_dashboard_is_disabled_by_default") {
+        return;
+    }
+
+    let env = TestEnv::new("dashboard-off");
+    start_dashboard_app(&env, "dash-off");
+
+    for path in ["/", "/assets/app.js", "/api/processes", "/api/session"] {
+        let reply = http_request(&env.api_addr, "GET", path, &[]);
+        assert_eq!(
+            reply.status, 404,
+            "{path} should be disabled: {}",
+            reply.body
+        );
+    }
+    let reply = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/processes/dash-off/stop",
+        &[("X-Oxmgr-Request", "1")],
+    );
+    assert_eq!(
+        reply.status, 404,
+        "actions should be disabled: {}",
+        reply.body
+    );
+    let origin = format!("http://{}", env.api_addr);
+    assert_eq!(
+        rejected_status(open_dashboard_socket(
+            &env.api_addr,
+            &[("Origin", origin.as_str())]
+        )),
+        404
+    );
+
+    let metrics = http_request(&env.api_addr, "GET", "/metrics", &[]);
+    assert_eq!(metrics.status, 200, "metrics must stay available");
+    assert!(
+        metrics.body.contains("dash-off"),
+        "metrics body:\n{}",
+        metrics.body
+    );
+
+    // Git hosts send push payloads far larger than the sign-in body limit; the
+    // webhook must still get an HTTP answer instead of a dropped connection.
+    let payload = format!(
+        r#"{{"ref":"refs/heads/main","padding":"{}"}}"#,
+        "x".repeat(64 * 1024)
+    );
+    let webhook = http_request_with_body(
+        &env.api_addr,
+        "POST",
+        "/pull/dash-off",
+        &[("Content-Type", "application/json")],
+        &payload,
+    );
+    assert_eq!(
+        webhook.status, 401,
+        "webhook without secret: {}",
+        webhook.body
+    );
+
+    let ui = env.run(&["ui", "web", "--no-open"]);
+    assert!(
+        !ui.status.success(),
+        "ui web should fail while the dashboard is off"
+    );
+    assert!(
+        String::from_utf8_lossy(&ui.stderr).contains("OXMGR_DASHBOARD=1"),
+        "ui web should explain how to enable the dashboard: {}",
+        String::from_utf8_lossy(&ui.stderr)
+    );
+}
+
+#[test]
+#[serial]
+fn e2e_web_dashboard_streams_over_websocket_and_guards_actions() {
+    if !should_run_e2e("e2e_web_dashboard_streams_over_websocket_and_guards_actions") {
+        return;
+    }
+
+    let env = TestEnv::new("dashboard-on").with_env("OXMGR_DASHBOARD", "1");
+    start_dashboard_app(&env, "dash-app");
+    let origin = format!("http://{}", env.api_addr);
+
+    let page = http_request(&env.api_addr, "GET", "/", &[]);
+    assert_eq!(page.status, 200, "dashboard page: {}", page.body);
+    assert!(
+        page.body.contains("/assets/app.js"),
+        "app shell must load the bundle"
+    );
+    let csp = page.header("content-security-policy").unwrap_or_default();
+    assert!(
+        csp.contains("script-src 'self'") && !csp.contains("unsafe-inline"),
+        "CSP: {csp}"
+    );
+    assert_eq!(page.header("x-frame-options"), Some("deny"));
+    let script = http_request(&env.api_addr, "GET", "/assets/app.js", &[]);
+    assert_eq!(script.status, 200);
+    assert!(script.head.contains("content-type: text/javascript"));
+
+    let rebinding = http_request(&env.api_addr, "GET", "/", &[("Host", "evil.example")]);
+    assert_eq!(rebinding.status, 403, "foreign Host must be rejected");
+
+    assert_eq!(
+        rejected_status(open_dashboard_socket(&env.api_addr, &[])),
+        403,
+        "WebSocket without Origin"
+    );
+    assert_eq!(
+        rejected_status(open_dashboard_socket(
+            &env.api_addr,
+            &[("Origin", "http://evil.example")]
+        )),
+        403,
+        "cross-site WebSocket hijacking must be rejected"
+    );
+
+    let mut socket = open_dashboard_socket(&env.api_addr, &[("Origin", origin.as_str())])
+        .expect("same-origin WebSocket should connect");
+    let hello = wait_for_message(&mut socket, Duration::from_secs(5), |m| {
+        m["type"] == "hello"
+    });
+    assert!(hello["version"].is_string());
+    let list = wait_for_message(&mut socket, Duration::from_secs(5), |m| {
+        m["type"] == "processes"
+    });
+    let app = list["data"]
+        .as_array()
+        .and_then(|items| items.iter().find(|p| p["name"] == "dash-app"))
+        .unwrap_or_else(|| panic!("dash-app missing from {list}"))
+        .clone();
+    assert!(
+        app["env"].as_object().is_some_and(|env| env.is_empty()),
+        "env must be redacted"
+    );
+    let pid_before = app["pid"].as_u64().expect("running app has a pid");
+
+    let csrf = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/processes/dash-app/restart",
+        &[],
+    );
+    assert_eq!(
+        csrf.status, 403,
+        "action without X-Oxmgr-Request must be rejected"
+    );
+    let cross = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/processes/dash-app/restart",
+        &[("X-Oxmgr-Request", "1"), ("Origin", "http://evil.example")],
+    );
+    assert_eq!(cross.status, 403, "cross-origin action must be rejected");
+
+    let restart = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/processes/dash-app/restart",
+        &[("X-Oxmgr-Request", "1"), ("Origin", origin.as_str())],
+    );
+    assert_eq!(restart.status, 200, "restart: {}", restart.body);
+
+    let event = wait_for_message(&mut socket, Duration::from_secs(10), |m| {
+        m["type"] == "event" && m["data"]["process"]["name"] == "dash-app"
+    });
+    assert!(
+        event["data"]["event"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("process:")),
+        "lifecycle event expected, got {event}"
+    );
+    wait_for_message(&mut socket, Duration::from_secs(10), |m| {
+        m["type"] == "processes"
+            && m["data"].as_array().is_some_and(|items| {
+                items.iter().any(|p| {
+                    p["name"] == "dash-app"
+                        && p["pid"].as_u64().is_some_and(|pid| pid != pid_before)
+                })
+            })
+    });
+    let _ = socket.close(None);
+
+    let stop = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/processes/dash-app/stop",
+        &[("X-Oxmgr-Request", "1")],
+    );
+    assert_eq!(stop.status, 200, "stop: {}", stop.body);
+    let status = env.run(&["status", "dash-app"]);
+    assert!(
+        String::from_utf8_lossy(&status.stdout)
+            .to_ascii_lowercase()
+            .contains("stopped"),
+        "process should be stopped: {}",
+        String::from_utf8_lossy(&status.stdout)
+    );
+
+    // The dashboard's Start button sends restart for a stopped process.
+    let start = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/processes/dash-app/restart",
+        &[("X-Oxmgr-Request", "1")],
+    );
+    assert_eq!(start.status, 200, "start: {}", start.body);
+    let detail = http_request(&env.api_addr, "GET", "/api/processes/dash-app", &[]);
+    assert!(
+        detail.body.contains(r#""status":"running""#),
+        "{}",
+        detail.body
+    );
+    assert_eq!(detail.header("cache-control"), Some("no-store"));
+
+    let ui = env.run(&["ui", "web", "--no-open"]);
+    assert!(
+        ui.status.success(),
+        "ui web: {}",
+        String::from_utf8_lossy(&ui.stderr)
+    );
+    assert!(String::from_utf8_lossy(&ui.stdout).contains(&env.api_addr));
+}
+
+#[test]
+#[serial]
+fn e2e_web_dashboard_sign_in_session_and_authenticated_websocket() {
+    if !should_run_e2e("e2e_web_dashboard_sign_in_session_and_authenticated_websocket") {
+        return;
+    }
+
+    let env = TestEnv::new("dashboard-auth")
+        .with_env("OXMGR_DASHBOARD", "1")
+        .with_env("OXMGR_DASHBOARD_USER", "admin")
+        .with_env("OXMGR_DASHBOARD_PASS", "s3cret");
+    start_dashboard_app(&env, "dash-auth");
+    let origin = format!("http://{}", env.api_addr);
+    let csrf = ("X-Oxmgr-Request", "1");
+
+    // The app shell renders the sign-in screen, so it loads without a session.
+    assert_eq!(http_request(&env.api_addr, "GET", "/", &[]).status, 200);
+    let session = http_request(&env.api_addr, "GET", "/api/session", &[]);
+    assert_eq!(session.status, 401);
+    assert!(
+        session.body.contains(r#""auth_required":true"#),
+        "{}",
+        session.body
+    );
+
+    let anonymous = http_request(&env.api_addr, "GET", "/api/processes", &[]);
+    assert_eq!(anonymous.status, 401);
+    assert!(
+        anonymous.header("www-authenticate").is_none(),
+        "no browser Basic Auth popup; the app renders its own sign-in"
+    );
+    assert_eq!(
+        rejected_status(open_dashboard_socket(
+            &env.api_addr,
+            &[("Origin", origin.as_str())]
+        )),
+        401,
+        "WebSocket needs a session"
+    );
+
+    let wrong = http_request_with_body(
+        &env.api_addr,
+        "POST",
+        "/api/login",
+        &[csrf],
+        r#"{"username":"admin","password":"wrong"}"#,
+    );
+    assert_eq!(wrong.status, 401);
+    let no_csrf = http_request_with_body(
+        &env.api_addr,
+        "POST",
+        "/api/login",
+        &[],
+        r#"{"username":"admin","password":"s3cret"}"#,
+    );
+    assert_eq!(no_csrf.status, 403, "login without X-Oxmgr-Request");
+
+    let login = http_request_with_body(
+        &env.api_addr,
+        "POST",
+        "/api/login",
+        &[csrf, ("Origin", origin.as_str())],
+        r#"{"username":"admin","password":"s3cret","remember":true}"#,
+    );
+    assert_eq!(login.status, 200, "login: {}", login.body);
+    let set_cookie = login.header("set-cookie").expect("session cookie");
+    assert!(set_cookie.contains("httponly") && set_cookie.contains("samesite=strict"));
+    // Header values were lower-cased by the helper; the token is hex, so it survives.
+    let cookie = set_cookie
+        .split(';')
+        .next()
+        .expect("cookie pair")
+        .to_string();
+
+    let session = http_request(
+        &env.api_addr,
+        "GET",
+        "/api/session",
+        &[("Cookie", cookie.as_str())],
+    );
+    assert_eq!(session.status, 200);
+    let list = http_request(
+        &env.api_addr,
+        "GET",
+        "/api/processes",
+        &[("Cookie", cookie.as_str())],
+    );
+    assert_eq!(list.status, 200);
+    assert!(list.body.contains("dash-auth"));
+
+    let mut socket = open_dashboard_socket(
+        &env.api_addr,
+        &[("Origin", origin.as_str()), ("Cookie", cookie.as_str())],
+    )
+    .expect("signed-in WebSocket should connect");
+    wait_for_message(&mut socket, Duration::from_secs(5), |m| {
+        m["type"] == "processes"
+    });
+
+    // Basic Auth keeps working for scripts. admin:s3cret
+    let basic = http_request(
+        &env.api_addr,
+        "GET",
+        "/api/processes",
+        &[("Authorization", "Basic YWRtaW46czNjcmV0")],
+    );
+    assert_eq!(basic.status, 200);
+
+    let logout = http_request(
+        &env.api_addr,
+        "POST",
+        "/api/logout",
+        &[csrf, ("Cookie", cookie.as_str())],
+    );
+    assert_eq!(logout.status, 200);
+    let after = http_request(
+        &env.api_addr,
+        "GET",
+        "/api/processes",
+        &[("Cookie", cookie.as_str())],
+    );
+    assert_eq!(after.status, 401, "revoked session must not authorize");
+
+    // The open socket notices the revoked session and closes.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut closed = false;
+    while Instant::now() < deadline {
+        match socket.read() {
+            Ok(tungstenite::Message::Close(_)) | Err(_) => {
+                closed = true;
+                break;
+            }
+            Ok(_) => {}
+        }
+    }
+    assert!(closed, "WebSocket should close after sign-out");
+
+    let metrics = http_request(&env.api_addr, "GET", "/metrics", &[]);
+    assert_eq!(metrics.status, 200, "metrics stay public");
 }

@@ -284,15 +284,9 @@ pub enum DaemonCommand {
 pub enum UiCommand {
     /// Open the terminal-based interactive dashboard (default).
     Tui,
-    /// Open the web dashboard in the default browser.
+    /// Open the daemon's web dashboard (needs OXMGR_DASHBOARD=1 on the daemon).
     Web {
-        /// Port to bind the web server to.
-        #[arg(long, default_value_t = 46001)]
-        port: u16,
-        /// Address to bind to.
-        #[arg(long, default_value = "127.0.0.1")]
-        bind: String,
-        /// Skip opening the browser automatically.
+        /// Print the dashboard URL without opening a browser.
         #[arg(long)]
         no_open: bool,
     },

@@ -40,6 +40,9 @@ flate2 = { version = "1.0", default-features = false, features = [
 ] }
 url = "2.5"
 base64 = "0.23.1"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+getrandom = "0.4"
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["signal", "process", "user"] }
@@ -52,6 +55,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 serial_test = "4.0"
 
 [profile.release]

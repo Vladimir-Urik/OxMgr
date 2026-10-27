@@ -46,11 +46,7 @@ pub(crate) async fn run(
     interval_ms: u64,
 ) -> Result<()> {
     match command {
-        Some(UiCommand::Web {
-            port,
-            bind,
-            no_open,
-        }) => web::run(config, &bind, port, no_open).await,
+        Some(UiCommand::Web { no_open }) => web::run(config, no_open).await,
         Some(UiCommand::Tui) | None => run_tui(config, interval_ms).await,
     }
 }

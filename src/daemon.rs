@@ -23,8 +23,8 @@ use crate::ipc::{read_json_line, send_request, write_json_line, IpcRequest, IpcR
 use crate::logging::ProcessLogs;
 use crate::process::ManagedProcess;
 use crate::process_manager::ProcessManager;
-use crate::signal::ShutdownListener;
 
+mod dashboard;
 mod http;
 
 #[cfg(test)]
@@ -69,9 +69,6 @@ enum ManagerCommand {
 /// The daemon owns process lifecycle management, serves the local IPC socket
 /// used by the CLI, and exposes the lightweight HTTP API used for authenticated
 /// pull triggers and Prometheus scraping.
-///
-/// Note: `[http_server]` config from oxfile.toml is applied in main.rs before
-/// AppConfig is loaded, so port/auth settings are already in env vars here.
 pub async fn run_foreground(config: AppConfig) -> Result<()> {
     config.ensure_layout()?;
 
@@ -114,11 +111,6 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
     )));
     let mut maintenance = tokio::time::interval(Duration::from_secs(2));
     maintenance.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    // Registered once, before the loop: SIGTERM is what `docker stop` and
-    // service supervisors send, and as PID 1 the daemon gets no default
-    // disposition, so it must handle the signal explicitly or be SIGKILLed.
-    let mut shutdown_signals = ShutdownListener::install();
 
     info!("oxmgr daemon started at {}", config.daemon_addr);
     if api_listener.is_some() {
@@ -201,8 +193,11 @@ pub async fn run_foreground(config: AppConfig) -> Result<()> {
                 snapshot.publish(&manager).await;
                 break;
             }
-            signal_name = shutdown_signals.recv() => {
-                info!("received {signal_name}; stopping managed processes");
+            ctrl = tokio::signal::ctrl_c() => {
+                if let Err(err) = ctrl {
+                    warn!("failed to wait for CTRL-C signal: {err}");
+                }
+                info!("received shutdown signal; stopping managed processes");
                 let _ = event_tx.send(std::sync::Arc::new(BusEvent::daemon_shutdown()));
                 manager.shutdown_all().await?;
                 snapshot.publish(&manager).await;
@@ -691,7 +686,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command as StdCommand;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -700,17 +695,12 @@ mod tests {
     use tokio::sync::RwLock;
     use tokio::time::Instant as TokioInstant;
 
-    use super::http::{authorize_request, build_sse_frame, render_dashboard_html};
     use super::{
         daemon_socket_available, escape_prometheus_label_value, execute_api_request,
         execute_snapshot_api_request, execute_snapshot_request, extract_api_secret,
         handle_api_client, render_prometheus_metrics, restart_sleep_deadline, DaemonSnapshot,
         HttpBody, HttpRequest, DISABLED_RESTART_SLEEP_SECS, PROMETHEUS_CONTENT_TYPE,
     };
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-
-    const ENV_DASHBOARD_USER: &str = "OXMGR_DASHBOARD_USER";
-    const ENV_DASHBOARD_PASS: &str = "OXMGR_DASHBOARD_PASS";
 
     use crate::config::AppConfig;
     use crate::hash::sha256_hex;
@@ -721,202 +711,14 @@ mod tests {
     };
     use crate::process_manager::ProcessManager;
 
-    fn env_mutex() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    fn restore_env(key: &str, previous: Option<String>) {
-        if let Some(value) = previous {
-            std::env::set_var(key, value);
-        } else {
-            std::env::remove_var(key);
-        }
-    }
-
     fn http_req(method: &str, path: &str) -> HttpRequest {
         HttpRequest {
             method: method.to_string(),
             path: path.to_string(),
             headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         }
-    }
-
-    fn http_req_with_headers(
-        method: &str,
-        path: &str,
-        headers: HashMap<String, String>,
-    ) -> HttpRequest {
-        HttpRequest {
-            method: method.to_string(),
-            path: path.to_string(),
-            headers,
-        }
-    }
-
-    /// Guards template drift: the renderer substitutes named tokens, so a
-    /// renamed or deleted token in `web/dashboard.html` would otherwise ship a
-    /// page with no styles, no behaviour, or a literal token in the title.
-    #[test]
-    fn dashboard_page_substitutes_every_template_token() {
-        let page = render_dashboard_html();
-
-        assert!(
-            !page.contains("{{OXMGR_"),
-            "dashboard page still contains an unsubstituted template token"
-        );
-        // Marker rules from dashboard.css and functions from dashboard.js: proof
-        // the assets were inlined rather than merely stripped of their tokens.
-        assert!(page.contains("--bg-panel"), "stylesheet was not inlined");
-        assert!(
-            page.contains("EventSource"),
-            "dashboard script was not inlined"
-        );
-        assert!(
-            page.contains(&format!("v{}", env!("OXMGR_BUILD_VERSION"))),
-            "build version was not substituted into the header"
-        );
-    }
-
-    #[test]
-    fn sse_frame_wraps_a_single_line_in_one_event() {
-        assert_eq!(build_sse_frame("hello"), "data: hello\n\n");
-    }
-
-    /// Pins the contract that made the framing worth fixing: terminating every
-    /// field with its own blank line would dispatch one event per physical line,
-    /// fragmenting a multi-line record (a stack trace, say) at the browser.
-    #[test]
-    fn sse_frame_keeps_a_multi_line_record_in_one_event() {
-        let frame = build_sse_frame("panic\n  at foo\n  at bar");
-        assert_eq!(frame, "data: panic\ndata:   at foo\ndata:   at bar\n\n");
-        // One trailing blank line means exactly one dispatched event.
-        assert_eq!(frame.matches("\n\n").count(), 1);
-    }
-
-    #[test]
-    fn sse_frame_strips_carriage_returns_from_crlf_logs() {
-        assert_eq!(
-            build_sse_frame("first\r\nsecond"),
-            "data: first\ndata: second\n\n"
-        );
-    }
-
-    #[test]
-    fn sse_frame_still_dispatches_an_empty_line() {
-        // Without the explicit empty field this would be a bare blank line,
-        // which carries no `data:` and dispatches nothing.
-        assert_eq!(build_sse_frame(""), "data: \n\n");
-    }
-
-    #[tokio::test]
-    async fn dashboard_api_requires_basic_auth_when_configured() {
-        // Serialize with other tests that mutate env vars to avoid clobbering.
-        let _guard = env_mutex().lock().expect("env lock");
-        let old_user = std::env::var(ENV_DASHBOARD_USER).ok();
-        let old_pass = std::env::var(ENV_DASHBOARD_PASS).ok();
-        std::env::set_var(ENV_DASHBOARD_USER, "admin");
-        std::env::set_var(ENV_DASHBOARD_PASS, "s3cret");
-
-        // Without credentials -> 401 + WWW-Authenticate challenge.
-        let denied = authorize_request(&http_req("GET", "/"))
-            .expect("root should require auth when configured");
-        assert_eq!(denied.status_code, 401);
-        assert!(denied
-            .headers
-            .get("WWW-Authenticate")
-            .is_some_and(|v| v.contains("Basic")));
-
-        let denied_api = authorize_request(&http_req("GET", "/api/processes"))
-            .expect("api should require auth when configured");
-        assert_eq!(denied_api.status_code, 401);
-
-        // Wrong credentials -> 401.
-        let mut wrong = HashMap::default();
-        wrong.insert(
-            "authorization".to_string(),
-            format!("Basic {}", STANDARD.encode("admin:wrong")),
-        );
-        let wrong_resp = authorize_request(&http_req_with_headers("GET", "/api/processes", wrong))
-            .expect("api should require auth when configured");
-        assert_eq!(wrong_resp.status_code, 401);
-
-        // Correct credentials -> None (passes middleware).
-        let mut ok_headers = HashMap::default();
-        ok_headers.insert(
-            "authorization".to_string(),
-            format!("Basic {}", STANDARD.encode("admin:s3cret")),
-        );
-        let ok = authorize_request(&http_req_with_headers("GET", "/api/processes", ok_headers));
-        assert!(ok.is_none(), "correct credentials should pass middleware");
-
-        // Metrics is NOT protected.
-        let metrics = authorize_request(&http_req("GET", "/metrics"));
-        assert!(metrics.is_none(), "metrics should not require basic auth");
-
-        // /pull/* is not basic-auth protected (uses webhook secret instead).
-        let pull = authorize_request(&http_req("POST", "/pull/api"));
-        assert!(pull.is_none(), "/pull/* should not require basic auth");
-
-        // Restore env.
-        restore_env(ENV_DASHBOARD_USER, old_user);
-        restore_env(ENV_DASHBOARD_PASS, old_pass);
-    }
-
-    #[tokio::test]
-    async fn dashboard_api_accepts_hashed_passwords() {
-        // Serialize with other tests that mutate env vars to avoid clobbering.
-        let _guard = env_mutex().lock().expect("env lock");
-        let old_user = std::env::var(ENV_DASHBOARD_USER).ok();
-        let old_pass = std::env::var(ENV_DASHBOARD_PASS).ok();
-        std::env::set_var(ENV_DASHBOARD_USER, "admin");
-
-        // Test each hash algorithm with "s3cret" as the password.
-        // Generate hashes: echo -n 's3cret' | openssl dgst -<algo> -binary | base64
-        let test_cases = [
-            ("{SHA256}HsHCa1DV08WNlYMYGvgHZlX+AHVr9yhZQLo2cPmfy6A=", "SHA256"),
-            ("{SHA512}lcia3d5QY1fsXv0O5BrCQe/W+xAJp2gMFQHqgXA0K4y/Dy2Ti1YpVJDxnx/F+ijQmxWE6qCcmmsvd3YjKZzVIQ==", "SHA512"),
-        ];
-
-        for (hash, algo) in test_cases {
-            std::env::set_var(ENV_DASHBOARD_PASS, hash);
-
-            // Wrong password -> 401.
-            let mut wrong = HashMap::default();
-            wrong.insert(
-                "authorization".to_string(),
-                format!("Basic {}", STANDARD.encode("admin:wrongpass")),
-            );
-            let wrong_resp =
-                authorize_request(&http_req_with_headers("GET", "/api/processes", wrong))
-                    .unwrap_or_else(|| panic!("{algo}: wrong password should be rejected"));
-            assert_eq!(wrong_resp.status_code, 401, "{algo}: expected 401");
-
-            // Correct password -> passes.
-            let mut ok_headers = HashMap::default();
-            ok_headers.insert(
-                "authorization".to_string(),
-                format!("Basic {}", STANDARD.encode("admin:s3cret")),
-            );
-            let ok = authorize_request(&http_req_with_headers("GET", "/api/processes", ok_headers));
-            assert!(ok.is_none(), "{algo}: correct password should pass");
-        }
-
-        // Restore env.
-        restore_env(ENV_DASHBOARD_USER, old_user);
-        restore_env(ENV_DASHBOARD_PASS, old_pass);
-    }
-
-    #[tokio::test]
-    async fn snapshot_api_serves_dashboard_html_at_root() {
-        let snapshot = snapshot_with_processes(Vec::default());
-        let response = execute_snapshot_api_request(&http_req("GET", "/"), &snapshot)
-            .await
-            .expect("root should be served from snapshot");
-        assert_eq!(response.status_code, 200);
-        assert!(response.content_type.starts_with("text/html"));
-        let body = text_body(&response);
-        assert!(body.contains("<title>OxMgr Dashboard</title>"));
     }
 
     #[tokio::test]
@@ -1097,6 +899,8 @@ mod tests {
             method: "GET".to_string(),
             path: "/pull/api".to_string(),
             headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -1113,6 +917,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -1139,6 +945,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers,
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -1169,6 +977,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers,
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_api_request(request, &mut manager).await;
@@ -1194,6 +1004,8 @@ mod tests {
             method: "GET".to_string(),
             path: "/metrics".to_string(),
             headers: HashMap::default(),
+            body: String::new(),
+            peer: None,
         };
 
         let response = execute_snapshot_api_request(&request, &snapshot)
@@ -1284,6 +1096,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers,
+            body: String::new(),
+            peer: None,
         };
 
         assert_eq!(
@@ -1298,6 +1112,8 @@ mod tests {
             method: "POST".to_string(),
             path: "/pull/api".to_string(),
             headers: HashMap::from([("authorization".to_string(), "Bearer token123".to_string())]),
+            body: String::new(),
+            peer: None,
         };
         assert_eq!(extract_api_secret(&request).as_deref(), Some("token123"));
     }

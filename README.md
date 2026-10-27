@@ -10,8 +10,6 @@ Use it to run, supervise, reload, and monitor long-running services on Linux, ma
 
 Latest published benchmark snapshots: [BENCHMARK.md](./BENCHMARK.md) and [benchmark.json](./benchmark.json)
 
-![OxMgr Dashboard](docs/screenshots/dashboard.png)
-
 ## Why Oxmgr
 
 - Language-agnostic: manage any executable, not just Node.js apps
@@ -113,63 +111,20 @@ Inside `oxmgr ui`, use `/` for live search, `f` to cycle status filters, and `o`
 
 ### Web dashboard
 
-Open the web dashboard in your browser:
+The daemon can serve a browser dashboard with live process status, log streaming
+and stop / restart / reload buttons. It is off by default; enable it when
+starting the daemon:
 
 ```bash
+OXMGR_DASHBOARD=1 oxmgr daemon run
 oxmgr ui web
 ```
 
-Or manually navigate to `http://127.0.0.1:46001` while the daemon is running.
+It listens on `OXMGR_API_ADDR` (loopback by default). Binding it to another
+interface requires `OXMGR_DASHBOARD_USER` and `OXMGR_DASHBOARD_PASS`. See the
+[Web Dashboard section of the UI guide](./docs/UI.md#web-dashboard).
 
-The dashboard shows process status, CPU/RAM usage, health, and log tails, and
-lets you stop, restart, or reload processes from the browser. Override the API
-bind address with the `OXMGR_API_ADDR` environment variable (see
-[src/config.rs](./src/config.rs)).
-
-![OxMgr web dashboard preview](./docs/screenshots/dashboard.png)
-![Process Details](./docs/screenshots/process-detail.png)
-![Process Logs](./docs/screenshots/process-logs.png)
-
-### Docker demo
-
-A ready-to-run demo image ships with a web dashboard and an example config:
-
-```bash
-docker compose up --build
-# open http://localhost:46001
-# the example managed web service is at http://localhost:8080
-```
-
-The `docker-compose.yaml` seeds the daemon with `docker/oxfile.example.toml`
-(three demo services: a web responder, a log ticker, and one that crashes so
-you can see error handling), and persists state in a named volume. See the
-[Dockerfile](./Dockerfile) for image layout and environment overrides.
-
-Use a config file for repeatable setups:
-
-```toml
-version = 1
-
-[[apps]]
-name = "api"
-command = "node server.js"
-restart_policy = "on_failure"
-max_restarts = 10
-stop_timeout_secs = 5
-```
-
-```bash
-oxmgr validate ./oxfile.toml
-oxmgr apply ./oxfile.toml
-oxmgr apply ./core.toml ./worker.toml
-```
-
-Container-style foreground mode:
-
-```bash
-oxmgr runtime ./oxfile.toml
-oxmgr runtime ./ecosystem.config.js
-```
+![OxMgr web dashboard](./docs/screenshots/dashboard.jpg)
 
 ## PM2 Migration
 
