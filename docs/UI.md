@@ -139,10 +139,12 @@ oxmgr ui web --no-open  # only print the URL
 ```bash
 export OXMGR_DASHBOARD=1
 export OXMGR_DASHBOARD_USER="admin"
-export OXMGR_DASHBOARD_PASS="{SHA256}$(echo -n 'yourpassword' | openssl dgst -sha256 -binary | base64)"
+export OXMGR_DASHBOARD_PASS="use-a-long-random-password"
 ```
 
-Password formats: plain text, `{SHA256}<base64>` or `{SHA512}<base64>` (supervisord-compatible).
+The password is compared as plain text (in constant time). Keep it out of
+shell history and world-readable files, for example by setting it in the
+service manager's environment file with restricted permissions.
 
 Optional appearance settings:
 

@@ -20,7 +20,7 @@ use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
-use sha2::{Digest, Sha256, Sha512};
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::RecvError;
@@ -29,6 +29,7 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tracing::warn;
 
 use crate::events::BusEvent;
 use crate::process::ManagedProcess;
@@ -96,20 +97,24 @@ impl DashboardAuth {
     }
 
     fn from_env() -> Option<Self> {
-        Self::new(
+        let auth = Self::new(
             std::env::var(ENV_DASHBOARD_USER).ok()?,
             std::env::var(ENV_DASHBOARD_PASS).ok()?,
-        )
+        )?;
+        if auth.pass.starts_with("{SHA256}") || auth.pass.starts_with("{SHA512}") {
+            warn!(
+                "{ENV_DASHBOARD_PASS} looks like a {{SHA256}}/{{SHA512}} hash; hashed passwords are \
+                 not supported, so the value is used as the literal password"
+            );
+        }
+        Some(auth)
     }
 
-    /// Both halves are always compared in constant time, so a mismatch leaks
-    /// neither which half failed nor how much of it matched.
+    /// Both halves are always compared, each in constant time, so a mismatch
+    /// leaks neither which half failed nor how much of it matched.
     fn verify(&self, user: &str, pass: &str) -> bool {
-        let user_ok = constant_time_eq(
-            Sha256::digest(user.as_bytes()).as_slice(),
-            Sha256::digest(self.user.as_bytes()).as_slice(),
-        );
-        let pass_ok = verify_password(pass, &self.pass);
+        let user_ok = constant_time_eq(user.as_bytes(), self.user.as_bytes());
+        let pass_ok = constant_time_eq(pass.as_bytes(), self.pass.as_bytes());
         user_ok & pass_ok
     }
 }
@@ -160,47 +165,15 @@ pub(super) fn settings() -> &'static DashboardSettings {
     SETTINGS.get_or_init(DashboardSettings::from_env)
 }
 
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
+/// Compares `input` with the configured `expected` secret. The loop always
+/// walks the whole of `expected`, so the time taken depends on the configured
+/// value only, not on how much of the input matches or how long it is.
+fn constant_time_eq(input: &[u8], expected: &[u8]) -> bool {
+    let mut diff = u8::from(input.len() != expected.len());
+    for (index, byte) in expected.iter().enumerate() {
+        diff |= byte ^ input.get(index).copied().unwrap_or(0);
     }
-    left.iter()
-        .zip(right)
-        .fold(0_u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
-}
-
-/// Verifies a password against the configured credential.
-///
-/// Supports multiple formats (supervisord-compatible):
-/// - Plain text: `s3cret`
-/// - SHA256:     `{SHA256}base64hash`
-/// - SHA512:     `{SHA512}base64hash`
-///
-/// Generate hashes with:
-/// ```sh
-/// echo -n 'password' | openssl dgst -sha256 -binary | base64    # {SHA256}
-/// echo -n 'password' | openssl dgst -sha512 -binary | base64    # {SHA512}
-/// ```
-fn verify_password(input: &str, configured: &str) -> bool {
-    fn check_hash<D: Digest>(input: &str, expected_b64: &str) -> bool {
-        let Ok(expected) = STANDARD.decode(expected_b64.trim()) else {
-            return false;
-        };
-        constant_time_eq(D::digest(input.as_bytes()).as_slice(), &expected)
-    }
-
-    if let Some(hash) = configured.strip_prefix("{SHA256}") {
-        check_hash::<Sha256>(input, hash)
-    } else if let Some(hash) = configured.strip_prefix("{SHA512}") {
-        check_hash::<Sha512>(input, hash)
-    } else {
-        // Hash both sides so the comparison does not depend on the password length.
-        constant_time_eq(
-            Sha256::digest(input.as_bytes()).as_slice(),
-            Sha256::digest(configured.as_bytes()).as_slice(),
-        )
-    }
+    diff == 0
 }
 
 /// Verifies an `Authorization: Basic <base64(user:pass)>` header (scripts, curl).
@@ -983,16 +956,23 @@ mod tests {
     }
 
     #[test]
-    fn hashed_passwords_are_accepted() {
-        // echo -n 's3cret' | openssl dgst -<algo> -binary | base64
-        for hash in [
-            "{SHA256}HsHCa1DV08WNlYMYGvgHZlX+AHVr9yhZQLo2cPmfy6A=",
-            "{SHA512}lcia3d5QY1fsXv0O5BrCQe/W+xAJp2gMFQHqgXA0K4y/Dy2Ti1YpVJDxnx/F+ijQmxWE6qCcmmsvd3YjKZzVIQ==",
+    fn passwords_compare_exactly() {
+        let auth = DashboardAuth::new("admin", "s3cret").expect("valid auth");
+        assert!(auth.verify("admin", "s3cret"));
+        for (user, pass) in [
+            ("admin", "s3cre"),
+            ("admin", "s3cret "),
+            ("admin", "S3cret"),
+            ("admin", ""),
+            ("admi", "s3cret"),
+            ("", ""),
         ] {
-            let auth = DashboardAuth::new("admin", hash).expect("valid auth");
-            assert!(auth.verify("admin", "s3cret"), "{hash}");
-            assert!(!auth.verify("admin", "wrongpass"), "{hash}");
+            assert!(!auth.verify(user, pass), "{user:?}/{pass:?}");
         }
+        // Hash-looking values are literal passwords, not supervisord hashes.
+        let literal = DashboardAuth::new("admin", "{SHA256}abc").expect("valid auth");
+        assert!(literal.verify("admin", "{SHA256}abc"));
+        assert!(!literal.verify("admin", "abc"));
     }
 
     #[test]

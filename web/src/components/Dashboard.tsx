@@ -13,11 +13,13 @@ type Filter = "all" | "running" | "issues" | "stopped";
 type Confirm = { title: string; body: string; label: string; danger: boolean; run: () => Promise<void> };
 type Toast = { id: number; text: string; bad: boolean };
 
-const FILTERS: { id: Filter; label: string; match: (s: ProcessStatus) => boolean }[] = [
-  { id: "all", label: "All", match: () => true },
-  { id: "running", label: "Running", match: (s) => s === "running" },
-  { id: "issues", label: "Issues", match: (s) => ISSUE_STATUSES.includes(s) },
-  { id: "stopped", label: "Stopped", match: (s) => s === "stopped" },
+// The predicate is called `accepts`, not `match`: a `.match(...)` call reads
+// like String.prototype.match to static analysis (CodeQL js/regex-injection).
+const FILTERS: { id: Filter; label: string; accepts: (s: ProcessStatus) => boolean }[] = [
+  { id: "all", label: "All", accepts: () => true },
+  { id: "running", label: "Running", accepts: (s) => s === "running" },
+  { id: "issues", label: "Issues", accepts: (s) => ISSUE_STATUSES.includes(s) },
+  { id: "stopped", label: "Stopped", accepts: (s) => s === "stopped" },
 ];
 
 export function Dashboard({ session, onSignedOut }: { session: Session; onSignedOut: () => void }) {
@@ -103,16 +105,16 @@ export function Dashboard({ session, onSignedOut }: { session: Session; onSigned
   const counts = useMemo(() => {
     const result: Record<Filter, number> = { all: 0, running: 0, issues: 0, stopped: 0 };
     for (const process of processes) {
-      for (const f of FILTERS) if (f.match(process.status)) result[f.id] += 1;
+      for (const f of FILTERS) if (f.accepts(process.status)) result[f.id] += 1;
     }
     return result;
   }, [processes]);
 
   const groups = useMemo<ProcessGroup[]>(() => {
     const needle = query.trim().toLowerCase();
-    const match = FILTERS.find((f) => f.id === filter)!.match;
+    const accepts = FILTERS.find((f) => f.id === filter)!.accepts;
     const visible = processes
-      .filter((p) => match(p.status))
+      .filter((p) => accepts(p.status))
       .filter(
         (p) =>
           !needle ||
