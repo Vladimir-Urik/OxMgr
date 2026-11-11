@@ -167,7 +167,13 @@ fn status_launchd_service() -> Result<()> {
 
 fn install_windows_task_service(executable: &Path) -> Result<()> {
     let task = "OxmgrDaemon";
-    let command = format!("\\\"{}\\\" daemon run", executable.display());
+    let system_root = env::var_os("SystemRoot").context("SystemRoot is not set")?;
+    let powershell = Path::new(&system_root)
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    let command = render_windows_task_command(executable, &powershell);
     let output = StdCommand::new("schtasks")
         .args([
             "/Create", "/F", "/SC", "ONLOGON", "/TN", task, "/TR", &command,
@@ -183,6 +189,17 @@ fn install_windows_task_service(executable: &Path) -> Result<()> {
     let _ = run_os_command_allow_failure("schtasks", &["/Run", "/TN", task]);
     println!("Installed Windows Task Scheduler service '{}'.", task);
     Ok(())
+}
+
+fn render_windows_task_command(executable: &Path, powershell: &Path) -> String {
+    // /TR is already one argument to Command: literal backslash-quote pairs
+    // would become part of the stored task action. PowerShell hides the console
+    // and waits for the daemon, so the task remains running for its lifetime.
+    let executable = executable.to_string_lossy().replace('\'', "''");
+    format!(
+        "\"{}\" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command \"& '{executable}' daemon run; exit $LASTEXITCODE\"",
+        powershell.display()
+    )
 }
 
 fn uninstall_windows_task_service() -> Result<()> {
@@ -288,10 +305,116 @@ fn current_uid_string() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_launchd_plist, render_systemd_service};
+    use super::{render_launchd_plist, render_systemd_service, render_windows_task_command};
     use crate::config::AppConfig;
     use crate::logging::LogRotationPolicy;
     use std::path::Path;
+
+    #[test]
+    fn windows_task_runs_daemon_through_hidden_waiting_launcher() {
+        let command = render_windows_task_command(
+            Path::new(r"E:\mybin\oxmgr.exe"),
+            Path::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+        );
+        assert_eq!(
+            command,
+            "\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command \"& 'E:\\mybin\\oxmgr.exe' daemon run; exit $LASTEXITCODE\""
+        );
+    }
+
+    #[test]
+    fn windows_task_preserves_spaces_unicode_and_powershell_metacharacters() {
+        let command = render_windows_task_command(
+            Path::new(r"C:\用户\O'Brien & $tools (test)\oxmgr.exe"),
+            Path::new(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+        );
+        assert!(command.contains("& 'C:\\用户\\O''Brien & $tools (test)\\oxmgr.exe' daemon run"));
+        assert!(!command.contains("\\\""));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_task_launcher_preserves_arguments_and_exit_code() {
+        use std::os::windows::ffi::OsStrExt;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{
+            CreateProcessW, GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+            CREATE_NEW_CONSOLE, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
+        };
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("oxmgr-task-{nonce}-用户 O'Brien & $tools"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("probe.exe");
+        let source = dir.join("probe.rs");
+        std::fs::write(
+            &source,
+            r#"fn main() {
+                let args: Vec<String> = std::env::args().skip(1).collect();
+                let output = std::env::current_exe().unwrap().with_file_name("args.txt");
+                std::fs::write(output, args.join("\n")).unwrap();
+                std::process::exit(37);
+            }"#,
+        )
+        .unwrap();
+        let built = std::process::Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(built.status.success(), "{built:?}");
+        let powershell = Path::new(&std::env::var_os("SystemRoot").unwrap())
+            .join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+        let command = render_windows_task_command(&executable, &powershell);
+        let mut command: Vec<u16> = std::ffi::OsStr::new(&command)
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+        startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        // Match a scheduler-owned console, but suppress any startup flash in tests.
+        startup.dwFlags = STARTF_USESHOWWINDOW;
+        startup.wShowWindow = 0; // SW_HIDE
+        let mut process: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+        let started = unsafe {
+            CreateProcessW(
+                std::ptr::null(),
+                command.as_mut_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                0,
+                CREATE_NEW_CONSOLE,
+                std::ptr::null(),
+                std::ptr::null(),
+                &startup,
+                &mut process,
+            )
+        };
+        assert_ne!(started, 0, "{}", std::io::Error::last_os_error());
+        let mut exit_code = 0;
+        let completed = unsafe {
+            let wait = WaitForSingleObject(process.hProcess, 20_000);
+            if wait != WAIT_OBJECT_0 {
+                TerminateProcess(process.hProcess, 1);
+                WaitForSingleObject(process.hProcess, 5_000);
+            }
+            GetExitCodeProcess(process.hProcess, &mut exit_code);
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+            wait == WAIT_OBJECT_0
+        };
+        let arguments = std::fs::read_to_string(dir.join("args.txt"));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(completed, "task launcher did not exit within 20 seconds");
+        assert_eq!(exit_code, 37);
+        assert_eq!(arguments.unwrap(), "daemon\nrun");
+    }
 
     #[test]
     fn render_systemd_service_contains_execstart() {
