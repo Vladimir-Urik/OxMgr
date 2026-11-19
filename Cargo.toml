@@ -45,7 +45,7 @@ getrandom = "0.4"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", features = ["signal", "process", "user"] }
+nix = { version = "0.32", features = ["signal", "process", "user"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
