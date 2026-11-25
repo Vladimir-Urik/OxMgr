@@ -78,6 +78,30 @@ sudo apt update
 sudo apt install oxmgr
 ```
 
+### Nix
+
+Until [NixOS/nixpkgs#588645](https://github.com/NixOS/nixpkgs/pull/588645) gets merged into nixpkgs, you can install or run Oxmgr using the included flake:
+
+```bash
+# Test straight without installing
+nix run github:Vladimir-Urik/OxMgr
+
+# Install to your user profile
+nix profile install github:Vladimir-Urik/OxMgr
+```
+
+Or add it to your `flake.nix`:
+
+```nix
+{
+  inputs = {
+    oxmgr.url = "github:Vladimir-Urik/OxMgr";
+  };
+}
+```
+
+and add `inputs.oxmgr.packages.${pkgs.system}.default` to `environment.systemPackages` (NixOS) or `home.packages` (Home Manager).
+
 ### Build from source
 
 ```bash
