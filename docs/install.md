@@ -64,6 +64,30 @@ The published `.deb` packages ship the Linux musl binary to avoid newer glibc ru
 
 If you previously added the repository with `[trusted=yes]`, `apt update` warns with `NO_PUBKEY 99A20442326A95A6`. Replace the source line with the signed setup above.
 
+### Nix
+
+Until [NixOS/nixpkgs#588645](https://github.com/NixOS/nixpkgs/pull/588645) is merged into nixpkgs, you can install or run Oxmgr using the included flake:
+
+```bash
+# Either run it directly without installing
+nix run github:Vladimir-Urik/OxMgr
+
+# Install to your user profile
+nix profile install github:Vladimir-Urik/OxMgr
+```
+
+Or add it to your `flake.nix`:
+
+```nix
+{
+  inputs = {
+    oxmgr.url = "github:Vladimir-Urik/OxMgr";
+  };
+}
+```
+
+and add `inputs.oxmgr.packages.${pkgs.system}.default` to `environment.systemPackages` (NixOS) or `home.packages` (Home Manager).
+
 ## Install From Source
 
 ```bash
